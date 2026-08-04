@@ -1,0 +1,23 @@
+# Run all Beyond Gravity tools with one command:
+#   docker compose up -d --build
+# Update after a git pull (rebuild + restart changed ones):
+#   docker compose up -d --build
+services:
+  adab:
+    build:
+      context: ./adab
+      args:
+        HTTP_PROXY: http://chbs8055.ruaggroup.com:8080
+        HTTPS_PROXY: http://chbs8055.ruaggroup.com:8080
+        NO_PROXY: localhost,127.0.0.1
+    container_name: adab
+    ports:
+      - "8000:8000"        # http://chbs4212:8000
+    restart: unless-stopped
+
+  tracker:
+    build: ./tracker
+    container_name: tracker
+    ports:
+      - "8080:80"          # http://chbs4212:8080
+    restart: unless-stopped

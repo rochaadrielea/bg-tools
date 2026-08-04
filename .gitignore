@@ -1,0 +1,23 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# tool outputs / temp
+*_ANALYSIS.xlsx
+*_BATCH_FOUND.xlsx
+adab_web_jobs/
+out/
+out_test/
+# data you should NOT push (company parts lists / scans)
+*.xlsx
+*.xlsm
+*.xls
+!requirements*.txt
+# secrets / env
+.env
+*.db
+# os / editor
+.DS_Store
+.idea/
+.vscode/
