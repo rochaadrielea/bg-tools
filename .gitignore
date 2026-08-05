@@ -1,23 +1,34 @@
-# python
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+.ipynb_checkpoints/
+
+# Virtual environments
 .venv/
 venv/
-# tool outputs / temp
-*_ANALYSIS.xlsx
-*_BATCH_FOUND.xlsx
-adab_web_jobs/
-out/
-out_test/
-# data you should NOT push (company parts lists / scans)
+env/
+quality/
+
+# Secrets & local databases - NEVER commit
+.streamlit/secrets.toml
+secrets.toml
+*.env
+.env
+*.db
+
+# Data files (Excel etc.)
+data/
 *.xlsx
 *.xlsm
 *.xls
-!requirements*.txt
-# secrets / env
-.env
-*.db
-# os / editor
-.DS_Store
-.idea/
+~$*
+
+# Build artifacts
+build/
+dist/
+
+# Editor / OS junk
 .vscode/
+.DS_Store
+Thumbs.db
+desktop.ini

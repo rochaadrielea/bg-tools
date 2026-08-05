@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>CAPA — Root Cause & Actions</title>
+<script>__PLOTLY__</script>
+<script>__SHEETJS__</script>
+<style>
+ :root{--navy:#1E2761;--orange:#F26E21;--ink:#1b2333;--line:#E1E5EE;--open:#E53E3E;--done:#2f9e44;}
+ *{box-sizing:border-box;}
+ body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:#fff;}
+ .wrap{max-width:1320px;margin:0 auto;padding:14px 18px;}
+ .crumbbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+   background:#F1F3F8;border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin-bottom:8px;}
+ .crumbbar .lab{font-size:.8rem;color:#5B6B78;}
+ .chip{display:inline-flex;align-items:center;gap:6px;background:var(--navy);color:#fff;
+   font-size:.75rem;font-weight:600;padding:4px 8px 4px 10px;border-radius:16px;}
+ .chip .x{cursor:pointer;font-weight:800;opacity:.85;}.chip .x:hover{opacity:1;}
+ .chip.dim-dept{background:#2a78d6;}.chip.dim-cause{background:#1baf7a;}
+ .chip.dim-detarea{background:#c1571c;}.chip.dim-defect{background:#7A5C9E;}
+ .chip.dim-launcher{background:var(--navy);}.chip.dim-cls{background:#5A63A0;}
+ .noflt{font-size:.82rem;color:#7A8894;}
+ .rbtn{margin-left:auto;background:#fff;color:var(--navy);border:1px solid var(--navy);
+   border-radius:8px;font-size:.76rem;font-weight:700;padding:5px 12px;cursor:pointer;}
+ .modebar{display:flex;align-items:center;gap:10px;margin:2px 0 10px;}
+ .modebar .t{font-size:.85rem;color:#5B6B78;font-weight:600;}
+ .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+ .seg button{border:none;background:#fff;color:#5B6B78;font-size:.9rem;font-weight:700;
+   padding:8px 22px;cursor:pointer;}
+ .seg button.on.open{background:var(--open);color:#fff;}
+ .seg button.on.done{background:var(--done);color:#fff;}
+ .hint{display:inline-flex;gap:14px;font-size:.76rem;color:#5B6B78;flex-wrap:wrap;
+   background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 11px;margin-bottom:8px;}
+ .hint b{color:var(--navy);}
+ .top{display:flex;gap:14px;align-items:stretch;}
+ .left{flex:1 1 auto;min-width:0;}
+ .side{flex:0 0 230px;display:flex;flex-direction:column;gap:10px;}
+ .card{border:1px solid var(--line);border-radius:12px;padding:14px;background:#FBFCFE;}
+ .card .k{font-size:.78rem;color:#5B6B78;font-weight:600;}
+ .card .v{font-size:1.9rem;color:var(--navy);font-weight:800;line-height:1.1;}
+ .card .s{font-size:.74rem;color:#7A8894;margin-top:2px;}
+ .dl{display:block;width:100%;text-align:center;background:var(--navy);color:#fff;
+   border:none;border-radius:10px;font-size:.9rem;font-weight:700;padding:12px;cursor:pointer;}
+ .dl:hover{background:#151b47;}
+ .dl small{display:block;font-weight:500;opacity:.85;font-size:.7rem;margin-top:3px;}
+ .stage{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;
+   background:#FBFCFE;cursor:grab;touch-action:none;}
+ .stage.big{height:380px;}.stage.sm{height:290px;}
+ .stage.dragging{cursor:grabbing;}
+ .canvas{position:absolute;inset:0;transform-origin:0 0;will-change:transform;}
+ .canvas>div{width:100%;height:100%;}
+ .zbadge{display:none;}
+ .zreset{position:absolute;right:10px;bottom:10px;z-index:5;background:#fff;color:var(--navy);
+   border:1px solid var(--navy);border-radius:8px;font-size:.68rem;font-weight:700;padding:4px 9px;cursor:pointer;}
+ .rowlabel{font-size:.8rem;color:#7A8894;margin:14px 0 4px;font-weight:600;}
+ .donuts{display:flex;gap:14px;flex-wrap:wrap;}
+ .donut{flex:1 1 340px;border:1px solid var(--line);border-radius:12px;padding:12px;}
+ .donut.secondary{opacity:.8;}
+ .dhead{display:flex;align-items:center;gap:10px;}
+ .dhead h3{margin:0;font-size:.98rem;color:var(--navy);}
+ .dhead .restore{margin-left:auto;background:#fff;color:var(--navy);border:1px solid var(--line);
+   border-radius:8px;font-size:.72rem;font-weight:700;padding:4px 10px;cursor:pointer;}
+ .dhead .restore:hover{border-color:var(--navy);}
+ .donut p{margin:4px 0 6px;font-size:.73rem;color:#5B6B78;}
+ .donut .empty{color:#7A8894;font-size:.85rem;padding:40px 0;text-align:center;}
+ .reportwrap{margin-top:16px;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+ .reporthead{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#F7F8FB;border-bottom:1px solid var(--line);}
+ .reporthead h3{margin:0;font-size:1rem;color:var(--navy);}.reporthead .cnt{font-size:.8rem;color:#5B6B78;}
+ .tblscroll{max-height:340px;overflow:auto;}
+ table.rep{width:100%;border-collapse:collapse;font-size:.8rem;}
+ table.rep th{position:sticky;top:0;background:#EEF1F7;color:var(--navy);text-align:left;
+   padding:7px 10px;font-weight:700;border-bottom:1px solid var(--line);white-space:nowrap;}
+ table.rep td{padding:6px 10px;border-bottom:1px solid #F0F1F5;white-space:nowrap;}
+ table.rep tr:hover td{background:#FAFBFE;}
+ .capaopen{color:var(--open);font-weight:600;}.capadone{color:var(--done);font-weight:600;}
+ .reachcard{border:2px solid #2a78d6;background:#EAF2FB;border-radius:12px;padding:14px 16px;margin:14px 0;}
+ .reachcard h3{margin:0 0 10px;color:var(--navy);font-size:1.02rem;}
+ .rinputs{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;}
+ .rinputs label{display:flex;flex-direction:column;font-size:.72rem;color:#5B6B78;font-weight:600;gap:4px;}
+ .rinputs input{font-size:.95rem;padding:6px 8px;border:1px solid var(--line);border-radius:8px;min-width:130px;}
+ .routputs{display:flex;gap:26px;flex-wrap:wrap;}
+ .rmetric .rk{font-size:.74rem;color:#5B6B78;font-weight:600;}
+ .rmetric .rv{font-size:1.7rem;color:var(--navy);font-weight:800;line-height:1.1;}
+ .rcap{font-size:.78rem;color:#5B6B78;margin-top:8px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="reachcard">
+    <h3>&#127919; CAPA closure rate to reach target</h3>
+    <div class="rinputs">
+      <label>Deadline<input type="date" id="rDeadline"></label>
+      <label>New / week (inflow)<input type="number" id="rInflow" min="0" step="0.1"></label>
+      <label>CAPA open now<input type="number" id="rOpen" min="0" step="1"></label>
+      <label>Target open<input type="number" id="rTarget" min="0" step="1" value="65"></label>
+    </div>
+    <div class="routputs">
+      <div class="rmetric"><div class="rk" id="rWeekK">Close / week</div><div class="rv" id="rWeek">—</div></div>
+      <div class="rmetric"><div class="rk">Close / month</div><div class="rv" id="rMonth">—</div></div>
+      <div class="rmetric"><div class="rk">Break-even (hold the line)</div><div class="rv" id="rBreak">—</div></div>
+    </div>
+    <div class="rcap" id="rCap"></div>
+  </div>
+
+  <div class="crumbbar">
+    <span class="lab">Filters:</span><span id="chips"></span>
+    <span class="noflt" id="noflt">none</span>
+    <button class="rbtn" id="resetSel">Clear all</button>
+  </div>
+  <div class="hint">
+    <span>&#128433; <b>Scroll</b> = zoom (icicle AND donuts)</span><span><b>Drag</b> = pan</span>
+    <span><b>Click</b> boxes/slices — pick <b>several</b>; click again to remove.</span>
+    <span><b>Reset view</b> brings the whole picture back.</span></div>
+
+  <div class="top">
+    <div class="left">
+      <div class="stage big" id="icStage">
+        <div class="zbadge" id="icZ">100%</div>
+        <button class="zreset" id="icReset">Reset view</button>
+        <div class="canvas"><div id="chart"></div></div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="card"><div class="k">NCs selected</div>
+        <div class="v" id="ncCount">0</div><div class="s" id="ncScope">everything</div></div>
+      <button class="dl" id="dlxlsx">&#11015; Download Excel<small id="dlscope">this selection</small></button>
+      <div class="card"><div class="k" id="modeCardK">CAPA open</div>
+        <div class="v" id="odCount">0</div><div class="s" id="cov"></div></div>
+    </div>
+  </div>
+
+  <div class="modebar">
+    <span class="t">View:</span>
+    <span class="seg">
+      <button id="mOpen" class="open">CAPA open</button>
+      <button id="mDone" class="done">CAPA done</button>
+    </span>
+    <span class="t" id="modehint"></span>
+  </div>
+
+  <div class="rowlabel" id="primLabel"></div>
+  <div class="donuts" id="rowPrimary"></div>
+  <div class="rowlabel" id="secLabel"></div>
+  <div class="donuts" id="rowSecondary"></div>
+
+  <!-- donut cards (moved between rows by JS) -->
+  <template id="cardTpl"></template>
+  <div id="cardStore" style="display:none;">
+    <div class="donut" id="card_detarea"><div class="dhead"><h3>Open — by detection area</h3>
+      <button class="restore" data-dim="detarea">Clear filter</button></div>
+      <p class="dcap" id="cap_detarea"></p>
+      <div class="stage sm" id="stage_detarea">
+        <div class="canvas"><div id="detarea"></div></div></div></div>
+    <div class="donut" id="card_defect"><div class="dhead"><h3>Open — by defect type</h3>
+      <button class="restore" data-dim="defect">Clear filter</button></div>
+      <p class="dcap" id="cap_defect"></p>
+      <div class="stage sm" id="stage_defect">
+        <div class="canvas"><div id="defect"></div></div></div></div>
+    <div class="donut" id="card_dept"><div class="dhead"><h3>Done — RCA by department</h3>
+      <button class="restore" data-dim="dept">Clear filter</button></div>
+      <p class="dcap" id="cap_dept"></p>
+      <div class="stage sm" id="stage_dept">
+        <div class="canvas"><div id="dept"></div></div></div></div>
+    <div class="donut" id="card_cause"><div class="dhead"><h3>Done — root-cause category</h3>
+      <button class="restore" data-dim="cause">Clear filter</button></div>
+      <p class="dcap" id="cap_cause"></p>
+      <div class="stage sm" id="stage_cause">
+        <div class="canvas"><div id="cause"></div></div></div></div>
+  </div>
+
+  <div class="reportwrap">
+    <div class="reporthead"><h3>Report</h3><span class="cnt" id="repcnt"></span></div>
+    <div class="tblscroll"><table class="rep" id="rep"></table></div>
+  </div>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+var DATA=JSON.parse(document.getElementById('data').textContent);
+var NC=DATA.nc, RCA=DATA.rca;
+var CLASS_COLORS={"LLV":"#1E2761","MLV":"#F26E21","SLV":"#5A63A0","Vulcan":"#4CAF50","(no project)":"#B0B0B0"};
+var STATUS={"CAPA open":"#E53E3E","CAPA done":"#2f9e44"};
+var PAL=["#1E2761","#F26E21","#2a78d6","#1baf7a","#eda100","#9085e9","#e34948","#5A63A0","#4CAF50","#e87ba4","#00838a","#B0B0B0","#c98500","#199e70"];
+
+var ncDept={}, ncCause={};
+RCA.forEach(function(r){(ncDept[r.nc_id]=ncDept[r.nc_id]||{})[r.dept]=1;(ncCause[r.nc_id]=ncCause[r.nc_id]||{})[r.cause]=1;});
+
+var mode='open'; // 'open' | 'done'
+var S={launcher:new Set(),cls:new Set(),detarea:new Set(),defect:new Set(),dept:new Set(),cause:new Set()};
+// ORDER of first selection (the funnel). A donut is filtered only by the dims
+// picked BEFORE it -> the first pick stays full, each later chart narrows to fit
+// the earlier ones. Maintained at the top of updateAll().
+var order=[];
+function upstreamDims(dim){var i=order.indexOf(dim);return (i===-1)?order.slice():order.slice(0,i);}
+function toggle(dim,val){ if(S[dim].has(val))S[dim].delete(val); else S[dim].add(val); }
+function setMode(m){ if(m===mode)return; mode=m; if(m==='open'){S.dept.clear();S.cause.clear();}else{S.detarea.clear();S.defect.clear();} }
+function sharedPass(r){ if(S.launcher.size&&!S.launcher.has(r.Launcher))return false; if(S.cls.size&&!S.cls.has(r.Class))return false; return true; }
+
+// ---- current selected NC set (drives counts/report/excel/icicle-scope) ----
+function curSet(scopeSelf){
+  return NC.filter(function(r){
+    if(!sharedPass(r))return false;
+    if(mode==='open'){
+      if(r.CAPA!=='CAPA open')return false;
+      if(scopeSelf!=='detarea'&&S.detarea.size&&!S.detarea.has(r.detection_area))return false;
+      if(scopeSelf!=='defect'&&S.defect.size&&!S.defect.has(r.defect_code_text))return false;
+    }else{
+      if(r.CAPA!=='CAPA done')return false;
+      if(scopeSelf!=='dept'&&S.dept.size){var d=ncDept[r.nc_id];if(!d)return false;var ok=false;S.dept.forEach(function(x){if(d[x])ok=true;});if(!ok)return false;}
+      if(scopeSelf!=='cause'&&S.cause.size){var c=ncCause[r.nc_id];if(!c)return false;var o2=false;S.cause.forEach(function(x){if(c[x])o2=true;});if(!o2)return false;}
+    }
+    return true;
+  });
+}
+function countBy(rows,key){var m={};rows.forEach(function(r){var k=r[key]||"(blank)";m[k]=(m[k]||0)+1;});
+  var a=Object.keys(m).map(function(k){return [k,m[k]];});a.sort(function(x,y){return y[1]-x[1];});return a;}
+
+// ---- icicle: ALWAYS shows both CAPA open + done (scoped only by launcher/cls),
+// so the bottom row is the open/done split. Clicking an open/done box switches
+// which donut pair is shown (same as the View toggle). ----
+function icicleRows(){
+  // Filter by the DONUT dims (detection area, defect, dept, cause) but NOT by
+  // launcher/cls or the open/done mode — so all launcher/class rows stay
+  // visible AND the CAPA open / CAPA done box numbers reflect the current
+  // donut selection (press a slice -> the CAPA open box shows that count).
+  return NC.filter(function(r){
+    if(S.detarea.size&&!S.detarea.has(r.detection_area))return false;
+    if(S.defect.size&&!S.defect.has(r.defect_code_text))return false;
+    if(S.dept.size){var d=ncDept[r.nc_id];if(!d)return false;var ok=false;S.dept.forEach(function(x){if(d[x])ok=true;});if(!ok)return false;}
+    if(S.cause.size){var c=ncCause[r.nc_id];if(!c)return false;var o2=false;S.cause.forEach(function(x){if(c[x])o2=true;});if(!o2)return false;}
+    return true;
+  });
+}
+function icicleFig(){
+  var rows=icicleRows();
+  var ids=["All"],labels=["All NCs"],parents=[""],values=[rows.length],colors=["#E7EBF3"];
+  var byL={};rows.forEach(function(r){(byL[r.Launcher]=byL[r.Launcher]||[]).push(r);});
+  Object.keys(byL).forEach(function(lau){var lid="All/"+lau;ids.push(lid);labels.push(lau);parents.push("All");values.push(byL[lau].length);colors.push(CLASS_COLORS[lau]||"#888");
+    var byC={};byL[lau].forEach(function(r){(byC[r.Class]=byC[r.Class]||[]).push(r);});
+    Object.keys(byC).forEach(function(cls){var cid=lid+"/"+cls;ids.push(cid);labels.push(cls);parents.push(lid);values.push(byC[cls].length);colors.push("#9AA6C4");
+      var byS={};byC[cls].forEach(function(r){(byS[r.CAPA]=byS[r.CAPA]||[]).push(r);});
+      Object.keys(byS).forEach(function(stt){var sid=cid+"/"+stt;ids.push(sid);labels.push(stt);parents.push(cid);values.push(byS[stt].length);colors.push(STATUS[stt]||"#888");});
+    });
+  });
+  return [{type:'icicle',ids:ids,labels:labels,parents:parents,values:values,branchvalues:'total',
+    tiling:{orientation:'v',pad:1},marker:{colors:colors,line:{width:1,color:'#fff'}},
+    texttemplate:'%{label}<br><b>%{value}</b>',textfont:{size:10,family:'system-ui'},insidetextfont:{size:10,color:'#ffffff'},
+    hovertemplate:'<b>%{label}</b><br>%{value} NCs<extra></extra>',root:{color:'#EEF1F7'},
+    level:'',maxdepth:4,pathbar:{visible:false}}];
+}
+function ICICLE_CLICK(e){
+  if(!e.points||!e.points.length)return;var id=e.points[0].id;if(!id)return;var p=id.split('/');
+  if(id==='All'){S.launcher.clear();S.cls.clear();}
+  else if(p.length===2)toggle('launcher',p[1]);
+  else if(p.length===3)toggle('cls',p[2]);
+  else if(p.length===4)setMode(p[3]==='CAPA open'?'open':'done'); // open/done box switches the donuts
+  updateAll(true);
+  // Plotly zooms into the clicked branch (its native drill). We keep that as a
+  // "zoom in" gesture; the Reset view button (undrill) brings the full tree back.
+}
+function undrill(){
+  // Plotly's native drill-in fires AFTER our click handler. Force the icicle
+  // back to the root level a couple of times so a click filters but never
+  // leaves the tree zoomed into a branch. (Reset view calls this too.)
+  requestAnimationFrame(function(){try{Plotly.restyle('chart',{level:''});}catch(e){}});
+  setTimeout(function(){try{Plotly.restyle('chart',{level:''});}catch(e){}},220);
+}
+function drawIcicle(){
+  Plotly.react('chart',icicleFig(),
+    {margin:{t:24,l:6,r:6,b:6},paper_bgcolor:'rgba(0,0,0,0)',font:{family:'system-ui'}},
+    {displayModeBar:false,responsive:true});
+}
+
+// ---- donut definitions ----
+var DON={
+  detarea:{status:'open',src:'nc',key:'detection_area'},
+  defect:{status:'open',src:'nc',key:'defect_code_text'},
+  dept:{status:'done',src:'rca',key:'dept'},
+  cause:{status:'done',src:'rca',key:'cause'}
+};
+function donutRows(dim){
+  // FUNNEL: filter this donut ONLY by the dims chosen BEFORE it (upstream).
+  // So the first pick's donut stays full; each later donut narrows to fit the
+  // earlier picks; and you can still multi-pick inside this donut (it is not
+  // filtered by itself).
+  var d=DON[dim], ups=upstreamDims(dim);
+  function upPass(r,isRCA){
+    for(var k=0;k<ups.length;k++){var u=ups[k];
+      if(u==='launcher'){if(!S.launcher.has(r.Launcher))return false;}
+      else if(u==='cls'){if(!S.cls.has(r.Class))return false;}
+      else if(u==='detarea'){if(!isRCA&&!S.detarea.has(r.detection_area))return false;}
+      else if(u==='defect'){if(!isRCA&&!S.defect.has(r.defect_code_text))return false;}
+      else if(u==='dept'){if(isRCA&&!S.dept.has(r.dept))return false;}
+      else if(u==='cause'){if(isRCA&&!S.cause.has(r.cause))return false;}
+    }
+    return true;
+  }
+  if(d.src==='nc'){
+    return NC.filter(function(r){ if(r.CAPA!=='CAPA open')return false; return upPass(r,false); });
+  }
+  return RCA.filter(function(r){ return upPass(r,true); });
+}
+function drawDonut(dim){
+  var d=DON[dim], rows=donutRows(dim), el=document.getElementById(dim);
+  if(!rows.length){el.innerHTML='<div class="empty">No rows for this selection.</div>';
+    document.getElementById('cap_'+dim).textContent=(d.status==='done'&&mode==='open')?'Switch to CAPA done to use this.':'Nothing in selection.';return;}
+  var arr=countBy(rows,d.key),labels=arr.map(function(x){return x[0];}),vals=arr.map(function(x){return x[1];});
+  var setSel=S[dim];
+  var cols=labels.map(function(l,i){return (setSel.size&&!setSel.has(l))?'#D9DEE8':PAL[i%PAL.length];});
+  var pulls=labels.map(function(l){return setSel.has(l)?0.09:0;});
+  Plotly.react(dim,[{type:'pie',labels:labels,values:vals,hole:0.5,pull:pulls,sort:true,
+    marker:{colors:cols,line:{color:'#fff',width:1}},textposition:'inside',textinfo:'percent+label',
+    hovertemplate:'<b>%{label}</b><br>%{value} (%{percent})<extra></extra>'}],
+    {margin:{t:6,l:6,r:6,b:6},showlegend:false,font:{family:'system-ui',size:12}},{displayModeBar:false,responsive:true});
+  document.getElementById('cap_'+dim).textContent='Click to filter (multi). '+rows.length+' rows. Scroll to zoom.';
+}
+
+var REPCOLS=["nc_id","Launcher","Project","Class","CAPA","status_state","owner","detection_area","defect_code_text","created_on"];
+var curNC=[];
+function drawReport(){
+  var cap=Math.min(curNC.length,400);
+  var h='<thead><tr>'+REPCOLS.map(function(c){return '<th>'+c+'</th>';}).join('')+'</tr></thead><tbody>';
+  for(var i=0;i<cap;i++){var r=curNC[i];h+='<tr>'+REPCOLS.map(function(c){var v=(r[c]==null?'':r[c]);
+    if(c==='CAPA')return '<td class="'+(v==='CAPA open'?'capaopen':'capadone')+'">'+v+'</td>';return '<td>'+v+'</td>';}).join('')+'</tr>';}
+  document.getElementById('rep').innerHTML=h+'</tbody>';
+  document.getElementById('repcnt').textContent=curNC.length.toLocaleString()+' NCs'+(curNC.length>cap?(' · first '+cap):'');
+}
+function dimVals(d){return Array.from(S[d]);}
+function activeLabel(){var p=[(mode==='open'?'OPEN':'DONE')];
+  if(S.launcher.size)p.push(dimVals('launcher').join('+'));
+  if(S.cls.size)p.push(dimVals('cls').join('+'));
+  if(mode==='open'){if(S.detarea.size)p.push('Area:'+dimVals('detarea').join('+'));if(S.defect.size)p.push('Defect:'+dimVals('defect').join('+'));}
+  else{if(S.dept.size)p.push('Dept:'+dimVals('dept').join('+'));if(S.cause.size)p.push('Cause:'+dimVals('cause').join('+'));}
+  return p.join(' · ');}
+function chipDims(){return mode==='open'?[['launcher','Launcher'],['cls','Class'],['detarea','Area'],['defect','Defect']]:[['launcher','Launcher'],['cls','Class'],['dept','Dept'],['cause','Cause']];}
+function chipsHtml(){var out=[];chipDims().forEach(function(d){S[d[0]].forEach(function(v){
+  out.push('<span class="chip dim-'+d[0]+'">'+d[1]+': '+v+' <span class="x" data-dim="'+d[0]+'" data-val="'+v+'">&times;</span></span>');});});return out.join(' ');}
+function anyFilter(){return ['launcher','cls','detarea','defect','dept','cause'].some(function(d){return S[d].size;});}
+
+function layout(){
+  var prim=document.getElementById('rowPrimary'),sec=document.getElementById('rowSecondary');
+  function mv(dim,to){to.appendChild(document.getElementById('card_'+dim));}
+  var openC=['detarea','defect'],doneC=['dept','cause'];
+  // appendChild re-parents (moves) the card nodes; never innerHTML='' — that would DESTROY them.
+  var pList=(mode==='open')?openC:doneC, sList=(mode==='open')?doneC:openC;
+  pList.forEach(function(d){mv(d,prim);document.getElementById('card_'+d).classList.remove('secondary');});
+  sList.forEach(function(d){mv(d,sec);document.getElementById('card_'+d).classList.add('secondary');});
+  document.getElementById('primLabel').textContent=(mode==='open')?'CAPA OPEN — where found & what defect':'CAPA DONE — root cause';
+  document.getElementById('secLabel').textContent=(mode==='open')?'CAPA done (click to switch)':'CAPA open (click to switch)';
+}
+// ---- CAPA closure-rate-to-target calculator (same concept as the NC one) ----
+function openNowCount(){
+  // CAPA-open NCs matching the current launcher/class (+ area/defect) selection.
+  return NC.filter(function(r){ if(r.CAPA!=='CAPA open')return false;
+    if(S.launcher.size&&!S.launcher.has(r.Launcher))return false;
+    if(S.cls.size&&!S.cls.has(r.Class))return false;
+    if(S.detarea.size&&!S.detarea.has(r.detection_area))return false;
+    if(S.defect.size&&!S.defect.has(r.defect_code_text))return false;
+    return true;}).length;
+}
+function computeReach(){
+  var dl=document.getElementById('rDeadline').value;
+  var inflow=parseFloat(document.getElementById('rInflow').value)||0;
+  var open=parseInt(document.getElementById('rOpen').value)||0;
+  var target=parseInt(document.getElementById('rTarget').value)||0;
+  var today=new Date(); today.setHours(0,0,0,0);
+  var dld=dl?new Date(dl):new Date(today.getTime()+90*864e5);
+  var weeks=Math.max(1,(dld-today)/(7*864e5));
+  var gap=open-target;
+  var perWeek=Math.max(0,gap)/weeks+inflow, perMonth=perWeek*4.33, breakeven=Math.ceil(inflow);
+  var dstr=dld.toLocaleDateString(undefined,{day:'2-digit',month:'short',year:'numeric'});
+  document.getElementById('rWeekK').textContent='Close / week → '+target+' by '+dstr;
+  document.getElementById('rWeek').textContent=Math.ceil(perWeek)+' /wk';
+  document.getElementById('rMonth').textContent=Math.ceil(perMonth)+' /mo';
+  document.getElementById('rBreak').textContent=breakeven+' /wk';
+  document.getElementById('rCap').textContent=(gap<=0)
+    ? ('Already at target ('+open+' open ≤ '+target+'). Closing ~'+breakeven+'/week just holds the line.')
+    : ('Clear '+gap+' CAPAs ('+open+' open → '+target+' target) in '+Math.round(weeks)+' weeks, while ~'+inflow.toFixed(1)+' new NCs arrive per week.');
+}
+
+function updateAll(rebuildIcicle){
+  // maintain the funnel order: append any newly-selected dim (one per click),
+  // drop dims that were cleared.
+  ['launcher','cls','detarea','defect','dept','cause'].forEach(function(d){
+    if(S[d].size&&order.indexOf(d)<0) order.push(d);});
+  order=order.filter(function(d){return S[d].size>0;});
+  if(rebuildIcicle) drawIcicle();
+  layout();
+  ['detarea','defect','dept','cause'].forEach(drawDonut);
+  curNC=curSet();
+  // refresh the calculator's "CAPA open now" to the current selection, recompute.
+  document.getElementById('rOpen').value=openNowCount();
+  computeReach();
+  document.getElementById('ncCount').textContent=curNC.length.toLocaleString();
+  document.getElementById('ncScope').textContent=activeLabel();
+  document.getElementById('dlscope').textContent=activeLabel();
+  document.getElementById('modeCardK').textContent=(mode==='open')?'CAPA open in view':'CAPA done in view';
+  document.getElementById('odCount').textContent=curNC.length.toLocaleString();
+  document.getElementById('cov').textContent=(mode==='open')?'still owe a CAPA':'root cause on record';
+  document.getElementById('mOpen').className='open'+(mode==='open'?' on':'');
+  document.getElementById('mDone').className='done'+(mode==='done'?' on':'');
+  document.getElementById('modehint').textContent=(mode==='open')?'open NCs have no root cause yet — shown by where found & what defect':'done NCs — shown by root cause';
+  document.getElementById('chips').innerHTML=chipsHtml();
+  document.getElementById('noflt').style.display=anyFilter()?'none':'inline';
+  drawReport();
+  [].forEach.call(document.querySelectorAll('#chips .x'),function(x){x.onclick=function(){S[x.getAttribute('data-dim')].delete(x.getAttribute('data-val'));updateAll(true);};});
+}
+
+// ---- pan/zoom on any stage ----
+function makeZoom(stage){var canvas=stage.querySelector('.canvas'),badge=stage.querySelector('.zbadge');var scale=1,tx=0,ty=0;
+  function ap(){canvas.style.transform='translate('+tx+'px,'+ty+'px) scale('+scale+')';if(badge)badge.textContent=Math.round(scale*100)+'%';}
+  stage.addEventListener('wheel',function(e){e.preventDefault();var r=stage.getBoundingClientRect(),cx=e.clientX-r.left,cy=e.clientY-r.top;
+    var f=e.deltaY<0?1.15:1/1.15,ns=Math.min(8,Math.max(1,scale*f));tx=cx-(cx-tx)*(ns/scale);ty=cy-(cy-ty)*(ns/scale);scale=ns;if(scale===1){tx=0;ty=0;}ap();},{passive:false});
+  var drag=false,sx=0,sy=0;stage.addEventListener('mousedown',function(e){drag=true;sx=e.clientX-tx;sy=e.clientY-ty;stage.classList.add('dragging');});
+  window.addEventListener('mousemove',function(e){if(!drag)return;tx=e.clientX-sx;ty=e.clientY-sy;ap();});
+  window.addEventListener('mouseup',function(){drag=false;stage.classList.remove('dragging');});
+  stage.addEventListener('dblclick',function(){scale=1;tx=0;ty=0;ap();});
+  var rb=stage.querySelector('.zreset');if(rb)rb.onclick=function(ev){ev.stopPropagation();scale=1;tx=0;ty=0;ap();};}
+
+function bindPlotly(){
+  document.getElementById('chart').on('plotly_click',ICICLE_CLICK);
+  ['detarea','defect','dept','cause'].forEach(function(dim){
+    document.getElementById(dim).on('plotly_click',function(e){if(!e.points||!e.points.length)return;
+      setMode(DON[dim].status);toggle(dim,e.points[0].label);updateAll(true);});});
+}
+document.getElementById('mOpen').onclick=function(){setMode('open');updateAll(true);};
+document.getElementById('mDone').onclick=function(){setMode('done');updateAll(true);};
+document.getElementById('resetSel').onclick=function(){S={launcher:new Set(),cls:new Set(),detarea:new Set(),defect:new Set(),dept:new Set(),cause:new Set()};updateAll(true);};
+[].forEach.call(document.querySelectorAll('.restore'),function(btn){btn.onclick=function(){S[btn.getAttribute('data-dim')].clear();updateAll(true);};});
+document.getElementById('dlxlsx').onclick=function(){var rows=[REPCOLS].concat(curNC.map(function(r){return REPCOLS.map(function(c){return r[c];});}));
+  var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"CAPA");
+  XLSX.writeFile(wb,"CAPA_"+activeLabel().replace(/[^A-Za-z0-9]+/g,"_")+".xlsx");};
+
+// test hooks
+window.__mode=function(m){setMode(m);updateAll(true);};
+window.__click=function(dim,val){setMode(DON[dim].status);toggle(dim,val);updateAll(true);};
+window.__icicle=function(id){var p=id.split('/');if(id==='All'){S.launcher.clear();S.cls.clear();}else if(p.length===2)toggle('launcher',p[1]);else if(p.length===3)toggle('cls',p[2]);else if(p.length===4)setMode(p[3]==='CAPA open'?'open':'done');updateAll(true);};
+window.__state=function(){var o={mode:mode};['launcher','cls','detarea','defect','dept','cause'].forEach(function(d){o[d]=Array.from(S[d]);});return JSON.stringify(o);};
+
+// ---- init the closure-rate calculator (defaults + live recompute) ----
+(function(){
+  var today=new Date();
+  document.getElementById('rDeadline').value=new Date(today.getTime()+90*864e5).toISOString().slice(0,10);
+  // inflow default = avg new NCs / week over the last 12 weeks (browser-side date math is fine here)
+  var cut=new Date(today.getTime()-84*864e5);
+  var recent=NC.filter(function(r){var d=new Date(r.created_on);return d>=cut&&d<=today;}).length;
+  document.getElementById('rInflow').value=(Math.round((recent/12)*10)/10)||0;
+  ['rDeadline','rInflow','rOpen','rTarget'].forEach(function(id){
+    document.getElementById(id).addEventListener('input',computeReach);});
+})();
+
+drawIcicle();updateAll(false);bindPlotly();
+['icStage','stage_detarea','stage_defect','stage_dept','stage_cause'].forEach(function(id){makeZoom(document.getElementById(id));});
+// Reset view also un-drills the icicle (undo any native drill), plus the zoom
+// reset that makeZoom already binds on the same button.
+document.getElementById('icReset').addEventListener('click',function(){undrill();});
+</script>
+</body>
+</html>
