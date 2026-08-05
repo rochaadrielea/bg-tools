@@ -1,0 +1,33 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- Build artifacts (PyInstaller etc.) ---
+build/
+dist/
+*.spec.bak
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+quality/            # the conda/venv folder used by the dashboard
+
+# --- Streamlit / secrets (never commit these) ---
+.streamlit/secrets.toml
+*.db                # local databases (quality.db, feedback.db)
+
+# --- Tool run outputs (reports are generated, not source) ---
+adab_*_*.xlsx
+*_BATCH_FOUND.xlsx
+*_MBOM_*.xlsx
+~$*.xlsx            # Excel lock files
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
