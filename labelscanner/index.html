@@ -56,7 +56,7 @@
   .idle p{margin:0;color:var(--ink-dim);font-size:13px;line-height:1.5;max-width:320px;}
   .idle button{padding:15px 26px;}
 
-  .status{position:absolute;left:10px;right:10px;bottom:10px;font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(14,17,22,.80);backdrop-filter:blur(6px);padding:7px 10px;border-radius:8px;border:1px solid var(--line);}
+  .status{position:absolute;left:10px;right:10px;bottom:10px;z-index:6;font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(14,17,22,.80);backdrop-filter:blur(6px);padding:7px 10px;border-radius:8px;border:1px solid var(--line);}
   .status .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink-dim);margin-right:7px;vertical-align:1px;}
   .status.live .dot{background:var(--signal);box-shadow:0 0 8px var(--signal);}
   .status.busy .dot{background:var(--warn);}
@@ -202,7 +202,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v5.1';
+const VERSION = 'v5.4';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -294,9 +294,14 @@ async function loadMaster(){
   }
 }
 
-// A material is known / design-only / unknown. In warn mode an unknown material
-// is flagged and kept; in strict mode it blocks the row. The batch is never
-// judged here - see the note above.
+// THE MASTER CONFIRMS THE MATERIAL NUMBER. NOTHING ELSE.
+// Not the batch (assigned by the production order, absent from any BOM) and
+// not the description (the same part carries different text in different
+// languages, so a text comparison flags correct reads). The number is the only
+// field the master can judge, so it is the only field it judges.
+//
+// warn mode : an unknown material is flagged and the row is still written
+// strict    : an unknown material blocks the row
 function checkAgainstMaster(mat){
   if(!MASTER) return {level:'none', flags:[]};
   const m = normId(mat);
@@ -456,42 +461,117 @@ if(!secureContextOk()){
 
 authBtn.addEventListener('click', startCamera);
 
+// Three constraint sets, tried in order. Some phones reject or stall on a
+// 1920x1080 request; a plain rear-camera request nearly always succeeds, and
+// {video:true} works on anything with a lens. Trying them in order is the
+// difference between "camera unavailable" and a working scanner on the odd
+// handset.
+const CONSTRAINTS = [
+  {video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false},
+  {video:{facingMode:'environment'},audio:false},
+  {video:true,audio:false}
+];
+
+async function getStream(){
+  let lastErr = null;
+  for(let i=0;i<CONSTRAINTS.length;i++){
+    try{
+      setStatus('Opening camera ('+(i+1)+'/'+CONSTRAINTS.length+')\u2026','busy');
+      return await navigator.mediaDevices.getUserMedia(CONSTRAINTS[i]);
+    }catch(e){
+      lastErr = e;
+      // a refusal will not be cured by asking for less
+      if(e && (e.name==='NotAllowedError' || e.name==='SecurityError')) throw e;
+    }
+  }
+  throw lastErr || new Error('no camera');
+}
+
+// Waits for the video element to actually produce pixels. Never blocks
+// forever: v5.1 awaited vid.play(), which on some browsers neither resolves
+// nor rejects, leaving the status stuck on "Starting camera" with no way to
+// tell what went wrong.
+function waitForVideo(ms){
+  return new Promise(function(resolve){
+    let done = false;
+    const finish = function(ok){ if(!done){ done = true; resolve(ok); } };
+    const check = function(){ if(vid.videoWidth > 0) finish(true); };
+    vid.addEventListener('loadedmetadata', check, {once:true});
+    vid.addEventListener('playing', check, {once:true});
+    const poll = setInterval(function(){ check(); }, 150);
+    setTimeout(function(){ clearInterval(poll); finish(vid.videoWidth > 0); }, ms);
+    try{
+      const p = vid.play();
+      if(p && p.catch) p.catch(function(){});   // never awaited on purpose
+    }catch(_){}
+  });
+}
+
 async function startCamera(){
   stopCamera();
+  banner.className = 'banner';
   try{
     setStatus('Starting camera\u2026','busy');
     idlePanel.classList.add('hide');
-    if(nativeDetector){
-      stream = await navigator.mediaDevices.getUserMedia(
-        {video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
-      vid.srcObject = stream; await vid.play();
-      track = stream.getVideoTracks()[0]; if(track) setupCapabilities();
-      scanning = true; nativeLoop();
-    } else {
-      codeReader = new ZXing.BrowserMultiFormatReader(hints, 200);
-      await codeReader.decodeFromConstraints(
-        {video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false},
-        vid,
-        function(result){ if(result && result.getText) onCodes([{value:result.getText().trim(), box:null}]); }
-      );
-      scanning = true;
-      stream = vid.srcObject;
-      track = stream ? stream.getVideoTracks()[0] : null;
-      if(track) setupCapabilities();
+
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw Object.assign(new Error('getUserMedia missing'), {name:'NoMediaDevices'});
     }
+
+    stream = await getStream();
+    vid.srcObject = stream;
+    const live = await waitForVideo(8000);
+    if(!live) throw Object.assign(new Error('no video frames'), {name:'NoFrames'});
+
+    track = stream.getVideoTracks()[0];
+    if(track) setupCapabilities();
+
+    if(nativeDetector){
+      scanning = true;
+      nativeLoop();
+    } else {
+      // ZXing decodes from the stream we already opened. v5.1 handed ZXing the
+      // constraints and awaited decodeFromConstraints, which does not reliably
+      // resolve - the other way this could hang on "Starting camera".
+      codeReader = new ZXing.BrowserMultiFormatReader(hints, 200);
+      scanning = true;
+      codeReader.decodeFromStream(stream, vid, function(result){
+        if(result && result.getText) onCodes([{value:result.getText().trim(), box:null}]);
+      }).catch(function(err){
+        console.warn('zxing stream decode failed, falling back', err);
+        try{
+          codeReader.decodeFromVideoElement(vid, function(result){
+            if(result && result.getText) onCodes([{value:result.getText().trim(), box:null}]);
+          });
+        }catch(e2){
+          setStatus('Barcode reader failed \u2014 use Read text now','bad');
+        }
+      });
+    }
+
     authBtn.textContent = 'Restart camera';
-    setStatus('Point at a label','live');
+    const engine = nativeDetector ? 'fast reader' : 'compatibility reader';
+    setStatus('Point at a label ('+engine+')','live');
   }catch(e){
+    stopCamera();
     idlePanel.classList.remove('hide');
     console.error(e);
-    const denied = e && (e.name==='NotAllowedError' || e.name==='SecurityError');
-    setStatus(denied ? 'Camera permission refused' : 'Camera unavailable','bad');
-    if(denied){
-      showBanner('Camera permission was refused. Allow it in the padlock menu next to '
-        + 'the address, then press <b>Turn on camera</b> again.', 'bad');
-    } else if(secureContextOk()){
-      showBanner('Could not open the camera. Another app may be holding it. '
-        + '<b>Upload photo</b> works meanwhile.', 'warn');
+    const name = (e && e.name) || 'Error';
+    setStatus('Camera failed: '+name,'bad');
+    if(name==='NotAllowedError' || name==='SecurityError'){
+      showBanner('Camera permission was refused. Tap the padlock (or <b>aA</b>) next to '
+        + 'the address, allow Camera, then press <b>Turn on camera</b> again.', 'bad');
+    } else if(name==='NoMediaDevices'){
+      showBanner('This browser will not give any page the camera at this address. '
+        + 'It must be <b>https://</b>. <b>Upload photo</b> still works.', 'bad');
+    } else if(name==='NotFoundError' || name==='OverconstrainedError'){
+      showBanner('No usable camera was found on this device.', 'bad');
+    } else if(name==='NotReadableError'){
+      showBanner('Another app is using the camera. Close it and try again.', 'bad');
+    } else {
+      showBanner('Camera did not start. Error: <b>'+name+'</b> \u2014 '
+        + ((e && e.message) || 'no detail') + '<br>Tell Adriele this message. '
+        + '<b>Upload photo</b> works meanwhile.', 'bad');
     }
   }
 }
@@ -508,10 +588,12 @@ function stopCamera(){
 // seconds and starved this loop of CPU, which is why reads were being missed.
 // OCR is now only ever run on demand.
 async function nativeLoop(){
+  let fails = 0;
   while(scanning){
     try{
       if(vid.videoWidth){
         const codes = await nativeDetector.detect(vid);
+        fails = 0;
         if(codes && codes.length){
           frameTick++;
           const tick = frameTick;
@@ -520,7 +602,19 @@ async function nativeLoop(){
           }), tick);
         }
       }
-    }catch(_){}
+    }catch(err){
+      // Some devices advertise BarcodeDetector and then fail on every call.
+      // v5.1 swallowed this, so the camera ran and nothing was ever read.
+      fails++;
+      if(fails === 5){
+        console.warn('native detector failing, switching to compatibility reader', err);
+        nativeDetector = null;
+        scanning = false;
+        setStatus('Switching to compatibility reader\u2026','busy');
+        setTimeout(startCamera, 200);
+        return;
+      }
+    }
     await new Promise(function(r){ setTimeout(r,80); });
   }
 }
@@ -680,6 +774,9 @@ function commit(proof, chk){
   row.Source = sourceLine(function(c){ return f[c] ? f[c].src : ''; });
   row.Proof  = proof ? proof.kind : 'manual';
   row.Check  = (chk && chk.flags.length) ? chk.flags.join('; ') : (MASTER ? 'ok' : 'not checked');
+  // A flag never costs you the scan. An unrecognised material is written with
+  // the flag recorded against it, so nothing is lost and the gap is visible
+  // afterwards. Only strict mode refuses, and that is handled in evaluate().
   rows.push(row); saveRows(); renderTable();
   splashOk(row.Mat + '  /  Char ' + row.Char, chk && chk.flags.length);
   beep(); setTimeout(beep,140);
