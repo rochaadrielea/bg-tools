@@ -16,7 +16,23 @@ Anything else is skipped loudly.
 
 Run:
     cd ~/bgtools/labelscanner
-    ~/bgtools/dash/quality/bin/python make_master.py
+    ~/bgtools/dash/quality/bin/python make_master.py            # full, internal
+    ~/bgtools/dash/quality/bin/python make_master.py --public   # numbers only
+
+PUBLIC MODE
+    Writes the same data/master.json but containing ONLY the material numbers
+    and the mode. No SAP short texts, no descriptions, no revisions, no
+    assembly levels, no source filenames.
+
+    This exists because the scanner is served from GitHub Pages, where
+    master.json is fetchable by anyone with the URL. Since the scanner
+    confirms the material NUMBER and nothing else, every other field is dead
+    weight that would be published for no benefit. A bare list of numbers
+    reveals no part names, no structure and no programme.
+
+    It is a reduction of exposure, not an elimination of it. Publishing any
+    company data outside the tenant is a decision for Adriele and Information
+    Security, not for this script.
 """
 
 import json
@@ -268,32 +284,52 @@ def main():
     # a hand-verified pair settles the ambiguity - stop reporting it
     conflicts = [c for c in conflicts if c["batch"] not in by_batch]
 
-    master = {
-        "generated": datetime.datetime.now().isoformat(timespec="seconds"),
-        "source_files": used,
-        # warn = unknown material is flagged but the row is still written.
-        # strict = unknown material blocks the row. Do not switch to strict
-        # until the master covers every part you expect to scan.
-        "mode": "warn",
-        "materials": [mbom_mats[m] for m in sorted(mbom_mats)],
-        "design_only": design_only,
-        "pairs": all_pairs,
-        "ambiguous_batches": conflicts,
-    }
+    public = "--public" in sys.argv
+
+    if public:
+        # Only what the scanner reads. Everything else is withheld.
+        master = {
+            "generated": datetime.date.today().isoformat(),
+            "mode": "warn",
+            "materials": sorted(mbom_mats),
+            "design_only": design_only,
+        }
+    else:
+        master = {
+            "generated": datetime.datetime.now().isoformat(timespec="seconds"),
+            "source_files": used,
+            # warn = unknown material is flagged but the row is still written.
+            # strict = unknown material blocks the row. Do not switch to strict
+            # until the master covers every part you expect to scan.
+            "mode": "warn",
+            "materials": [mbom_mats[m] for m in sorted(mbom_mats)],
+            "design_only": design_only,
+            "pairs": all_pairs,
+            "ambiguous_batches": conflicts,
+        }
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(master, f, indent=1, ensure_ascii=False)
 
     size = os.path.getsize(OUT_PATH) / 1024
-    print(f"\nmaster.json written  ({size:.0f} KB)")
-    print(f"  materials (MBOM) : {len(master['materials'])}")
+    print(f"\nmaster.json written  ({size:.0f} KB)"
+          + ("   [PUBLIC - numbers only]" if public else "   [FULL - internal only]"))
+    print(f"  materials (MBOM) : {len(mbom_mats)}")
     print(f"  design only      : {len(design_only)}")
-    print(f"  batch pairs      : {len(all_pairs)}")
-    print(f"  ambiguous        : {len(conflicts)}")
     print(f"  mode             : {master['mode']}")
-    named = sum(1 for m in master["materials"] if m["name"])
-    print(f"  with SAP name    : {named}/{len(master['materials'])}")
+    if public:
+        print("\n  Published fields : material numbers, design-only numbers, mode")
+        print("  Withheld         : names, descriptions, revisions, UoM,")
+        print("                     traceable/serialized flags, levels,")
+        print("                     batch pairs, source filenames")
+    else:
+        print(f"  batch pairs      : {len(all_pairs)}")
+        print(f"  ambiguous        : {len(conflicts)}")
+        named = sum(1 for m in master["materials"] if m["name"])
+        print(f"  with SAP name    : {named}/{len(master['materials'])}")
+        print("\n  This file contains part descriptions. Do NOT commit it.")
+        print("  For the published copy run:  make_master.py --public")
 
 
 if __name__ == "__main__":

@@ -202,7 +202,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v5.4';
+const VERSION = 'v5.5';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -281,15 +281,24 @@ async function loadMaster(){
     const res = await fetch('data/master.json?t='+Date.now(), {cache:'no-store'});
     if(!res.ok) throw new Error('HTTP '+res.status);
     MASTER = await res.json();
-    (MASTER.materials||[]).forEach(m=>matIndex.set(normId(m.material), m));
-    (MASTER.design_only||[]).forEach(m=>designOnly.add(normId(m)));
+    // Two shapes are valid. The internal file lists objects with names and
+    // descriptions; the published file lists bare material numbers, because
+    // the scanner only ever confirms the number. Both must load.
+    (MASTER.materials||[]).forEach(function(m){
+      const id = normId(typeof m === 'string' ? m : (m && m.material));
+      if(id) matIndex.set(id, (typeof m === 'string') ? {material:id} : m);
+    });
+    (MASTER.design_only||[]).forEach(function(m){
+      const id = normId(typeof m === 'string' ? m : (m && m.material));
+      if(id) designOnly.add(id);
+    });
     const mode = MASTER.mode==='strict' ? 'strict' : 'warn';
     MASTER.mode = mode;
     masterLine.className = 'masterline';
     masterLine.innerHTML = 'master list <b>'+matIndex.size+'</b> materials &middot; mode <b>'+mode+'</b>';
   }catch(e){
     masterLine.className = 'masterline off';
-    masterLine.innerHTML = 'master list <b>not loaded</b> &mdash; values are not checked';
+    masterLine.innerHTML = 'master list <b>not loaded</b> &mdash; material numbers are not checked';
     console.warn('master.json:', e);
   }
 }
