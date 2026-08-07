@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
 <title>WAE Label Scanner</title>
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
@@ -28,33 +26,49 @@
   header .count b{color:var(--signal);font-size:15px;}
   .wrap{padding:12px;max-width:640px;margin:0 auto;}
 
-  /* camera stage */
+  .banner{border-radius:10px;padding:11px 13px;margin:0 0 12px;font-size:13px;line-height:1.45;display:none;}
+  .banner.show{display:block;}
+  .banner.bad{background:rgba(255,107,107,.12);border:1px solid var(--bad);color:#FFC9C9;}
+  .banner.warn{background:rgba(255,180,84,.10);border:1px solid var(--warn);color:#FFDCA8;}
+  .banner b{color:#fff;}
+
   .stage{position:relative;border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--line);aspect-ratio:3/4;max-height:56vh;margin:0 auto;}
   video{width:100%;height:100%;object-fit:cover;display:block;}
   .reticle{position:absolute;inset:14% 8%;border:2px solid var(--signal);border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.32);pointer-events:none;opacity:.9;transition:border-color .2s;}
   .reticle.hit{border-color:#fff;}
   .reticle.partial{border-color:var(--warn);}
-  .donesplash{position:absolute;inset:0;background:rgba(53,224,161,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:6px;z-index:5;}
-  .donesplash.show{display:flex;}
-  .donesplash .check{font-size:72px;line-height:1;color:#08130E;font-weight:700;}
-  .donesplash .what{font-family:var(--mono);color:#08130E;font-weight:700;font-size:14px;text-align:center;padding:0 14px;}
+  .reticle.reject{border-color:var(--bad);}
   .reticle::before{content:"";position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--signal),transparent);animation:sweep 2.2s ease-in-out infinite;}
   @keyframes sweep{0%,100%{top:3%}50%{top:95%}}
   @media (prefers-reduced-motion:reduce){.reticle::before{animation:none;top:50%}}
 
-  .status{position:absolute;left:10px;right:10px;bottom:10px;font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(14,17,22,.78);backdrop-filter:blur(6px);padding:7px 10px;border-radius:8px;border:1px solid var(--line);}
+  .splash{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:6px;z-index:5;padding:0 16px;text-align:center;}
+  .splash.show{display:flex;}
+  .splash.ok{background:rgba(53,224,161,.90);}
+  .splash.no{background:rgba(255,107,107,.93);}
+  .splash .mark{font-size:66px;line-height:1;font-weight:700;}
+  .splash .what{font-family:var(--mono);font-weight:700;font-size:14px;}
+  .splash.ok .mark,.splash.ok .what{color:#08130E;}
+  .splash.no .mark,.splash.no .what{color:#2A0808;}
+
+  .idle{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:#0B0E13;padding:24px;text-align:center;z-index:4;}
+  .idle.hide{display:none;}
+  .idle p{margin:0;color:var(--ink-dim);font-size:13px;line-height:1.5;max-width:320px;}
+  .idle button{padding:15px 26px;}
+
+  .status{position:absolute;left:10px;right:10px;bottom:10px;font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(14,17,22,.80);backdrop-filter:blur(6px);padding:7px 10px;border-radius:8px;border:1px solid var(--line);}
   .status .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink-dim);margin-right:7px;vertical-align:1px;}
   .status.live .dot{background:var(--signal);box-shadow:0 0 8px var(--signal);}
   .status.busy .dot{background:var(--warn);}
   .status.hit .dot{background:#fff;box-shadow:0 0 8px #fff;}
+  .status.bad .dot{background:var(--bad);box-shadow:0 0 8px var(--bad);}
 
-  /* overlaid camera tools: torch, OCR trigger, zoom */
-  .camtools{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .camtools{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:3;}
   .chip{font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(14,17,22,.7);border:1px solid var(--line);border-radius:20px;padding:7px 12px;backdrop-filter:blur(6px);cursor:pointer;user-select:none;}
   .chip.on{background:var(--signal);color:#08130E;border-color:var(--signal);}
   .zoomwrap{margin-left:auto;display:flex;align-items:center;gap:8px;background:rgba(14,17,22,.7);border:1px solid var(--line);border-radius:20px;padding:4px 12px;backdrop-filter:blur(6px);}
   .zoomwrap span{font-family:var(--mono);font-size:12px;color:var(--ink-dim);}
-  input[type=range]{width:110px;accent-color:var(--signal);}
+  input[type=range]{width:100px;accent-color:var(--signal);}
 
   .controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0;}
   button{font-family:var(--sans);font-size:15px;font-weight:600;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);padding:14px;border-radius:11px;cursor:pointer;transition:transform .05s,background .15s;}
@@ -65,10 +79,18 @@
   button.wide{grid-column:1/-1;}
   input[type=file]{display:none;}
 
-  /* review card */
+  .masterline{font-family:var(--mono);font-size:11px;color:var(--ink-dim);text-align:center;margin:2px 0 10px;}
+  .masterline b{color:var(--signal);}
+  .masterline.off b{color:var(--warn);}
+
   .review{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:4px 4px 10px;margin:12px 0;display:none;}
   .review.show{display:block;}
+  .review.alarm{border-color:var(--bad);}
   .review h2{font-size:12px;font-family:var(--mono);letter-spacing:1px;color:var(--ink-dim);margin:12px 14px 8px;text-transform:uppercase;}
+  .rnote{margin:0 10px 10px;padding:10px 12px;border-radius:9px;font-size:13px;line-height:1.45;display:none;}
+  .rnote.show{display:block;}
+  .rnote.bad{background:rgba(255,107,107,.12);border:1px solid var(--bad);color:#FFC9C9;}
+  .rnote.warn{background:rgba(255,180,84,.10);border:1px solid var(--warn);color:#FFDCA8;}
   .fields{display:grid;gap:1px;background:var(--line);border-radius:9px;overflow:hidden;margin:0 10px;}
   .field{display:grid;grid-template-columns:104px 1fr;align-items:center;background:var(--panel-2);}
   .field label{font-family:var(--mono);font-size:11px;color:var(--ink-dim);padding:0 0 0 12px;}
@@ -76,16 +98,18 @@
   .field input:focus{background:rgba(53,224,161,.07);}
   .field.src-bc label::after{content:" \25AA";color:var(--signal);}
   .field.src-ocr label::after{content:" \25AA";color:var(--warn);}
-  .legend{font-family:var(--mono);font-size:10px;color:var(--ink-dim);margin:8px 14px 0;}
+  .field.flagged input{color:var(--warn);}
+  .field.rejected input{color:var(--bad);}
+  .legend{font-family:var(--mono);font-size:10px;color:var(--ink-dim);margin:8px 14px 0;line-height:1.6;}
   .legend .g{color:var(--signal);}.legend .o{color:var(--warn);}
 
-  /* results table */
   .tablewrap{margin:8px 0 96px;border:1px solid var(--line);border-radius:12px;overflow:auto;}
   table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12px;}
   th{background:var(--panel-2);color:var(--ink-dim);text-align:left;padding:6px 8px;position:sticky;top:0;white-space:nowrap;font-size:11px;}
   td{padding:6px 8px;border-top:1px solid var(--line);white-space:nowrap;font-size:11px;}
   tr:nth-child(even) td{background:rgba(255,255,255,.015);}
   td.del{color:var(--bad);cursor:pointer;text-align:center;width:34px;}
+  td.flag{color:var(--warn);}
   .empty{color:var(--ink-dim);font-family:var(--mono);font-size:12px;text-align:center;padding:22px;}
 
   .exportbar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 22%);display:flex;gap:10px;max-width:640px;margin:0 auto;}
@@ -100,10 +124,12 @@
 </header>
 
 <div class="wrap">
+  <div class="banner" id="banner"></div>
+
   <div class="stage">
     <video id="vid" playsinline muted autoplay></video>
     <div class="reticle" id="reticle"></div>
-    <div class="donesplash" id="doneSplash"><div class="check">&#10003;</div><div class="what" id="doneTxt"></div></div>
+    <div class="splash" id="splash"><div class="mark" id="splashMark"></div><div class="what" id="splashTxt"></div></div>
     <div class="camtools">
       <div class="chip on" id="autoChip">Auto-add</div>
       <div class="chip" id="torchChip" style="display:none;">Light</div>
@@ -112,11 +138,16 @@
         <span>zoom</span><input type="range" id="zoom" min="1" max="5" step="0.1" value="1">
       </div>
     </div>
-    <div class="status" id="status"><span class="dot"></span><span id="statustxt">Starting camera…</span></div>
+    <div class="status" id="status"><span class="dot"></span><span id="statustxt">Camera off</span></div>
+    <div class="idle" id="idle">
+      <button class="primary" id="authBtn">Turn on camera</button>
+      <p id="idleTxt">The browser will ask permission to use the camera. Nothing is uploaded &mdash; frames are read on this device and discarded.</p>
+    </div>
   </div>
 
+  <div class="masterline" id="masterLine">Checking master list&hellip;</div>
+
   <div class="controls">
-    <button class="primary wide" id="startBtn">Start / restart camera</button>
     <button class="ghost" id="fileBtn">Upload photo</button>
     <button class="ghost" id="focusBtn">Refocus</button>
     <button class="ghost wide" id="freshBtn">Get latest version (fresh reload)</button>
@@ -125,8 +156,11 @@
 
   <div class="review" id="review">
     <h2>Review &amp; confirm</h2>
+    <div class="rnote" id="rnote"></div>
     <div class="fields" id="fields"></div>
-    <div class="legend"><span class="g">&#9642;</span> from barcode &nbsp; <span class="o">&#9642;</span> from OCR — check the amber ones</div>
+    <div class="legend">
+      <span class="g">&#9642;</span> from barcode &nbsp; <span class="o">&#9642;</span> from OCR &mdash; check the amber ones
+    </div>
     <div class="controls" style="margin:12px 10px 4px;">
       <button class="ghost" id="discardBtn">Discard</button>
       <button class="primary" id="addBtn">Add row</button>
@@ -135,7 +169,7 @@
 
   <div class="tablewrap">
     <table id="tbl"><thead><tr id="head"></tr></thead>
-    <tbody id="body"><tr><td class="empty" colspan="12">No rows yet. Point the camera at a label.</td></tr></tbody></table>
+    <tbody id="body"><tr><td class="empty" colspan="14">No rows yet.</td></tr></tbody></table>
   </div>
 </div>
 
@@ -146,440 +180,741 @@
 
 <script>
 // ============================================================================
-//  WAE LABEL SCANNER — robust live-scan build (v2)
+//  WAE LABEL SCANNER  v5.0
 //  ---------------------------------------------------------------------------
-//  What changed vs v1 and why:
-//  - The camera now runs CONTINUOUSLY and tries to decode a barcode on every
-//    frame. No more "Capture" press that can grab a blank frame. When a code
-//    is caught the frame flashes, it beeps, and the field fills in.
-//  - Zoom slider + pinch-to-zoom + Refocus button + torch: get CLOSE on the
-//    small print. Sharp and close is what makes both barcode and OCR work.
-//  - "Read text now" runs a 3-frame OCR burst on the current zoomed view and
-//    keeps the highest-confidence value per field.
-//  - Barcode results always win over OCR results for the same field.
+//  WHAT CHANGED FROM v4.2, AND WHY IT MATTERED
 //
-//  Where to tune things later:
-//  - COLS: the Excel columns (single source of truth)
-//  - applyBarcodes(): rules mapping decoded codes -> fields  (green dot)
-//  - parseOcr():      regex rules reading label text -> fields (amber dot)
+//  v4.2 kept every field it had ever read in one global `found` object that was
+//  cleared only when a row was written. Read the batch off label A, fail to get
+//  its material, move to label B, catch B's material -> the two combined into
+//  one row and auto-added. Material B with batch A. A wrong pairing is worse
+//  than no read at all: it is a false traceability record.
+//
+//  v5.0 replaces that with a LABEL SESSION. Evidence belongs to one physical
+//  label, is timestamped, expires on its own, and a row is only written
+//  automatically when the mandatory fields can be PROVEN to come from the same
+//  label. Where proof is unavailable the row goes to review instead, and the
+//  reason is recorded in the exported audit columns.
+//
+//  Tuning lives in three places and nowhere else:
+//    applyBarcodes()  barcode -> field rules   (green dot)
+//    parseOcr()       printed text -> field    (amber dot)
+//    the CONSTANTS block below
 // ============================================================================
-// ---- version + cache handling ----------------------------------------------
-// Bump VERSION every time you change this file. It shows in the header, so on
-// the phone you can instantly see whether you're running the new build or a
-// stale cached one.
-const VERSION='v4.2';
-document.getElementById('ver').textContent=VERSION;
 
-// "Get latest version": wipes cached copies of the app and reloads with a
-// unique URL so no cache layer (browser or GitHub Pages) can serve the old
-// file. Your scanned rows are NOT touched — they live in localStorage, which
-// this deliberately leaves alone.
-document.getElementById('freshBtn').addEventListener('click',async()=>{
-  try{ if(window.caches){ const keys=await caches.keys(); await Promise.all(keys.map(k=>caches.delete(k))); } }catch(_){}
-  try{ if(navigator.serviceWorker){ const regs=await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r=>r.unregister())); } }catch(_){}
-  location.href=location.pathname+'?fresh='+Date.now();
-});
+const VERSION = 'v5.0';
+document.getElementById('ver').textContent = VERSION;
 
-const COLS=["Mat","Definition","Rev","SerNr","Char","L-Char","Auftr","Menge","Einheit","Verfallsdatum","CH-Nr"];
-const STORE_KEY='wae_label_rows_v2';
-const rows=loadRows(); let current=null;
-function loadRows(){try{return JSON.parse(localStorage.getItem(STORE_KEY))||[]}catch(_){return[]}}
-function saveRows(){try{localStorage.setItem(STORE_KEY,JSON.stringify(rows))}catch(_){}}
+// ---- constants --------------------------------------------------------------
+// IDLE_MS      no new evidence for this long -> the part-read label is thrown
+//              away. This is the setting that stops values crossing labels.
+// COHERENCE_MS two fields further apart in time than this are not assumed to
+//              be from the same label.
+// BOX_SPANS    two barcodes count as being on one label when their centres are
+//              within this many barcode-diagonals of each other.
+// GRACE_MS     after the mandatory fields land, keep reading this long so the
+//              rest of the same label lands in the same row.
+const IDLE_MS = 2500;
+const COHERENCE_MS = 900;
+const BOX_SPANS = 2.5;
+const GRACE_MS = 800;
+const NEED_VOTES = 2;
+
+const COLS = ["Mat","Definition","Rev","SerNr","Char","L-Char","Auftr","Menge","Einheit","Verfallsdatum","CH-Nr"];
+const AUDIT_COLS = ["Source","Proof","Check"];
+const ALL_COLS = COLS.concat(AUDIT_COLS);
+const MANDATORY = ["Mat","Char"];
+const STORE_KEY = 'wae_label_rows_v5';
+
+const rows = loadRows();
+let current = null;
+function loadRows(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY))||[] }catch(_){ return [] } }
+function saveRows(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(rows)) }catch(_){} }
 
 const vid=document.getElementById('vid');
 const statusEl=document.getElementById('status'), statusTxt=document.getElementById('statustxt');
-const reticle=document.getElementById('reticle');
-const startBtn=document.getElementById('startBtn'), fileBtn=document.getElementById('fileBtn');
-const focusBtn=document.getElementById('focusBtn'), fileInput=document.getElementById('fileInput');
-const ocrChip=document.getElementById('ocrChip'), torchChip=document.getElementById('torchChip');
+const reticle=document.getElementById('reticle'), banner=document.getElementById('banner');
+const idlePanel=document.getElementById('idle'), authBtn=document.getElementById('authBtn'), idleTxt=document.getElementById('idleTxt');
+const fileBtn=document.getElementById('fileBtn'), focusBtn=document.getElementById('focusBtn'), fileInput=document.getElementById('fileInput');
+const ocrChip=document.getElementById('ocrChip'), torchChip=document.getElementById('torchChip'), autoChip=document.getElementById('autoChip');
 const zoomWrap=document.getElementById('zoomWrap'), zoom=document.getElementById('zoom');
-const review=document.getElementById('review'), fieldsEl=document.getElementById('fields');
+const review=document.getElementById('review'), fieldsEl=document.getElementById('fields'), rnote=document.getElementById('rnote');
 const addBtn=document.getElementById('addBtn'), discardBtn=document.getElementById('discardBtn');
 const exportBtn=document.getElementById('exportBtn'), clearBtn=document.getElementById('clearBtn');
-function setStatus(t,c){statusTxt.textContent=t;statusEl.className='status'+(c?' '+c:'');}
+const masterLine=document.getElementById('masterLine');
 
-// ---- camera + continuous barcode scanning ----------------------------------
-// Uses ZXing's built-in continuous decoder (decodeFromConstraints): it owns the
-// camera stream and calls us on every successful decode. Frames are processed
-// in memory and discarded — nothing is saved.
-let stream=null, track=null, scanning=false, codeReader=null;
-let found={};   // fields caught for the CURRENT label (cleared on add/discard)
-const hints=new Map();
+function setStatus(t,c){ statusTxt.textContent=t; statusEl.className='status'+(c?' '+c:''); }
+function showBanner(html,kind){ banner.innerHTML=html; banner.className='banner show '+(kind||'warn'); }
+
+document.getElementById('freshBtn').addEventListener('click', async()=>{
+  try{ if(window.caches){ const k=await caches.keys(); await Promise.all(k.map(x=>caches.delete(x))); } }catch(_){}
+  try{ if(navigator.serviceWorker){ const r=await navigator.serviceWorker.getRegistrations(); await Promise.all(r.map(x=>x.unregister())); } }catch(_){}
+  location.href = location.pathname + '?fresh=' + Date.now();
+});
+
+// ============================================================================
+//  MASTER LIST
+//  data/master.json, generated by make_master.py from the Teamcenter BOMs.
+//  Absent or unreadable -> the scanner still works, validation switches off and
+//  says so. It must never be the reason a label cannot be scanned.
+// ============================================================================
+let MASTER = null;
+const matIndex = new Map();     // normalised material -> entry
+const designOnly = new Set();
+const pairIndex = new Map();    // normalised batch -> material
+
+function normId(v){
+  if(v===null||v===undefined) return '';
+  let s = String(v).trim();
+  if(/^\d+\.0$/.test(s)) s = s.slice(0,-2);
+  return s.toUpperCase();
+}
+
+async function loadMaster(){
+  try{
+    const res = await fetch('data/master.json?t='+Date.now(), {cache:'no-store'});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    MASTER = await res.json();
+    (MASTER.materials||[]).forEach(m=>matIndex.set(normId(m.material), m));
+    (MASTER.design_only||[]).forEach(m=>designOnly.add(normId(m)));
+    (MASTER.pairs||[]).forEach(p=>pairIndex.set(normId(p.batch), normId(p.material)));
+    const mode = MASTER.mode==='strict' ? 'strict' : 'warn';
+    MASTER.mode = mode;
+    masterLine.className = 'masterline';
+    masterLine.innerHTML = 'master list <b>'+matIndex.size+'</b> materials &middot; '
+      + '<b>'+pairIndex.size+'</b> batch pairs &middot; mode <b>'+mode+'</b>';
+    if(pairIndex.size === 0){
+      showBanner('Master list has <b>no batch pairs</b>. Material numbers are checked, '
+        + 'but a batch cannot be verified against its material yet. '
+        + 'Same-label proof is the only thing preventing a mixed row.', 'warn');
+    }
+  }catch(e){
+    masterLine.className = 'masterline off';
+    masterLine.innerHTML = 'master list <b>not loaded</b> &mdash; values are not checked';
+    console.warn('master.json:', e);
+  }
+}
+
+// A material is known / design-only / unknown. In warn mode an unknown material
+// is flagged and kept; in strict mode it blocks the row. A batch that the master
+// says belongs to a DIFFERENT material is rejected in BOTH modes - that is the
+// exact failure this rebuild exists to prevent, and it is never a warning.
+function checkAgainstMaster(mat, batch){
+  if(!MASTER) return {level:'none', flags:[]};
+  const flags = []; let level = 'ok';
+  const m = normId(mat), b = normId(batch);
+
+  if(m){
+    if(!matIndex.has(m)){
+      if(designOnly.has(m)){ flags.push('design-only material'); level='warn'; }
+      else if(MASTER.mode==='strict'){ flags.push('material not in master'); level='reject'; }
+      else { flags.push('material not in master'); level='warn'; }
+    }
+  }
+  if(m && b && pairIndex.has(b)){
+    const owner = pairIndex.get(b);
+    if(owner !== m){
+      flags.push('batch '+b+' belongs to '+owner);
+      level = 'reject';
+    }
+  }
+  return {level, flags};
+}
+
+// ============================================================================
+//  LABEL SESSION
+//  One session = one physical label. Every field carries when it was read and,
+//  where the browser gave us one, where in the frame it was read.
+// ============================================================================
+let session = newSession();
+function newSession(){ return {fields:{}, startedAt:0, lastAt:0, votes:{}}; }
+
+function resetSession(reason){
+  const had = Object.keys(session.fields).length;
+  session = newSession();
+  reticle.classList.remove('partial','reject');
+  if(had && reason) setStatus(reason,'live');
+}
+
+// Record one field. `box` and `tick` are optional; when the decoder cannot tell
+// us where in the frame the code was, we say so rather than assume.
+function put(field, value, src, box, tick){
+  if(!value) return false;
+  const now = Date.now();
+  const prev = session.fields[field];
+  // a barcode is never overwritten by OCR; barcode-by-barcode is allowed
+  if(prev && prev.src==='bc' && src!=='bc') return false;
+  if(prev && prev.value===value){ prev.t=now; session.lastAt=now; return false; }
+  if(!session.startedAt) session.startedAt = now;
+  session.fields[field] = {value:value, src:src, t:now, box:box||null, tick:(tick||0)};
+  session.lastAt = now;
+  return true;
+}
+
+// Idle sweep. This is what stops a half-read label from waiting around to
+// contaminate the next one.
+setInterval(function(){
+  if(!scanning) return;
+  if(!session.lastAt) return;
+  if(Date.now() - session.lastAt < IDLE_MS) return;
+  if(review.classList.contains('show')) return;   // user is editing, leave it
+  if(Object.keys(session.fields).length){
+    resetSession('Part-read label cleared \u2014 start again');
+  }
+}, 400);
+
+function boxesCohere(a,b){
+  if(!a||!b) return null;                 // unknown, not false
+  const ca={x:a.x+a.width/2, y:a.y+a.height/2};
+  const cb={x:b.x+b.width/2, y:b.y+b.height/2};
+  const d = Math.hypot(ca.x-cb.x, ca.y-cb.y);
+  const span = Math.max(Math.hypot(a.width,a.height), Math.hypot(b.width,b.height));
+  return d <= span * BOX_SPANS;
+}
+
+// Can we PROVE the mandatory fields came off one label?
+//   same-frame  strongest: both codes in a single detection
+//   near        different frames, close in time, boxes agree
+//   time-only   close in time but no position available (ZXing / OCR)
+//   split       too far apart in time, or boxes disagree -> no auto-add
+function proveSameLabel(){
+  const f = MANDATORY.map(function(k){ return session.fields[k]; });
+  if(f.some(function(x){ return !x; })) return {ok:false, kind:'incomplete'};
+  const a=f[0], b=f[1];
+  if(a.tick && b.tick && a.tick===b.tick) return {ok:true, kind:'same-frame'};
+  if(Math.abs(a.t-b.t) > COHERENCE_MS) return {ok:false, kind:'split'};
+  const co = boxesCohere(a.box, b.box);
+  if(co === true) return {ok:true, kind:'near'};
+  if(co === false) return {ok:false, kind:'split'};
+  return {ok:true, kind:'time-only'};
+}
+
+// ============================================================================
+//  CAMERA  (user-authorised, never auto-started)
+// ============================================================================
+let stream=null, track=null, scanning=false, codeReader=null, frameTick=0;
+let nativeDetector=null, autoMode=true, lastBeep=0, ocrBusy=false, worker=null;
+
+const hints = new Map();
 hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
 hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
   ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
   ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.QR_CODE,
   ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.ITF
 ]);
-
-// ---- native barcode engine (Google's, built into Android Chrome) -----------
-// Hardware-accelerated, tolerant of tilt/blur, and detects MULTIPLE barcodes
-// per frame — so Mat + CH get caught in one glance. ZXing is the fallback for
-// browsers that don't have it.
-let nativeDetector=null;
 try{
   if('BarcodeDetector' in window){
-    nativeDetector=new BarcodeDetector({formats:['code_128','code_39','data_matrix','qr_code','itf','ean_13']});
+    nativeDetector = new BarcodeDetector({formats:['code_128','code_39','data_matrix','qr_code','itf','ean_13']});
   }
-}catch(_){ nativeDetector=null; }
+}catch(_){ nativeDetector = null; }
+
+// Browsers refuse the camera outside a secure context. Say that plainly up
+// front instead of letting the user think the scanner is broken.
+function secureContextOk(){
+  return window.isSecureContext
+      || location.protocol === 'https:'
+      || ['localhost','127.0.0.1'].indexOf(location.hostname) >= 0;
+}
+
+if(!secureContextOk()){
+  showBanner('This page is on <b>http://</b>, and browsers only allow camera access '
+    + 'over <b>https://</b>. The table, photo upload and export all work here; live '
+    + 'scanning does not. Use the https address for scanning.', 'bad');
+  idleTxt.innerHTML = 'Camera is unavailable on this address. <b>Upload photo</b> still works.';
+}
+
+authBtn.addEventListener('click', startCamera);
 
 async function startCamera(){
   stopCamera();
   try{
-    setStatus('Starting camera…','busy');
+    setStatus('Starting camera\u2026','busy');
+    idlePanel.classList.add('hide');
     if(nativeDetector){
-      stream=await navigator.mediaDevices.getUserMedia(
+      stream = await navigator.mediaDevices.getUserMedia(
         {video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
-      vid.srcObject=stream; await vid.play();
-      track=stream.getVideoTracks()[0]; if(track) setupCapabilities();
-      scanning=true; nativeLoop(); startOcrLoop();
-      setStatus('Reading label… hold steady','live');
+      vid.srcObject = stream; await vid.play();
+      track = stream.getVideoTracks()[0]; if(track) setupCapabilities();
+      scanning = true; nativeLoop();
     } else {
-      codeReader=new ZXing.BrowserMultiFormatReader(hints, 200);
+      codeReader = new ZXing.BrowserMultiFormatReader(hints, 200);
       await codeReader.decodeFromConstraints(
         {video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false},
         vid,
-        (result,err)=>{ if(result&&result.getText) onBarcode(result.getText().trim()); }
+        function(result){ if(result && result.getText) onCodes([{value:result.getText().trim(), box:null}]); }
       );
-      scanning=true;
-      stream=vid.srcObject;
-      track=stream?stream.getVideoTracks()[0]:null;
+      scanning = true;
+      stream = vid.srcObject;
+      track = stream ? stream.getVideoTracks()[0] : null;
       if(track) setupCapabilities();
-      startOcrLoop();
-      setStatus('Reading label… hold steady','live');
     }
-  }catch(e){ setStatus('Camera blocked — use Upload photo','busy'); console.error(e); }
+    authBtn.textContent = 'Restart camera';
+    setStatus('Point at a label','live');
+  }catch(e){
+    idlePanel.classList.remove('hide');
+    console.error(e);
+    const denied = e && (e.name==='NotAllowedError' || e.name==='SecurityError');
+    setStatus(denied ? 'Camera permission refused' : 'Camera unavailable','bad');
+    if(denied){
+      showBanner('Camera permission was refused. Allow it in the padlock menu next to '
+        + 'the address, then press <b>Turn on camera</b> again.', 'bad');
+    } else if(secureContextOk()){
+      showBanner('Could not open the camera. Another app may be holding it. '
+        + '<b>Upload photo</b> works meanwhile.', 'warn');
+    }
+  }
 }
 
-// native loop: ~7 checks/sec, ALL barcodes in the frame at once
+function stopCamera(){
+  scanning = false;
+  try{ if(codeReader) codeReader.reset(); }catch(_){}
+  if(stream){ try{ stream.getTracks().forEach(function(t){ t.stop(); }); }catch(_){} stream=null; }
+}
+
+// ~12 checks a second. The native detector returns EVERY barcode in the frame
+// with its position, which is what lets us prove two codes share a label.
+// v4.2 also ran Tesseract in a parallel while-loop; on a phone each pass takes
+// seconds and starved this loop of CPU, which is why reads were being missed.
+// OCR is now only ever run on demand.
 async function nativeLoop(){
   while(scanning){
     try{
       if(vid.videoWidth){
-        const codes=await nativeDetector.detect(vid);
-        if(codes&&codes.length){ for(const c of codes){ if(c.rawValue) onBarcode(c.rawValue.trim()); } }
+        const codes = await nativeDetector.detect(vid);
+        if(codes && codes.length){
+          frameTick++;
+          const tick = frameTick;
+          onCodes(codes.map(function(c){
+            return {value:(c.rawValue||'').trim(), box:c.boundingBox||null};
+          }), tick);
+        }
       }
     }catch(_){}
-    await new Promise(r=>setTimeout(r,80));
+    await new Promise(function(r){ setTimeout(r,80); });
   }
 }
-function stopCamera(){ scanning=false; stopOcrLoop();
-  try{ if(codeReader) codeReader.reset(); }catch(_){}
-  if(stream){ try{stream.getTracks().forEach(t=>t.stop());}catch(_){} stream=null; }
-}
 
-// expose zoom / torch only if the phone camera supports them
 function setupCapabilities(){
-  const caps=track.getCapabilities?track.getCapabilities():{};
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
   if(caps.zoom){
     zoom.min=caps.zoom.min; zoom.max=caps.zoom.max; zoom.step=caps.zoom.step||0.1; zoom.value=caps.zoom.min;
     zoomWrap.style.display='flex';
-    zoom.oninput=()=>track.applyConstraints({advanced:[{zoom:parseFloat(zoom.value)}]}).catch(()=>{});
-  } else { zoomWrap.style.display='none'; }
+    zoom.oninput=function(){ track.applyConstraints({advanced:[{zoom:parseFloat(zoom.value)}]}).catch(function(){}); };
+  } else zoomWrap.style.display='none';
   if(caps.torch){
     torchChip.style.display='block'; let on=false;
-    torchChip.onclick=()=>{on=!on;torchChip.classList.toggle('on',on);
-      track.applyConstraints({advanced:[{torch:on}]}).catch(()=>{});};
-  } else { torchChip.style.display='none'; }
+    torchChip.onclick=function(){ on=!on; torchChip.classList.toggle('on',on);
+      track.applyConstraints({advanced:[{torch:on}]}).catch(function(){}); };
+  } else torchChip.style.display='none';
 }
 
-// pinch-to-zoom directly on the video
 let pinchStart=0, zoomStart=1;
-vid.addEventListener('touchstart',e=>{ if(e.touches.length===2){pinchStart=dist(e.touches);zoomStart=parseFloat(zoom.value)||1;} },{passive:true});
-vid.addEventListener('touchmove',e=>{ if(e.touches.length===2 && zoomWrap.style.display!=='none'){ e.preventDefault();
+vid.addEventListener('touchstart',function(e){ if(e.touches.length===2){ pinchStart=dist(e.touches); zoomStart=parseFloat(zoom.value)||1; } },{passive:true});
+vid.addEventListener('touchmove',function(e){ if(e.touches.length===2 && zoomWrap.style.display!=='none'){ e.preventDefault();
   const f=dist(e.touches)/pinchStart;
-  let z=Math.min(parseFloat(zoom.max),Math.max(parseFloat(zoom.min),zoomStart*f));
-  zoom.value=z; track.applyConstraints({advanced:[{zoom:z}]}).catch(()=>{}); } },{passive:false});
-function dist(t){return Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);}
+  const z=Math.min(parseFloat(zoom.max),Math.max(parseFloat(zoom.min),zoomStart*f));
+  zoom.value=z; track.applyConstraints({advanced:[{zoom:z}]}).catch(function(){}); } },{passive:false});
+function dist(t){ return Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY); }
 
-// nudge continuous autofocus
-focusBtn.addEventListener('click',()=>{ if(!track)return;
-  track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
-  setStatus('Refocusing…','busy'); setTimeout(()=>setStatus('Scanning…','live'),700);
+focusBtn.addEventListener('click',function(){ if(!track) return;
+  track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(function(){});
+  setStatus('Refocusing\u2026','busy'); setTimeout(function(){ setStatus('Point at a label','live'); },700);
 });
 
-// ---- continuous LIVE TEXT READING (v4) --------------------------------------
-// The camera text is the ground truth (barcodes are often damaged). This loop
-// OCRs the central frame region over and over. A mandatory value (Mat/Char) is
-// only accepted once the SAME value has been read in two different frames —
-// frame-voting — so one blurry misread can't land in the table.
-let ocrLoopOn=false;
-const ocrVotes={};            // field -> {value: timesSeen}
-const NEED_VOTES=2;           // frames that must agree for Mat/Char
+autoChip.addEventListener('click',function(){ autoMode=!autoMode; autoChip.classList.toggle('on',autoMode);
+  setStatus(autoMode?'Auto-add on':'Manual \u2014 review every label','live'); });
 
-async function startOcrLoop(){
-  if(ocrLoopOn) return;
-  ocrLoopOn=true;
-  if(!worker){ worker=await Tesseract.createWorker('eng'); await worker.setParameters({tessedit_pageseg_mode:'6'}); }
-  while(ocrLoopOn&&scanning){
-    try{
-      if(vid.videoWidth){
-        const {data}=await worker.recognize(centerCrop(vid));
-        const p=parseOcr(data.text||'');
-        for(const k in p) castVote(k,p[k]);
-      }
-    }catch(_){}
-    await new Promise(r=>setTimeout(r,120));
+// ============================================================================
+//  BARCODE RULES
+//  Order matters and is deliberate: most specific first. In v4.2 the loose Mat
+//  pattern was tested before the L-Char pattern, so a 10-digit L-Char barcode
+//  matched Mat first and was filed as the material number.
+// ============================================================================
+function applyBarcodes(codes, tick){
+  let changed = false;
+  for(const c of codes){
+    const s = (c.value||'').trim(); if(!s) continue;
+    const box = c.box;
+
+    // CH-884843 -> CH-Nr, and the digits are the Char
+    if(/^CH-?\d+$/i.test(s)){
+      const n = s.replace(/^CH-?/i,'');
+      changed = put('CH-Nr','CH-'+n,'bc',box,tick) || changed;
+      changed = put('Char', n,'bc',box,tick) || changed;
+      continue;
+    }
+    // EQ-labels: serialized parts. The EQ number is NOT the Char.
+    if(/^EQ-?\d+$/i.test(s)){
+      changed = put('CH-Nr', s.toUpperCase(),'bc',box,tick) || changed;
+      continue;
+    }
+    // exactly 10 digits -> L-Char. Checked BEFORE the general material shape.
+    if(/^\d{10}$/.test(s)){
+      changed = put('L-Char', s,'bc',box,tick) || changed;
+      continue;
+    }
+    // material: 1-2 letters + 4+ digits + optional suffix, or a bare 6-7 digit
+    // number. A bare 8-9 or 11+ digit number is not a material on these labels.
+    if(/^[A-Z]{1,2}\d{4,}[A-Z0-9-]{0,6}$/i.test(s) || /^\d{6,7}$/.test(s)){
+      changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
+      continue;
+    }
   }
-  ocrLoopOn=false;
+  return changed;
 }
-function stopOcrLoop(){ ocrLoopOn=false; }
 
-// crop to the central region (where the reticle is), upscale + clean for OCR
-function centerCrop(src){
-  const w=src.videoWidth,h=src.videoHeight;
+function onCodes(codes, tick){
+  if(!applyBarcodes(codes, tick)) return;
+  reticle.classList.add('hit');
+  const now = Date.now(); if(now-lastBeep>400){ beep(); lastBeep=now; }
+  setTimeout(function(){ reticle.classList.remove('hit'); },300);
+  evaluate();
+}
+
+// ============================================================================
+//  DECIDE WHAT TO DO WITH THE CURRENT SESSION
+// ============================================================================
+let graceTimer = null;
+
+function evaluate(){
+  const f = session.fields;
+  const hasAll = MANDATORY.every(function(k){ return f[k]; });
+
+  if(!hasAll){
+    reticle.classList.add('partial');
+    const got = MANDATORY.filter(function(k){ return f[k]; });
+    const miss = MANDATORY.filter(function(k){ return !f[k]; });
+    if(got.length){
+      setStatus(got.map(function(k){ return k+' '+f[k].value; }).join(' ')
+                + ' \u2014 need ' + miss.join(', '), 'busy');
+      // Mat from a barcode but no Char: on EQ labels the Char is printed text.
+      if(f['Mat'] && !f['Char'] && autoMode && !ocrBusy) ocrBurst(false);
+    }
+    return;
+  }
+
+  reticle.classList.remove('partial');
+  const proof = proveSameLabel();
+  const chk = checkAgainstMaster(f['Mat'].value, f['Char'].value);
+
+  if(chk.level === 'reject'){
+    reticle.classList.add('reject');
+    setStatus(chk.flags[0], 'bad');
+    splashNo(chk.flags[0]);
+    // Never write it and never keep it. Holding it is how the next label gets
+    // poisoned - which is the bug this whole rebuild exists to prevent.
+    setTimeout(function(){ resetSession('Rejected \u2014 scan the label again'); }, 1500);
+    return;
+  }
+
+  if(!proof.ok){
+    setStatus('Mat and Char may be from different labels \u2014 check', 'bad');
+    openReview(proof, chk);
+    return;
+  }
+
+  if(!autoMode){ openReview(proof, chk); return; }
+
+  setStatus('Reading the rest of the label\u2026','busy');
+  clearTimeout(graceTimer);
+  graceTimer = setTimeout(function(){ commit(proof, chk); }, GRACE_MS);
+}
+
+function sourceLine(get){
+  const bc = COLS.filter(function(c){ return get(c)==='bc'; });
+  const oc = COLS.filter(function(c){ return get(c)==='ocr'; });
+  return (bc.length ? 'barcode: '+bc.join(' ') : '')
+       + (oc.length ? (bc.length?' | ':'') + 'ocr: '+oc.join(' ') : '');
+}
+
+function commit(proof, chk){
+  const f = session.fields, row = {};
+  COLS.forEach(function(c){ row[c] = f[c] ? f[c].value : ''; });
+  row.Source = sourceLine(function(c){ return f[c] ? f[c].src : ''; });
+  row.Proof  = proof ? proof.kind : 'manual';
+  row.Check  = (chk && chk.flags.length) ? chk.flags.join('; ') : (MASTER ? 'ok' : 'not checked');
+  rows.push(row); saveRows(); renderTable();
+  splashOk(row.Mat + '  /  Char ' + row.Char, chk && chk.flags.length);
+  beep(); setTimeout(beep,140);
+  setTimeout(function(){ hideSplash(); resetSession(); setStatus('Row added \u2014 next label','live'); }, 900);
+}
+
+function splashOk(txt, flagged){
+  document.getElementById('splash').className='splash ok show';
+  document.getElementById('splashMark').textContent='\u2713';
+  document.getElementById('splashTxt').textContent = txt + (flagged?'  \u2014 flagged, check it':'');
+}
+function splashNo(txt){
+  document.getElementById('splash').className='splash no show';
+  document.getElementById('splashMark').textContent='\u2715';
+  document.getElementById('splashTxt').textContent = txt;
+  setTimeout(hideSplash,1500);
+}
+function hideSplash(){ document.getElementById('splash').className='splash'; }
+
+function beep(){ try{
+  const a=new (window.AudioContext||window.webkitAudioContext)();
+  const o=a.createOscillator(), g=a.createGain(); o.connect(g); g.connect(a.destination);
+  o.frequency.value=880; g.gain.value=.05; o.start(); setTimeout(function(){ o.stop(); a.close(); },90);
+}catch(_){} }
+
+// ============================================================================
+//  OCR  (on demand only)
+// ============================================================================
+ocrChip.addEventListener('click', function(){ ocrBurst(true); });
+
+async function ensureWorker(){
+  if(!worker){
+    setStatus('Loading text reader\u2026','busy');
+    worker = await Tesseract.createWorker('eng');
+    await worker.setParameters({tessedit_pageseg_mode:'6'});
+  }
+  return worker;
+}
+
+// A value only becomes a mandatory field once two passes agree on it, so a
+// single blurry misread cannot land in the table.
+function vote(field, value){
+  if(!value) return;
+  const f = session.fields;
+  if(f[field] && f[field].src==='bc') return;
+  if(MANDATORY.indexOf(field) < 0){ if(!f[field]) put(field,value,'ocr',null,0); return; }
+  session.votes[field] = session.votes[field] || {};
+  session.votes[field][value] = (session.votes[field][value]||0)+1;
+  if(session.votes[field][value] >= NEED_VOTES) put(field,value,'ocr',null,0);
+}
+
+async function ocrBurst(manual){
+  if(!vid.videoWidth){ setStatus('Turn the camera on first','busy'); return; }
+  if(ocrBusy) return;
+  ocrBusy = true;
+  try{
+    await ensureWorker();
+    setStatus('Reading text \u2014 hold steady\u2026','busy');
+    for(let i=0;i<3;i++){
+      const out = await worker.recognize(cropForOcr(vid));
+      const p = parseOcr((out && out.data && out.data.text) || '');
+      for(const k in p) vote(k, p[k]);
+      await new Promise(function(r){ setTimeout(r,150); });
+    }
+  }catch(e){ console.warn(e); }
+  ocrBusy = false;
+  if(manual) openReview(proveSameLabel(), checkAgainstMaster(val('Mat'), val('Char')));
+  else evaluate();
+}
+function val(k){ return session.fields[k] ? session.fields[k].value : ''; }
+
+function cropForOcr(src){
+  const w=src.videoWidth||src.width, h=src.videoHeight||src.height;
   const mx=Math.round(w*0.06), my=Math.round(h*0.10);
   const cw=w-2*mx, ch=h-2*my;
   const c=document.createElement('canvas');
-  // cap ~1300px on the long side: much faster per pass, still sharp enough
-  const sc=Math.min(1.6, 1300/Math.max(cw,ch));
+  const sc=Math.min(1.8, 1600/Math.max(cw,ch));
   c.width=Math.round(cw*sc); c.height=Math.round(ch*sc);
   const ctx=c.getContext('2d');
-  ctx.filter='grayscale(1) contrast(1.25)';
+  ctx.filter='grayscale(1) contrast(1.3)';
   ctx.drawImage(src,mx,my,cw,ch,0,0,c.width,c.height);
   return c;
 }
 
-// frame-voting: mandatory fields need NEED_VOTES agreeing reads; other fields
-// fill on first read (they're review-card checked anyway). Barcode values are
-// never overwritten — a barcode read is still more certain when available.
-function castVote(field,value){
-  if(!value) return;
-  if(found[field]&&found[field].src==='bc') return;
-  const mandatory=(field==='Mat'||field==='Char');
-  if(!mandatory){ if(!found[field]) found[field]={value,src:'ocr'}; return; }
-  ocrVotes[field]=ocrVotes[field]||{};
-  ocrVotes[field][value]=(ocrVotes[field][value]||0)+1;
-  if(ocrVotes[field][value]>=NEED_VOTES && (!found[field]||found[field].value!==value)){
-    found[field]={value,src:'ocr'};
-    reticle.classList.add('hit'); setTimeout(()=>reticle.classList.remove('hit'),300);
-    beep();
-    checkMandatory();
-  } else if(!found[field]) {
-    // show progress: one read seen, waiting for confirmation
-    statusEl.className='status busy';
-    statusTxt.textContent=field+' '+value+' — confirming…';
+function digitFix(v){ return v.replace(/O/g,'0').replace(/B/g,'8').replace(/S/g,'5').replace(/[Il]/g,'1'); }
+
+function parseOcr(text){
+  const j = text.split(/\n/).map(function(l){ return l.trim(); }).filter(Boolean).join('\n');
+  const out = {};
+  const g = function(re){ const m = j.match(re); return m ? m[1].trim() : ''; };
+  let def = g(/Mat\.?\s*[A-Z0-9-]+\s*\n\s*([A-Z][A-Z0-9 ,.\/-]{3,})/);
+  if(!def){
+    const L = j.split('\n');
+    def = L.find(function(l){
+      return /^[A-Z][A-Z0-9 ,.\/-]{4,}$/.test(l) && !/GRAVITY|SCHWEIZ|BEYOND|PNF|LNR/i.test(l);
+    }) || '';
   }
+  if(def) out.Definition = def;
+  let r;
+  if(r=g(/Rev\.?\s*([A-Z])\b/)) out.Rev=r;
+  if(r=g(/SerNr\.?\s*(\d{2,})/)) out.SerNr=r;
+  if(r=g(/(?:^|\n)\s*[CG]?ha[rl]?\.?\s*[:.]?\s*([0-9OBSIl]{5,7})\b/)) out.Char=digitFix(r);
+  if(r=g(/L-?[CG]?ha[rl]?\.?\s*[:.]?\s*([0-9OBSIl]{4,})/)) out['L-Char']=digitFix(r);
+  if(r=g(/Mat\.?\s*[:.]?\s*([A-Z]{0,2}\d{4,}[A-Z0-9-]{0,6})/i)) out.Mat=r.toUpperCase();
+  if(r=g(/Menge:?\s*\n?\s*(\d{3,})/)) out.Auftr=r;
+  if(r=g(/(\d+\.\d{3})\b/)) out.Menge=r;
+  if(r=g(/\b(ST|PCS|KG|M)\b/)) out.Einheit=r;
+  if(r=g(/Verfallsdatum:?\s*(\d{2}\.\d{2}\.\d{4})/)) out.Verfallsdatum=r;
+  if(r=g(/(CH-?\d{5,})/)) out['CH-Nr'] = r.replace(/^CH-?/,'CH-');
+  if(r=g(/(EQ-?\d{5,})/)) out['CH-Nr'] = out['CH-Nr'] || r;
+  return out;
 }
 
-
-let lastBeep=0, lastAdded='', autoMode=true, ocrBusy=false;
-const autoChip=document.getElementById('autoChip');
-autoChip.addEventListener('click',()=>{autoMode=!autoMode;autoChip.classList.toggle('on',autoMode);
-  setStatus(autoMode?'Auto-add ON — Mat+Char adds the row':'Manual mode — review each label','live');});
-
-function onBarcode(text){
-  const before=JSON.stringify(found);
-  applyBarcodes([text],found);
-  if(JSON.stringify(found)===before) return;   // nothing new
-  reticle.classList.add('hit');
-  const now=Date.now(); if(now-lastBeep>400){beep();lastBeep=now;}
-  setTimeout(()=>reticle.classList.remove('hit'),300);
-  checkMandatory();
-  if(!autoMode) showReviewFromFound();
-}
-
-// mandatory = Mat + Char. Both caught -> green splash + auto-add. Only one ->
-// amber border; if Mat is there but Char isn't (EQ-label), auto-run OCR to
-// try to read the printed Char line.
-function checkMandatory(){
-  const hasMat=!!found['Mat'], hasChar=!!found['Char'];
-  if(hasMat&&hasChar){
-    reticle.classList.remove('partial');
-    if(autoMode){
-      const key=found['Mat'].value+'|'+found['Char'].value;
-      if(key!==lastAdded){ lastAdded=key;
-        // grace window: keep reading ~1.2s so Definition / SerNr / L-Char /
-        // Auftr / Menge from the same label land in this row too, then add.
-        setStatus('Mat+Char caught — grabbing details…','busy');
-        setTimeout(autoAdd,800);
-      }
+// ============================================================================
+//  UPLOAD  (works with no camera, so it also works on http://)
+// ============================================================================
+fileBtn.addEventListener('click', function(){ fileInput.click(); });
+fileInput.addEventListener('change', function(e){
+  const file = e.target.files[0]; if(!file) return;
+  resetSession();
+  const img = new Image();
+  img.onload = async function(){
+    setStatus('Reading photo\u2026','busy');
+    const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight;
+    c.getContext('2d').drawImage(img,0,0);
+    // one still = one label, so everything read here shares a tick
+    const tick = ++frameTick;
+    for(const deg of [0,90,180,270]){
+      try{
+        const rc = rotateCanvas(c,deg);
+        const el = new Image(); el.src = rc.toDataURL('image/png');
+        await el.decode().catch(function(){});
+        const rd = new ZXing.BrowserMultiFormatReader();
+        const res = await rd.decodeFromImageElement(el).catch(function(){ return null; });
+        if(res && res.text) applyBarcodes([{value:res.text.trim(), box:null}], tick);
+      }catch(_){}
     }
-    return;
-  }
-  if(hasMat||hasChar){
-    reticle.classList.add('partial');
-    statusEl.className='status busy';
-    statusTxt.textContent=hasMat?('Mat '+found['Mat'].value+' — need Char'):('Char '+found['Char'].value+' — need Mat');
-    // EQ-label case: Mat caught by barcode but Char is printed text only
-    if(hasMat&&!hasChar&&autoMode&&!ocrBusy) autoOcrForChar();
-  }
-}
+    try{
+      await ensureWorker();
+      const out = await worker.recognize(upscale(c));
+      const p = parseOcr((out && out.data && out.data.text) || '');
+      for(const k in p) if(!session.fields[k]) put(k,p[k],'ocr',null,tick);
+    }catch(_){}
+    openReview(proveSameLabel(), checkAgainstMaster(val('Mat'), val('Char')));
+    setStatus(scanning?'Point at a label':'Photo read', scanning?'live':'');
+  };
+  img.src = URL.createObjectURL(file); fileInput.value='';
+});
 
-async function autoOcrForChar(){
-  ocrBusy=true;
-  try{
-    if(!worker) worker=await Tesseract.createWorker('eng');
-    for(let i=0;i<3&&!found['Char'];i++){
-      const {data}=await worker.recognize(grabUpscaled(vid));
-      const p=parseOcr(data.text||'');
-      if(p.Char){ found['Char']={value:p.Char,src:'ocr'}; }
-      // opportunistic: keep other OCR fields too
-      for(const k in p){ if(!found[k]) found[k]={value:p[k],src:'ocr'}; }
-      await new Promise(r=>setTimeout(r,200));
-    }
-  }catch(_){}
-  ocrBusy=false;
-  checkMandatory();
-}
-
-function autoAdd(){
-  const row={}; COLS.forEach(c=>row[c]=found[c]?found[c].value:'');
-  rows.push(row); saveRows(); renderTable();
-  // green full-screen splash so you can see it from arm's length
-  const splash=document.getElementById('doneSplash');
-  document.getElementById('doneTxt').textContent=row['Mat']+'  /  Char '+row['Char'];
-  splash.classList.add('show');
-  beep(); setTimeout(beep,140);
-  setTimeout(()=>{ splash.classList.remove('show');
-    found={}; current=null; review.classList.remove('show');
-    for(const k in ocrVotes) delete ocrVotes[k];
-    setStatus('Row added — next tag','live'); },900);
-}
-function beep(){try{const a=new (window.AudioContext||window.webkitAudioContext)();
-  const o=a.createOscillator();const g=a.createGain();o.connect(g);g.connect(a.destination);
-  o.frequency.value=880;g.gain.value=.05;o.start();setTimeout(()=>{o.stop();a.close();},90);}catch(_){}}
-
-// ---- OCR: on-demand, multi-frame burst --------------------------------------
-let worker=null;
-ocrChip.addEventListener('click',()=>runOcrBurst());
-async function runOcrBurst(){
-  if(!vid.videoWidth){ setStatus('Start the camera first','busy'); return; }
-  setStatus('Reading text — hold steady…','busy');
-  if(!worker){ worker=await Tesseract.createWorker('eng'); }
-  const agg={};   // per-field best-confidence value across frames
-  for(let i=0;i<3;i++){
-    const c=grabUpscaled(vid);
-    const {data}=await worker.recognize(c);
-    mergeOcr(parseOcr(data.text||''), data.confidence||0, agg);
-    await new Promise(r=>setTimeout(r,180));
-  }
-  for(const k in agg){ if(!found[k]||found[k].src!=='bc') found[k]={value:agg[k].value,src:'ocr'}; }
-  showReviewFromFound();
-  setStatus('Scanning…','live');
-}
-function grabUpscaled(src){
-  const w=src.videoWidth||src.width, h=src.videoHeight||src.height;
-  const c=document.createElement('canvas'); const sc=Math.min(2,2200/Math.max(w,h)+0.001);
+function upscale(src){
+  const w=src.width, h=src.height;
+  const c=document.createElement('canvas'); const sc=Math.min(2, 2200/Math.max(w,h)+0.001);
   c.width=w*sc; c.height=h*sc;
   const ctx=c.getContext('2d'); ctx.filter='grayscale(1) contrast(1.2)'; ctx.drawImage(src,0,0,c.width,c.height);
   return c;
 }
-function mergeOcr(fields,conf,agg){for(const k in fields){if(!agg[k]||conf>agg[k].conf)agg[k]={value:fields[k],conf};}}
-
-// ---- upload path (works even without camera permission) --------------------
-fileBtn.addEventListener('click',()=>fileInput.click());
-fileInput.addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;
-  const img=new Image();
-  img.onload=async()=>{
-    setStatus('Reading photo…','busy');
-    const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;
-    c.getContext('2d').drawImage(img,0,0);
-    // barcodes from the still (try a few rotations)
-    for(const deg of [0,90,180,270]){
-      try{
-        const rc=rotateCanvas(c,deg);
-        const el=new Image(); el.src=rc.toDataURL('image/png'); await el.decode().catch(()=>{});
-        const r=new ZXing.BrowserMultiFormatReader();
-        const res=await r.decodeFromImageElement(el).catch(()=>null);
-        if(res&&res.text) applyBarcodes([res.text.trim()],found);
-      }catch(_){}
-    }
-    if(!worker) worker=await Tesseract.createWorker('eng');
-    const {data}=await worker.recognize(grabUpscaled(c));
-    const p=parseOcr(data.text||'');
-    for(const k in p){ if(!found[k]||found[k].src!=='bc') found[k]={value:p[k],src:'ocr'}; }
-    showReviewFromFound();
-    setStatus(scanning?'Scanning…':'Photo read','live');
-  };
-  img.src=URL.createObjectURL(f); fileInput.value='';
-});
 function rotateCanvas(src,deg){
-  if(deg===0)return src;
-  const c=document.createElement('canvas');const ctx=c.getContext('2d');
-  if(deg===180){c.width=src.width;c.height=src.height;ctx.translate(c.width,c.height);ctx.rotate(Math.PI);}
-  else{c.width=src.height;c.height=src.width;ctx.translate(c.width/2,c.height/2);ctx.rotate(deg*Math.PI/180);ctx.translate(-src.width/2,-src.height/2);}
-  ctx.drawImage(src,0,0);return c;
+  if(deg===0) return src;
+  const c=document.createElement('canvas'), ctx=c.getContext('2d');
+  if(deg===180){ c.width=src.width; c.height=src.height; ctx.translate(c.width,c.height); ctx.rotate(Math.PI); }
+  else { c.width=src.height; c.height=src.width; ctx.translate(c.width/2,c.height/2);
+         ctx.rotate(deg*Math.PI/180); ctx.translate(-src.width/2,-src.height/2); }
+  ctx.drawImage(src,0,0); return c;
 }
 
-// ---- field extraction rules -------------------------------------------------
-// Barcode rules (reliable, green dot). Add rules here for new code shapes.
-function applyBarcodes(codes,found){
-  for(const raw of codes){ const s=raw.trim();
-    // CH-884843 barcode == Char. 884843 on the label (verified on screw label)
-    if(/^CH-?\d+/i.test(s)){ found['CH-Nr']={value:s.replace(/^CH-?/i,'CH-'),src:'bc'};
-      const n=s.replace(/^CH-?/i,''); if(/^\d+$/.test(n))found['Char']={value:n,src:'bc'}; continue; }
-    // EQ-labels (serialized parts): EQ number is NOT the Char — Char must come from OCR
-    if(/^EQ-?\d+/i.test(s)){ found['CH-Nr']={value:s,src:'bc'}; continue; }
-    if(/^[A-Z]{0,2}\d{4,}[A-Z0-9-]*$/i.test(s)&&!found['Mat']){ found['Mat']={value:s,src:'bc'}; continue; }
-    if(/^\d{10}$/.test(s)&&!found['L-Char']){ found['L-Char']={value:s,src:'bc'}; continue; }
-  }
-}
-// OCR rules (amber dot). THIS is what you tune per label variant.
-// repair classic OCR digit confusions in numeric fields
-function digitFix(v){return v.replace(/O/g,'0').replace(/B/g,'8').replace(/S/g,'5').replace(/[Il]/g,'1');}
-function parseOcr(text){
-  const j=text.split(/\n/).map(l=>l.trim()).filter(Boolean).join('\n'); const out={};
-  const g=re=>{const m=j.match(re);return m?m[1].trim():'';};
-  let def=g(/Mat\.?\s*[A-Z0-9-]+\s*\n\s*([A-Z][A-Z0-9 ,.\/-]{3,})/);
-  if(!def){const lines=j.split('\n');def=lines.find(l=>/^[A-Z][A-Z0-9 ,.\/-]{4,}$/.test(l)&&!/GRAVITY|SCHWEIZ|BEYOND|PNF|LNR/i.test(l))||'';}
-  if(def)out.Definition=def;
-  let r;
-  if(r=g(/Rev\.?\s*([A-Z])\b/))out.Rev=r;
-  if(r=g(/SerNr\.?\s*(\d{2,})/))out.SerNr=r;
-  // Char.: tolerate broken print — "Char." may read as "har.", "Chal", "Ghar";
-  // digits may read as letters (O/B/S/I). digitFix repairs them.
-  if(r=g(/(?:^|\n)\s*[CG]?ha[rl]?\.?\s*[:.]?\s*([0-9OBSIl]{5,7})\b/))out.Char=digitFix(r);
-  if(r=g(/L-?[CG]?ha[rl]?\.?\s*[:.]?\s*([0-9OBSIl]{4,})/))out['L-Char']=digitFix(r);
-  // Mat.: letters+digits code straight after the word Mat (N3508108X, CN400190-R, 3007458)
-  if(r=g(/Mat\.?\s*[:.]?\s*([A-Z]{0,2}\d{4,}[A-Z0-9-]{0,6})/i))out.Mat=out.Mat||r.toUpperCase();
-  if(r=g(/Menge:?\s*\n?\s*(\d{3,})/))out.Auftr=r;
-  if(r=g(/(\d+\.\d{3})\b/))out.Menge=r;
-  if(r=g(/\b(ST|PCS|KG|M)\b/))out.Einheit=r;
-  if(r=g(/Verfallsdatum:?\s*(\d{2}\.\d{2}\.\d{4})/))out.Verfallsdatum=r;
-  if(r=g(/(CH-?\d{5,})/))out['CH-Nr']=out['CH-Nr']||r.replace(/^CH-?/,'CH-');
-  if(r=g(/(EQ-?\d{5,})/))out['CH-Nr']=out['CH-Nr']||r;
-  return out;
-}
+// ============================================================================
+//  REVIEW CARD
+// ============================================================================
+const PROOF_TEXT = {
+  'same-frame':'Both codes were read in one camera frame.',
+  'near':'Read moments apart, in the same place on the label.',
+  'time-only':'Read moments apart. The browser could not tell us where on the label these came from, so this is not proven \u2014 check the two values belong together.',
+  'split':'These values were read at different times or in different places. They may be from TWO DIFFERENT LABELS. Check before adding.',
+  'incomplete':'A mandatory value is missing.'
+};
 
-// ---- review card (updates live as fields get caught) ------------------------
-function showReviewFromFound(){
-  current={}; COLS.forEach(c=>current[c]=found[c]?{...found[c]}:{value:'',src:''});
+function openReview(proof, chk){
+  current = {};
+  ALL_COLS.forEach(function(c){
+    const f = session.fields[c];
+    current[c] = f ? {value:f.value, src:f.src} : {value:'', src:''};
+  });
+  current._proof = proof; current._chk = chk;
+
+  const bad  = (chk && chk.level==='reject') || (proof && !proof.ok && proof.kind==='split');
+  const warn = (chk && chk.level==='warn')   || (proof && proof.kind==='time-only');
+  review.className = 'review show' + (bad?' alarm':'');
+
+  const msgs = [];
+  if(proof && PROOF_TEXT[proof.kind] && proof.kind!=='same-frame' && proof.kind!=='near')
+    msgs.push(PROOF_TEXT[proof.kind]);
+  if(chk && chk.flags.length) msgs.push(chk.flags.join('. '));
+  if(msgs.length){ rnote.className = 'rnote show ' + (bad?'bad':'warn'); rnote.innerHTML = msgs.join('<br>'); }
+  else rnote.className = 'rnote';
+
   fieldsEl.innerHTML='';
-  COLS.forEach(col=>{const f=current[col];const cls=f.src==='bc'?'src-bc':(f.src==='ocr'?'src-ocr':'');
-    const row=document.createElement('div');row.className='field '+cls;
-    row.innerHTML=`<label>${col}</label><input data-col="${col}" value="${(f.value||'').replace(/"/g,'&quot;')}" spellcheck="false">`;
-    fieldsEl.appendChild(row);});
-  review.classList.add('show');
+  COLS.forEach(function(col){
+    const f = current[col];
+    let cls = f.src==='bc' ? 'src-bc' : (f.src==='ocr' ? 'src-ocr' : '');
+    if(chk && chk.level==='reject' && (col==='Mat'||col==='Char')) cls += ' rejected';
+    else if(warn && (col==='Mat'||col==='Char')) cls += ' flagged';
+    const row = document.createElement('div');
+    row.className = 'field '+cls;
+    row.innerHTML = '<label>'+col+'</label><input data-col="'+col+'" value="'
+      + (f.value||'').replace(/"/g,'&quot;') + '" spellcheck="false">';
+    fieldsEl.appendChild(row);
+  });
+  review.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
-fieldsEl.addEventListener('input',e=>{const col=e.target.dataset.col;if(col&&current)current[col].value=e.target.value;});
-addBtn.addEventListener('click',()=>{ if(!current)return;
-  const row={};COLS.forEach(c=>row[c]=current[c].value);rows.push(row);
-  current=null;found={};review.classList.remove('show');saveRows();renderTable();
-  setStatus('Row added — next label','live');
-});
-discardBtn.addEventListener('click',()=>{current=null;found={};review.classList.remove('show');
-  setStatus(scanning?'Scanning…':'Camera off',scanning?'live':'');});
 
-// ---- table + export ----------------------------------------------------------
+fieldsEl.addEventListener('input', function(e){
+  const col = e.target.dataset.col;
+  if(col && current) current[col].value = e.target.value;
+});
+
+// Hand-edited values are re-checked. Typing over a rejected pairing does not
+// make it acceptable unless the corrected values actually agree.
+addBtn.addEventListener('click', function(){
+  if(!current) return;
+  const chk = checkAgainstMaster(current['Mat'].value, current['Char'].value);
+  if(chk.level==='reject'){
+    rnote.className='rnote show bad';
+    rnote.innerHTML = chk.flags.join('. ') + '<br>Correct the values before adding.';
+    return;
+  }
+  const row = {};
+  COLS.forEach(function(c){ row[c] = current[c].value; });
+  row.Source = sourceLine(function(c){ return current[c].src; });
+  row.Proof  = (current._proof ? current._proof.kind : 'manual') + ' (confirmed by user)';
+  row.Check  = chk.flags.length ? chk.flags.join('; ') : (MASTER ? 'ok' : 'not checked');
+  rows.push(row); saveRows(); renderTable();
+  current=null; resetSession(); review.className='review';
+  setStatus('Row added \u2014 next label','live');
+});
+
+discardBtn.addEventListener('click', function(){
+  current=null; resetSession(); review.className='review';
+  setStatus(scanning?'Point at a label':'Camera off', scanning?'live':'');
+});
+
+// ============================================================================
+//  TABLE + EXPORT
+// ============================================================================
 function renderTable(){
-  document.getElementById('cnt').textContent=rows.length;
-  document.getElementById('head').innerHTML='<th></th>'+COLS.map(c=>`<th>${c}</th>`).join('');
-  const body=document.getElementById('body');
-  if(!rows.length){body.innerHTML=`<tr><td class="empty" colspan="${COLS.length+1}">No rows yet. Point the camera at a label.</td></tr>`;return;}
-  body.innerHTML=rows.map((r,i)=>`<tr><td class="del" data-i="${i}">&#10005;</td>`+COLS.map(c=>`<td>${(r[c]||'').replace(/</g,'&lt;')}</td>`).join('')+'</tr>').join('');
+  document.getElementById('cnt').textContent = rows.length;
+  document.getElementById('head').innerHTML = '<th></th>'
+    + ALL_COLS.map(function(c){ return '<th>'+c+'</th>'; }).join('');
+  const body = document.getElementById('body');
+  if(!rows.length){
+    body.innerHTML = '<tr><td class="empty" colspan="'+(ALL_COLS.length+1)+'">No rows yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(function(r,i){
+    const flagged = r.Check && r.Check!=='ok' && r.Check!=='not checked';
+    return '<tr><td class="del" data-i="'+i+'">&#10005;</td>' + ALL_COLS.map(function(c){
+      const v = (r[c]||'').toString().replace(/</g,'&lt;');
+      const cls = ((c==='Check' && flagged) || (c==='Proof' && /split|time-only/.test(r[c]||'')))
+                  ? ' class="flag"' : '';
+      return '<td'+cls+'>'+v+'</td>';
+    }).join('') + '</tr>';
+  }).join('');
 }
-document.getElementById('body').addEventListener('click',e=>{const i=e.target.dataset.i;if(i!==undefined){rows.splice(+i,1);saveRows();renderTable();}});
-exportBtn.addEventListener('click',()=>{ if(!rows.length){setStatus('Nothing to export yet');return;}
-  const ws=XLSX.utils.json_to_sheet(rows,{header:COLS});const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Labels');
-  XLSX.writeFile(wb,`WAE_labels_${new Date().toISOString().slice(0,10)}.xlsx`);
-});
-clearBtn.addEventListener('click',()=>{if(confirm('Clear all rows?')){rows.length=0;saveRows();renderTable();}});
 
-startBtn.addEventListener('click',startCamera);
+document.getElementById('body').addEventListener('click', function(e){
+  const i = e.target.dataset.i;
+  if(i!==undefined){ rows.splice(+i,1); saveRows(); renderTable(); }
+});
+
+exportBtn.addEventListener('click', function(){
+  if(!rows.length){ setStatus('Nothing to export yet'); return; }
+  const ws = XLSX.utils.json_to_sheet(rows, {header: ALL_COLS});
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Labels');
+  XLSX.writeFile(wb, 'WAE_labels_' + new Date().toISOString().slice(0,10) + '.xlsx');
+});
+
+clearBtn.addEventListener('click', function(){
+  if(confirm('Clear all rows?')){ rows.length=0; saveRows(); renderTable(); }
+});
+
 renderTable();
-startCamera();   // auto-start on page load
+loadMaster();
 </script>
 </body>
 </html>
