@@ -202,7 +202,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v5.0';
+const VERSION = 'v5.1';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -258,10 +258,16 @@ document.getElementById('freshBtn').addEventListener('click', async()=>{
 //  Absent or unreadable -> the scanner still works, validation switches off and
 //  says so. It must never be the reason a label cannot be scanned.
 // ============================================================================
+//  THE MASTER CHECKS MATERIAL NUMBERS ONLY, AND ALWAYS WILL.
+//  A batch is assigned by the production order at build time. No BOM states
+//  which batch was consumed, so a batch can never be validated against a
+//  material from design data - any such check would reject every new batch.
+//  A correct batch therefore depends entirely on reading the right label and
+//  proving the values came off it. That is what the reticle gate, the conflict
+//  check and the label session below are for.
 let MASTER = null;
 const matIndex = new Map();     // normalised material -> entry
 const designOnly = new Set();
-const pairIndex = new Map();    // normalised batch -> material
 
 function normId(v){
   if(v===null||v===undefined) return '';
@@ -277,17 +283,10 @@ async function loadMaster(){
     MASTER = await res.json();
     (MASTER.materials||[]).forEach(m=>matIndex.set(normId(m.material), m));
     (MASTER.design_only||[]).forEach(m=>designOnly.add(normId(m)));
-    (MASTER.pairs||[]).forEach(p=>pairIndex.set(normId(p.batch), normId(p.material)));
     const mode = MASTER.mode==='strict' ? 'strict' : 'warn';
     MASTER.mode = mode;
     masterLine.className = 'masterline';
-    masterLine.innerHTML = 'master list <b>'+matIndex.size+'</b> materials &middot; '
-      + '<b>'+pairIndex.size+'</b> batch pairs &middot; mode <b>'+mode+'</b>';
-    if(pairIndex.size === 0){
-      showBanner('Master list has <b>no batch pairs</b>. Material numbers are checked, '
-        + 'but a batch cannot be verified against its material yet. '
-        + 'Same-label proof is the only thing preventing a mixed row.', 'warn');
-    }
+    masterLine.innerHTML = 'master list <b>'+matIndex.size+'</b> materials &middot; mode <b>'+mode+'</b>';
   }catch(e){
     masterLine.className = 'masterline off';
     masterLine.innerHTML = 'master list <b>not loaded</b> &mdash; values are not checked';
@@ -296,29 +295,17 @@ async function loadMaster(){
 }
 
 // A material is known / design-only / unknown. In warn mode an unknown material
-// is flagged and kept; in strict mode it blocks the row. A batch that the master
-// says belongs to a DIFFERENT material is rejected in BOTH modes - that is the
-// exact failure this rebuild exists to prevent, and it is never a warning.
-function checkAgainstMaster(mat, batch){
+// is flagged and kept; in strict mode it blocks the row. The batch is never
+// judged here - see the note above.
+function checkAgainstMaster(mat){
   if(!MASTER) return {level:'none', flags:[]};
-  const flags = []; let level = 'ok';
-  const m = normId(mat), b = normId(batch);
-
-  if(m){
-    if(!matIndex.has(m)){
-      if(designOnly.has(m)){ flags.push('design-only material'); level='warn'; }
-      else if(MASTER.mode==='strict'){ flags.push('material not in master'); level='reject'; }
-      else { flags.push('material not in master'); level='warn'; }
-    }
-  }
-  if(m && b && pairIndex.has(b)){
-    const owner = pairIndex.get(b);
-    if(owner !== m){
-      flags.push('batch '+b+' belongs to '+owner);
-      level = 'reject';
-    }
-  }
-  return {level, flags};
+  const m = normId(mat);
+  if(!m || matIndex.has(m)) return {level:'ok', flags:[]};
+  if(designOnly.has(m)) return {level:'warn', flags:['design-only material']};
+  return {
+    level: MASTER.mode==='strict' ? 'reject' : 'warn',
+    flags: ['material not in master']
+  };
 }
 
 // ============================================================================
@@ -327,7 +314,7 @@ function checkAgainstMaster(mat, batch){
 //  where the browser gave us one, where in the frame it was read.
 // ============================================================================
 let session = newSession();
-function newSession(){ return {fields:{}, startedAt:0, lastAt:0, votes:{}}; }
+function newSession(){ return {fields:{}, startedAt:0, lastAt:0, votes:{}, conflict:null}; }
 
 function resetSession(reason){
   const had = Object.keys(session.fields).length;
@@ -342,9 +329,19 @@ function put(field, value, src, box, tick){
   if(!value) return false;
   const now = Date.now();
   const prev = session.fields[field];
-  // a barcode is never overwritten by OCR; barcode-by-barcode is allowed
+  // a barcode is never overwritten by OCR
   if(prev && prev.src==='bc' && src!=='bc') return false;
   if(prev && prev.value===value){ prev.t=now; session.lastAt=now; return false; }
+  // TWO BARCODES, SAME FIELD, DIFFERENT VALUES.
+  // Before v5.1 the newer one silently replaced the older, which is exactly how
+  // one label's value ends up on another label's row. It is not a better read -
+  // it is evidence that more than one label is being seen. Keep the first,
+  // record the disagreement, and let evaluate() send it to review.
+  if(prev && prev.src==='bc' && src==='bc'){
+    session.conflict = {field:field, kept:prev.value, other:value};
+    session.lastAt = now;
+    return true;
+  }
   if(!session.startedAt) session.startedAt = now;
   session.fields[field] = {value:value, src:src, t:now, box:box||null, tick:(tick||0)};
   session.lastAt = now;
@@ -362,6 +359,40 @@ setInterval(function(){
     resetSession('Part-read label cleared \u2014 start again');
   }
 }, 400);
+
+// ---- the reticle is a GATE, not decoration ---------------------------------
+// Until v5.1 the green box meant nothing: a barcode anywhere in frame was read.
+// With two labels side by side the detector returned both in ONE detect() call,
+// so they shared a frame tick and passed as "same-frame" - the strongest proof
+// the scanner has - while actually being two different labels. Aiming now
+// decides what gets read.
+//
+// The video is drawn with object-fit:cover, so the element crops the frame.
+// This converts the reticle's on-screen rectangle back into video pixels.
+const RET_INSET_X = 0.08, RET_INSET_Y = 0.14;   // must match .reticle CSS inset
+
+function reticleRectInVideo(){
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  if(!vw || !vh) return null;
+  const W = vid.clientWidth, H = vid.clientHeight;
+  if(!W || !H) return null;
+  const scale = Math.max(W/vw, H/vh);          // cover
+  const offX = (vw*scale - W)/2, offY = (vh*scale - H)/2;
+  const toVid = (sx,sy)=>({x:(sx+offX)/scale, y:(sy+offY)/scale});
+  const a = toVid(W*RET_INSET_X, H*RET_INSET_Y);
+  const b = toVid(W*(1-RET_INSET_X), H*(1-RET_INSET_Y));
+  return {x1:a.x, y1:a.y, x2:b.x, y2:b.y};
+}
+
+// true inside, false outside, null when we cannot tell (no box from the
+// decoder). Null must not be treated as inside - it is recorded instead.
+function insideReticle(box){
+  if(!box) return null;
+  const r = reticleRectInVideo();
+  if(!r) return null;
+  const cx = box.x + box.width/2, cy = box.y + box.height/2;
+  return cx >= r.x1 && cx <= r.x2 && cy >= r.y1 && cy <= r.y2;
+}
 
 function boxesCohere(a,b){
   if(!a||!b) return null;                 // unknown, not false
@@ -532,9 +563,15 @@ autoChip.addEventListener('click',function(){ autoMode=!autoMode; autoChip.class
 // ============================================================================
 function applyBarcodes(codes, tick){
   let changed = false;
+  let ignored = 0;
   for(const c of codes){
     const s = (c.value||'').trim(); if(!s) continue;
     const box = c.box;
+
+    // aim gate: a code sitting outside the green box belongs to a label the
+    // operator is not pointing at. null = decoder gave no position, so the
+    // gate cannot be applied and the code is allowed through.
+    if(insideReticle(box) === false){ ignored++; continue; }
 
     // CH-884843 -> CH-Nr, and the digits are the Char
     if(/^CH-?\d+$/i.test(s)){
@@ -560,6 +597,7 @@ function applyBarcodes(codes, tick){
       continue;
     }
   }
+  if(ignored && !changed) setStatus(ignored+' code(s) outside the box \u2014 aim at one label','busy');
   return changed;
 }
 
@@ -578,6 +616,15 @@ let graceTimer = null;
 
 function evaluate(){
   const f = session.fields;
+
+  // Two labels seen. Never auto-add; the operator decides which one is in hand.
+  if(session.conflict){
+    reticle.classList.add('reject');
+    setStatus('Two different '+session.conflict.field+' codes seen \u2014 check','bad');
+    openReview({ok:false, kind:'conflict'}, checkAgainstMaster(f['Mat'] ? f['Mat'].value : ''));
+    return;
+  }
+
   const hasAll = MANDATORY.every(function(k){ return f[k]; });
 
   if(!hasAll){
@@ -595,7 +642,7 @@ function evaluate(){
 
   reticle.classList.remove('partial');
   const proof = proveSameLabel();
-  const chk = checkAgainstMaster(f['Mat'].value, f['Char'].value);
+  const chk = checkAgainstMaster(f['Mat'].value);
 
   if(chk.level === 'reject'){
     reticle.classList.add('reject');
@@ -699,7 +746,7 @@ async function ocrBurst(manual){
     }
   }catch(e){ console.warn(e); }
   ocrBusy = false;
-  if(manual) openReview(proveSameLabel(), checkAgainstMaster(val('Mat'), val('Char')));
+  if(manual) openReview(proveSameLabel(), checkAgainstMaster(val('Mat')));
   else evaluate();
 }
 function val(k){ return session.fields[k] ? session.fields[k].value : ''; }
@@ -776,7 +823,7 @@ fileInput.addEventListener('change', function(e){
       const p = parseOcr((out && out.data && out.data.text) || '');
       for(const k in p) if(!session.fields[k]) put(k,p[k],'ocr',null,tick);
     }catch(_){}
-    openReview(proveSameLabel(), checkAgainstMaster(val('Mat'), val('Char')));
+    openReview(proveSameLabel(), checkAgainstMaster(val('Mat')));
     setStatus(scanning?'Point at a label':'Photo read', scanning?'live':'');
   };
   img.src = URL.createObjectURL(file); fileInput.value='';
@@ -806,6 +853,7 @@ const PROOF_TEXT = {
   'near':'Read moments apart, in the same place on the label.',
   'time-only':'Read moments apart. The browser could not tell us where on the label these came from, so this is not proven \u2014 check the two values belong together.',
   'split':'These values were read at different times or in different places. They may be from TWO DIFFERENT LABELS. Check before adding.',
+  'conflict':'TWO DIFFERENT LABELS were seen. Move the other label out of view, point at one label only, and scan again.',
   'incomplete':'A mandatory value is missing.'
 };
 
@@ -817,13 +865,18 @@ function openReview(proof, chk){
   });
   current._proof = proof; current._chk = chk;
 
-  const bad  = (chk && chk.level==='reject') || (proof && !proof.ok && proof.kind==='split');
+  const bad  = (chk && chk.level==='reject')
+            || (proof && !proof.ok && (proof.kind==='split' || proof.kind==='conflict'));
   const warn = (chk && chk.level==='warn')   || (proof && proof.kind==='time-only');
   review.className = 'review show' + (bad?' alarm':'');
 
   const msgs = [];
   if(proof && PROOF_TEXT[proof.kind] && proof.kind!=='same-frame' && proof.kind!=='near')
     msgs.push(PROOF_TEXT[proof.kind]);
+  if(session.conflict){
+    msgs.push('Kept <b>'+session.conflict.field+' '+session.conflict.kept
+      + '</b>; also saw <b>'+session.conflict.other+'</b>.');
+  }
   if(chk && chk.flags.length) msgs.push(chk.flags.join('. '));
   if(msgs.length){ rnote.className = 'rnote show ' + (bad?'bad':'warn'); rnote.innerHTML = msgs.join('<br>'); }
   else rnote.className = 'rnote';
@@ -852,7 +905,7 @@ fieldsEl.addEventListener('input', function(e){
 // make it acceptable unless the corrected values actually agree.
 addBtn.addEventListener('click', function(){
   if(!current) return;
-  const chk = checkAgainstMaster(current['Mat'].value, current['Char'].value);
+  const chk = checkAgainstMaster(current['Mat'].value);
   if(chk.level==='reject'){
     rnote.className='rnote show bad';
     rnote.innerHTML = chk.flags.join('. ') + '<br>Correct the values before adding.';
