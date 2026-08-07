@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>WAE Label Scanner</title>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0E1116; --panel:#161B22; --panel-2:#1C232D; --line:#2A3441;
+    --ink:#E8EDF2; --ink-dim:#8B98A8; --signal:#35E0A1; --warn:#FFB454; --bad:#FF6B6B;
+    --mono:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;
+    --sans:-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+  body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);}
+  header{display:flex;align-items:baseline;gap:10px;padding:14px 16px 10px;border-bottom:1px solid var(--line);}
+  header .tag{font-family:var(--mono);font-size:11px;letter-spacing:2px;color:var(--bg);background:var(--signal);padding:3px 7px;border-radius:3px;font-weight:700;}
+  header h1{font-size:15px;font-weight:600;margin:0;}
+  header .ver{font-family:var(--mono);font-size:10px;color:var(--ink-dim);border:1px solid var(--line);border-radius:10px;padding:2px 7px;}
+  header .count{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink-dim);}
+  header .count b{color:var(--signal);font-size:15px;}
+  .wrap{padding:12px;max-width:640px;margin:0 auto;}
+
+  /* camera stage */
+  .stage{position:relative;border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--line);aspect-ratio:3/4;max-height:56vh;margin:0 auto;}
+  video{width:100%;height:100%;object-fit:cover;display:block;}
+  .reticle{position:absolute;inset:14% 8%;border:2px solid var(--signal);border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.32);pointer-events:none;opacity:.9;transition:border-color .2s;}
+  .reticle.hit{border-color:#fff;}
+  .reticle::before{content:"";position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--signal),transparent);animation:sweep 2.2s ease-in-out infinite;}
+  @keyframes sweep{0%,100%{top:3%}50%{top:95%}}
+  @media (prefers-reduced-motion:reduce){.reticle::before{animation:none;top:50%}}
+
+  .status{position:absolute;left:10px;right:10px;bottom:10px;font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(14,17,22,.78);backdrop-filter:blur(6px);padding:7px 10px;border-radius:8px;border:1px solid var(--line);}
+  .status .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink-dim);margin-right:7px;vertical-align:1px;}
+  .status.live .dot{background:var(--signal);box-shadow:0 0 8px var(--signal);}
+  .status.busy .dot{background:var(--warn);}
+  .status.hit .dot{background:#fff;box-shadow:0 0 8px #fff;}
+
+  /* overlaid camera tools: torch, OCR trigger, zoom */
+  .camtools{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(14,17,22,.7);border:1px solid var(--line);border-radius:20px;padding:7px 12px;backdrop-filter:blur(6px);cursor:pointer;user-select:none;}
+  .chip.on{background:var(--signal);color:#08130E;border-color:var(--signal);}
+  .zoomwrap{margin-left:auto;display:flex;align-items:center;gap:8px;background:rgba(14,17,22,.7);border:1px solid var(--line);border-radius:20px;padding:4px 12px;backdrop-filter:blur(6px);}
+  .zoomwrap span{font-family:var(--mono);font-size:12px;color:var(--ink-dim);}
+  input[type=range]{width:110px;accent-color:var(--signal);}
+
+  .controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0;}
+  button{font-family:var(--sans);font-size:15px;font-weight:600;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);padding:14px;border-radius:11px;cursor:pointer;transition:transform .05s,background .15s;}
+  button:active{transform:scale(.98);}
+  button:disabled{opacity:.4;}
+  button.primary{background:var(--signal);color:#08130E;border-color:var(--signal);}
+  button.ghost{background:transparent;}
+  button.wide{grid-column:1/-1;}
+  input[type=file]{display:none;}
+
+  /* review card */
+  .review{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:4px 4px 10px;margin:12px 0;display:none;}
+  .review.show{display:block;}
+  .review h2{font-size:12px;font-family:var(--mono);letter-spacing:1px;color:var(--ink-dim);margin:12px 14px 8px;text-transform:uppercase;}
+  .fields{display:grid;gap:1px;background:var(--line);border-radius:9px;overflow:hidden;margin:0 10px;}
+  .field{display:grid;grid-template-columns:104px 1fr;align-items:center;background:var(--panel-2);}
+  .field label{font-family:var(--mono);font-size:11px;color:var(--ink-dim);padding:0 0 0 12px;}
+  .field input{font-family:var(--mono);font-size:14px;color:var(--ink);background:transparent;border:none;padding:12px;width:100%;outline:none;}
+  .field input:focus{background:rgba(53,224,161,.07);}
+  .field.src-bc label::after{content:" \25AA";color:var(--signal);}
+  .field.src-ocr label::after{content:" \25AA";color:var(--warn);}
+  .legend{font-family:var(--mono);font-size:10px;color:var(--ink-dim);margin:8px 14px 0;}
+  .legend .g{color:var(--signal);}.legend .o{color:var(--warn);}
+
+  /* results table */
+  .tablewrap{margin:8px 0 96px;border:1px solid var(--line);border-radius:12px;overflow:auto;}
+  table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12px;}
+  th{background:var(--panel-2);color:var(--ink-dim);text-align:left;padding:9px 10px;position:sticky;top:0;white-space:nowrap;}
+  td{padding:9px 10px;border-top:1px solid var(--line);white-space:nowrap;}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015);}
+  td.del{color:var(--bad);cursor:pointer;text-align:center;width:34px;}
+  .empty{color:var(--ink-dim);font-family:var(--mono);font-size:12px;text-align:center;padding:22px;}
+
+  .exportbar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 22%);display:flex;gap:10px;max-width:640px;margin:0 auto;}
+  .exportbar button{flex:1;}
+</style>
+</head>
+<body>
+<header>
+  <span class="tag">WAE</span><h1>Label Scanner</h1>
+  <span class="ver" id="ver"></span>
+  <span class="count"><b id="cnt">0</b> rows</span>
+</header>
+
+<div class="wrap">
+  <div class="stage">
+    <video id="vid" playsinline muted autoplay></video>
+    <div class="reticle" id="reticle"></div>
+    <div class="camtools">
+      <div class="chip" id="torchChip" style="display:none;">Light</div>
+      <div class="chip" id="ocrChip">Read text now</div>
+      <div class="zoomwrap" id="zoomWrap" style="display:none;">
+        <span>zoom</span><input type="range" id="zoom" min="1" max="5" step="0.1" value="1">
+      </div>
+    </div>
+    <div class="status" id="status"><span class="dot"></span><span id="statustxt">Starting camera…</span></div>
+  </div>
+
+  <div class="controls">
+    <button class="primary wide" id="startBtn">Start / restart camera</button>
+    <button class="ghost" id="fileBtn">Upload photo</button>
+    <button class="ghost" id="focusBtn">Refocus</button>
+    <button class="ghost wide" id="freshBtn">Get latest version (fresh reload)</button>
+    <input type="file" id="fileInput" accept="image/*" capture="environment">
+  </div>
+
+  <div class="review" id="review">
+    <h2>Review &amp; confirm</h2>
+    <div class="fields" id="fields"></div>
+    <div class="legend"><span class="g">&#9642;</span> from barcode &nbsp; <span class="o">&#9642;</span> from OCR — check the amber ones</div>
+    <div class="controls" style="margin:12px 10px 4px;">
+      <button class="ghost" id="discardBtn">Discard</button>
+      <button class="primary" id="addBtn">Add row</button>
+    </div>
+  </div>
+
+  <div class="tablewrap">
+    <table id="tbl"><thead><tr id="head"></tr></thead>
+    <tbody id="body"><tr><td class="empty" colspan="12">No rows yet. Point the camera at a label.</td></tr></tbody></table>
+  </div>
+</div>
+
+<div class="exportbar">
+  <button id="clearBtn" class="ghost">Clear all</button>
+  <button id="exportBtn" class="primary">Export .xlsx</button>
+</div>
+
+<script>
+// ============================================================================
+//  WAE LABEL SCANNER — robust live-scan build (v2)
+//  ---------------------------------------------------------------------------
+//  What changed vs v1 and why:
+//  - The camera now runs CONTINUOUSLY and tries to decode a barcode on every
+//    frame. No more "Capture" press that can grab a blank frame. When a code
+//    is caught the frame flashes, it beeps, and the field fills in.
+//  - Zoom slider + pinch-to-zoom + Refocus button + torch: get CLOSE on the
+//    small print. Sharp and close is what makes both barcode and OCR work.
+//  - "Read text now" runs a 3-frame OCR burst on the current zoomed view and
+//    keeps the highest-confidence value per field.
+//  - Barcode results always win over OCR results for the same field.
+//
+//  Where to tune things later:
+//  - COLS: the Excel columns (single source of truth)
+//  - applyBarcodes(): rules mapping decoded codes -> fields  (green dot)
+//  - parseOcr():      regex rules reading label text -> fields (amber dot)
+// ============================================================================
+// ---- version + cache handling ----------------------------------------------
+// Bump VERSION every time you change this file. It shows in the header, so on
+// the phone you can instantly see whether you're running the new build or a
+// stale cached one.
+const VERSION='v2.1';
+document.getElementById('ver').textContent=VERSION;
+
+// "Get latest version": wipes cached copies of the app and reloads with a
+// unique URL so no cache layer (browser or GitHub Pages) can serve the old
+// file. Your scanned rows are NOT touched — they live in localStorage, which
+// this deliberately leaves alone.
+document.getElementById('freshBtn').addEventListener('click',async()=>{
+  try{ if(window.caches){ const keys=await caches.keys(); await Promise.all(keys.map(k=>caches.delete(k))); } }catch(_){}
+  try{ if(navigator.serviceWorker){ const regs=await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r=>r.unregister())); } }catch(_){}
+  location.href=location.pathname+'?fresh='+Date.now();
+});
+
+const COLS=["Mat","Definition","Rev","SerNr","Char","L-Char","Auftr","Menge","Einheit","Verfallsdatum","CH-Nr"];
+const STORE_KEY='wae_label_rows_v2';
+const rows=loadRows(); let current=null;
+function loadRows(){try{return JSON.parse(localStorage.getItem(STORE_KEY))||[]}catch(_){return[]}}
+function saveRows(){try{localStorage.setItem(STORE_KEY,JSON.stringify(rows))}catch(_){}}
+
+const vid=document.getElementById('vid');
+const statusEl=document.getElementById('status'), statusTxt=document.getElementById('statustxt');
+const reticle=document.getElementById('reticle');
+const startBtn=document.getElementById('startBtn'), fileBtn=document.getElementById('fileBtn');
+const focusBtn=document.getElementById('focusBtn'), fileInput=document.getElementById('fileInput');
+const ocrChip=document.getElementById('ocrChip'), torchChip=document.getElementById('torchChip');
+const zoomWrap=document.getElementById('zoomWrap'), zoom=document.getElementById('zoom');
+const review=document.getElementById('review'), fieldsEl=document.getElementById('fields');
+const addBtn=document.getElementById('addBtn'), discardBtn=document.getElementById('discardBtn');
+const exportBtn=document.getElementById('exportBtn'), clearBtn=document.getElementById('clearBtn');
+function setStatus(t,c){statusTxt.textContent=t;statusEl.className='status'+(c?' '+c:'');}
+
+// ---- camera + continuous barcode scanning ----------------------------------
+let stream=null, track=null, scanning=false, reader=null;
+let found={};   // fields caught for the CURRENT label (cleared on Add/Discard)
+const hints=new Map();
+hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+
+async function startCamera(){
+  stopCamera();
+  try{
+    setStatus('Starting camera…','busy');
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+    vid.srcObject=stream; await vid.play();
+    track=stream.getVideoTracks()[0];
+    setupCapabilities();
+    beginScanLoop();
+    setStatus('Scanning… point at a barcode','live');
+  }catch(e){ setStatus('Camera blocked — use Upload photo','busy'); console.error(e); }
+}
+function stopCamera(){ scanning=false; if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;} }
+
+// expose zoom / torch only if the phone camera supports them
+function setupCapabilities(){
+  const caps=track.getCapabilities?track.getCapabilities():{};
+  if(caps.zoom){
+    zoom.min=caps.zoom.min; zoom.max=caps.zoom.max; zoom.step=caps.zoom.step||0.1; zoom.value=caps.zoom.min;
+    zoomWrap.style.display='flex';
+    zoom.oninput=()=>track.applyConstraints({advanced:[{zoom:parseFloat(zoom.value)}]}).catch(()=>{});
+  } else { zoomWrap.style.display='none'; }
+  if(caps.torch){
+    torchChip.style.display='block'; let on=false;
+    torchChip.onclick=()=>{on=!on;torchChip.classList.toggle('on',on);
+      track.applyConstraints({advanced:[{torch:on}]}).catch(()=>{});};
+  } else { torchChip.style.display='none'; }
+}
+
+// pinch-to-zoom directly on the video
+let pinchStart=0, zoomStart=1;
+vid.addEventListener('touchstart',e=>{ if(e.touches.length===2){pinchStart=dist(e.touches);zoomStart=parseFloat(zoom.value)||1;} },{passive:true});
+vid.addEventListener('touchmove',e=>{ if(e.touches.length===2 && zoomWrap.style.display!=='none'){ e.preventDefault();
+  const f=dist(e.touches)/pinchStart;
+  let z=Math.min(parseFloat(zoom.max),Math.max(parseFloat(zoom.min),zoomStart*f));
+  zoom.value=z; track.applyConstraints({advanced:[{zoom:z}]}).catch(()=>{}); } },{passive:false});
+function dist(t){return Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);}
+
+// nudge continuous autofocus
+focusBtn.addEventListener('click',()=>{ if(!track)return;
+  track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
+  setStatus('Refocusing…','busy'); setTimeout(()=>setStatus('Scanning…','live'),700);
+});
+
+// the live loop: grab a frame, try to decode, repeat (~8x per second)
+function beginScanLoop(){
+  reader=new ZXing.MultiFormatReader(); reader.setHints(hints);
+  scanning=true;
+  const cv=document.createElement('canvas'); const ctx=cv.getContext('2d',{willReadFrequently:true});
+  const tick=()=>{
+    if(!scanning) return;
+    if(!vid.videoWidth){ requestAnimationFrame(tick); return; }
+    cv.width=vid.videoWidth; cv.height=vid.videoHeight; ctx.drawImage(vid,0,0);
+    try{
+      const img=ctx.getImageData(0,0,cv.width,cv.height);
+      const lum=new ZXing.RGBLuminanceSource(img.data,cv.width,cv.height);
+      const bmp=new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+      const res=reader.decode(bmp);
+      if(res&&res.text) onBarcode(res.text.trim());
+      reader.reset();
+    }catch(_){ /* no code in this frame — normal */ }
+    setTimeout(()=>requestAnimationFrame(tick),120);
+  };
+  requestAnimationFrame(tick);
+}
+
+let lastBeep=0;
+function onBarcode(text){
+  const before=JSON.stringify(found);
+  applyBarcodes([text],found);
+  if(JSON.stringify(found)===before) return;   // nothing new, stay quiet
+  reticle.classList.add('hit'); statusEl.className='status hit';
+  const got=COLS.filter(k=>found[k]&&found[k].src==='bc');
+  statusTxt.textContent='Caught: '+got.join(', ');
+  const now=Date.now(); if(now-lastBeep>400){beep();lastBeep=now;}
+  setTimeout(()=>{reticle.classList.remove('hit'); if(scanning)statusEl.className='status live';},500);
+  showReviewFromFound();   // review card updates live as codes are caught
+}
+function beep(){try{const a=new (window.AudioContext||window.webkitAudioContext)();
+  const o=a.createOscillator();const g=a.createGain();o.connect(g);g.connect(a.destination);
+  o.frequency.value=880;g.gain.value=.05;o.start();setTimeout(()=>{o.stop();a.close();},90);}catch(_){}}
+
+// ---- OCR: on-demand, multi-frame burst --------------------------------------
+let worker=null;
+ocrChip.addEventListener('click',()=>runOcrBurst());
+async function runOcrBurst(){
+  if(!vid.videoWidth){ setStatus('Start the camera first','busy'); return; }
+  setStatus('Reading text — hold steady…','busy');
+  if(!worker){ worker=await Tesseract.createWorker('eng'); }
+  const agg={};   // per-field best-confidence value across frames
+  for(let i=0;i<3;i++){
+    const c=grabUpscaled(vid);
+    const {data}=await worker.recognize(c);
+    mergeOcr(parseOcr(data.text||''), data.confidence||0, agg);
+    await new Promise(r=>setTimeout(r,180));
+  }
+  for(const k in agg){ if(!found[k]||found[k].src!=='bc') found[k]={value:agg[k].value,src:'ocr'}; }
+  showReviewFromFound();
+  setStatus('Scanning…','live');
+}
+function grabUpscaled(src){
+  const w=src.videoWidth||src.width, h=src.videoHeight||src.height;
+  const c=document.createElement('canvas'); const sc=Math.min(2,2200/Math.max(w,h)+0.001);
+  c.width=w*sc; c.height=h*sc;
+  const ctx=c.getContext('2d'); ctx.filter='grayscale(1) contrast(1.2)'; ctx.drawImage(src,0,0,c.width,c.height);
+  return c;
+}
+function mergeOcr(fields,conf,agg){for(const k in fields){if(!agg[k]||conf>agg[k].conf)agg[k]={value:fields[k],conf};}}
+
+// ---- upload path (works even without camera permission) --------------------
+fileBtn.addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;
+  const img=new Image();
+  img.onload=async()=>{
+    setStatus('Reading photo…','busy');
+    const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;
+    c.getContext('2d').drawImage(img,0,0);
+    // barcodes from the still (try a few rotations)
+    for(const deg of [0,90,180,270]){
+      try{
+        const rc=rotateCanvas(c,deg);
+        const el=new Image(); el.src=rc.toDataURL('image/png'); await el.decode().catch(()=>{});
+        const r=new ZXing.BrowserMultiFormatReader();
+        const res=await r.decodeFromImageElement(el).catch(()=>null);
+        if(res&&res.text) applyBarcodes([res.text.trim()],found);
+      }catch(_){}
+    }
+    if(!worker) worker=await Tesseract.createWorker('eng');
+    const {data}=await worker.recognize(grabUpscaled(c));
+    const p=parseOcr(data.text||'');
+    for(const k in p){ if(!found[k]||found[k].src!=='bc') found[k]={value:p[k],src:'ocr'}; }
+    showReviewFromFound();
+    setStatus(scanning?'Scanning…':'Photo read','live');
+  };
+  img.src=URL.createObjectURL(f); fileInput.value='';
+});
+function rotateCanvas(src,deg){
+  if(deg===0)return src;
+  const c=document.createElement('canvas');const ctx=c.getContext('2d');
+  if(deg===180){c.width=src.width;c.height=src.height;ctx.translate(c.width,c.height);ctx.rotate(Math.PI);}
+  else{c.width=src.height;c.height=src.width;ctx.translate(c.width/2,c.height/2);ctx.rotate(deg*Math.PI/180);ctx.translate(-src.width/2,-src.height/2);}
+  ctx.drawImage(src,0,0);return c;
+}
+
+// ---- field extraction rules -------------------------------------------------
+// Barcode rules (reliable, green dot). Add rules here for new code shapes.
+function applyBarcodes(codes,found){
+  for(const raw of codes){ const s=raw.trim();
+    if(/^CH-?\d+/i.test(s)){ found['CH-Nr']={value:s.replace(/^CH-?/i,'CH-'),src:'bc'};
+      const n=s.replace(/^CH-?/i,''); if(/^\d+$/.test(n)&&!found['SerNr'])found['SerNr']={value:n,src:'bc'}; continue; }
+    if(/^EQ-?\d+/i.test(s)){ found['CH-Nr']={value:s,src:'bc'}; continue; }
+    if(/^[A-Z]?\d{4,}[A-Z]?$/.test(s)&&!found['Mat']){ found['Mat']={value:s,src:'bc'}; continue; }
+    if(/^\d{10}$/.test(s)&&!found['L-Char']){ found['L-Char']={value:s,src:'bc'}; continue; }
+  }
+}
+// OCR rules (amber dot). THIS is what you tune per label variant.
+function parseOcr(text){
+  const j=text.split(/\n/).map(l=>l.trim()).filter(Boolean).join('\n'); const out={};
+  const g=re=>{const m=j.match(re);return m?m[1].trim():'';};
+  let def=g(/Mat\.?\s*[A-Z0-9]+\s*\n\s*([A-Z][A-Z0-9 .\/-]{3,})/);
+  if(!def){const lines=j.split('\n');def=lines.find(l=>/^[A-Z][A-Z0-9 .\/-]{4,}$/.test(l)&&!/GRAVITY|SCHWEIZ|BEYOND/i.test(l))||'';}
+  if(def)out.Definition=def;
+  let r;
+  if(r=g(/Rev\.?\s*([A-Z])\b/))out.Rev=r;
+  if(r=g(/SerNr\.?\s*(\d{4,})/))out.SerNr=r;
+  if(r=g(/(?:^|\n)\s*Char\.?\s*(\d{4,})/))out.Char=r;
+  if(r=g(/L-?Char\.?\s*(\d{6,})/))out['L-Char']=r;
+  if(r=g(/Mat\.?\s*([A-Z]?\d{4,}[A-Z]?)/))out.Mat=out.Mat||r;
+  if(r=g(/Menge:?\s*\n?\s*(\d{3,})/))out.Auftr=r;
+  if(r=g(/(\d+\.\d{3})\b/))out.Menge=r;
+  if(r=g(/\b(ST|PCS|KG|M)\b/))out.Einheit=r;
+  if(r=g(/Verfallsdatum:?\s*(\d{2}\.\d{2}\.\d{4})/))out.Verfallsdatum=r;
+  if(r=g(/(CH-?\d{5,})/))out['CH-Nr']=out['CH-Nr']||r.replace(/^CH-?/,'CH-');
+  return out;
+}
+
+// ---- review card (updates live as fields get caught) ------------------------
+function showReviewFromFound(){
+  current={}; COLS.forEach(c=>current[c]=found[c]?{...found[c]}:{value:'',src:''});
+  fieldsEl.innerHTML='';
+  COLS.forEach(col=>{const f=current[col];const cls=f.src==='bc'?'src-bc':(f.src==='ocr'?'src-ocr':'');
+    const row=document.createElement('div');row.className='field '+cls;
+    row.innerHTML=`<label>${col}</label><input data-col="${col}" value="${(f.value||'').replace(/"/g,'&quot;')}" spellcheck="false">`;
+    fieldsEl.appendChild(row);});
+  review.classList.add('show');
+}
+fieldsEl.addEventListener('input',e=>{const col=e.target.dataset.col;if(col&&current)current[col].value=e.target.value;});
+addBtn.addEventListener('click',()=>{ if(!current)return;
+  const row={};COLS.forEach(c=>row[c]=current[c].value);rows.push(row);
+  current=null;found={};review.classList.remove('show');saveRows();renderTable();
+  setStatus('Row added — next label','live');
+});
+discardBtn.addEventListener('click',()=>{current=null;found={};review.classList.remove('show');
+  setStatus(scanning?'Scanning…':'Camera off',scanning?'live':'');});
+
+// ---- table + export ----------------------------------------------------------
+function renderTable(){
+  document.getElementById('cnt').textContent=rows.length;
+  document.getElementById('head').innerHTML='<th></th>'+COLS.map(c=>`<th>${c}</th>`).join('');
+  const body=document.getElementById('body');
+  if(!rows.length){body.innerHTML=`<tr><td class="empty" colspan="${COLS.length+1}">No rows yet. Point the camera at a label.</td></tr>`;return;}
+  body.innerHTML=rows.map((r,i)=>`<tr><td class="del" data-i="${i}">&#10005;</td>`+COLS.map(c=>`<td>${(r[c]||'').replace(/</g,'&lt;')}</td>`).join('')+'</tr>').join('');
+}
+document.getElementById('body').addEventListener('click',e=>{const i=e.target.dataset.i;if(i!==undefined){rows.splice(+i,1);saveRows();renderTable();}});
+exportBtn.addEventListener('click',()=>{ if(!rows.length){setStatus('Nothing to export yet');return;}
+  const ws=XLSX.utils.json_to_sheet(rows,{header:COLS});const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Labels');
+  XLSX.writeFile(wb,`WAE_labels_${new Date().toISOString().slice(0,10)}.xlsx`);
+});
+clearBtn.addEventListener('click',()=>{if(confirm('Clear all rows?')){rows.length=0;saveRows();renderTable();}});
+
+startBtn.addEventListener('click',startCamera);
+renderTable();
+startCamera();   // auto-start on page load
+</script>
+</body>
+</html>
