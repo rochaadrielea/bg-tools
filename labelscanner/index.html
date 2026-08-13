@@ -101,6 +101,8 @@
   .rnote.show{display:block;}
   .rnote.bad{background:rgba(255,107,107,.12);border:1px solid var(--bad);color:#FFC9C9;}
   .rnote.warn{background:rgba(255,180,84,.10);border:1px solid var(--warn);color:#FFDCA8;}
+  .rnote button.sugg{font-family:var(--mono);font-size:14px;padding:9px 13px;margin:6px 4px 0 0;
+    background:var(--panel-2);color:var(--ink);border:1px solid var(--signal);border-radius:9px;}
   .fields{display:grid;gap:1px;background:var(--line);border-radius:9px;overflow:hidden;margin:0 10px;}
   .field{display:grid;grid-template-columns:104px 1fr;align-items:center;background:var(--panel-2);}
   .field label{font-family:var(--mono);font-size:11px;color:var(--ink-dim);padding:0 0 0 12px;}
@@ -202,7 +204,7 @@
 
 <script>
 // ============================================================================
-//  WAE LABEL SCANNER  v6.0
+//  WAE LABEL SCANNER  v6.3
 //  ---------------------------------------------------------------------------
 //  THE ONE RULE THIS VERSION EXISTS FOR
 //
@@ -234,7 +236,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v6.2';
+const VERSION = 'v6.3';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -261,7 +263,16 @@ const OCR_PASSES = 3;
 //             master number sits that far away. Distance 2 is never auto-applied:
 //             a real extra part can sit 2 characters from a valid one and nothing
 //             can tell them apart.
-const OCR_MAX_PX = 900;
+// Tesseract needs roughly 30 px of capital-letter height to read reliably. The
+// label crop off a phone preview is ~650 px wide, which gives about 15 - and
+// that is why "Mat.No 3001195" came back as "Maine s00186". Measured on the real
+// label: at 1x the material is unreadable garbage, at 3-4x it reads 3001106,
+// one or two characters out.
+// v6.1 upscaled EVERYTHING (slow, no gain on an already-large photo); v6.2
+// refused to upscale at all (fast, unreadable on a small crop). Both were wrong:
+// the target is a RANGE. Small crops are magnified, large ones are shrunk.
+const OCR_MIN_PX = 1800;
+const OCR_MAX_PX = 2200;
 const ENHANCE_EVERY = 3;
 const MAT_FIX_DIST = 1;
 
@@ -447,12 +458,53 @@ function resolveMat(raw){
 // itself belongs to a list of 399. EXACT hits only here (after confusion
 // substitution): accepting a near-miss without a field label to anchor it is how
 // a batch number would get filed as a material.
-function matFromTokens(text, exclude){
-  if(!MASTER) return '';
-  const toks = String(text||'').toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+// WHEN THE READ IS TOO BROKEN TO TRUST, SUGGEST INSTEAD OF GUESS.
+// Measured on the real label, the best OCR pass returned 3001106 for a material
+// printed 3001195 - two characters out. Applying that automatically is exactly
+// the distance-2 mistake this tool refuses to make. But making the operator type
+// seven digits when the answer is one of three numbers is its own kind of bad.
+// So: the closest master numbers are offered as buttons in the card. One tap,
+// eyes on the label, nothing invented.
+function nearestMasters(text, howMany, notMat){
+  if(!MASTER) return [];
+  const lines = String(text||'').split(/\n/).filter(function(l){ return !OTHER_FIELD_LINE.test(l); });
+  const toks = lines.join(' ').toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+  const scored = [];
   for(let i=0;i<toks.length;i++){
     const t = cleanMatToken(toks[i]);
-    if(!t || t === exclude) continue;
+    if(t.length < 5) continue;
+    if(notMat && notMat.indexOf(t) >= 0) continue;
+    for(let m=0;m<matList.length;m++){
+      if(notMat && notMat.indexOf(matList[m]) >= 0) continue;
+      const d = editDist(t, matList[m], 3);
+      if(d <= 3) scored.push({m:matList[m], d:d, from:t});
+    }
+  }
+  scored.sort(function(a,b){ return a.d-b.d; });
+  const seen = {}, out = [];
+  for(let i=0;i<scored.length && out.length<(howMany||3);i++){
+    if(seen[scored[i].m]) continue;
+    seen[scored[i].m] = 1;
+    out.push(scored[i]);
+  }
+  return out;
+}
+
+// Lines that belong to another field. Measured on the real label: the token scan
+// picked up "Prod no 2003721" as the material in 4 of 6 reads. A production order
+// is not a material - but if one ever happens to collide with a master number,
+// filing it as the material is silent and wrong. So the scan never looks at a
+// line that carries another field's label.
+const OTHER_FIELD_LINE =
+  /prod\s*n|ba[t1lI][a-z0-9]{0,3}\s*[.:]?\s*\d|qty|menge|expiry|verfalls|charge|l-?cha|sernr|ch-\d|eq-\d/i;
+
+function matFromTokens(text, exclude, exclude2){
+  if(!MASTER) return '';
+  const lines = String(text||'').split(/\n/).filter(function(l){ return !OTHER_FIELD_LINE.test(l); });
+  const toks = lines.join(' ').toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+  for(let i=0;i<toks.length;i++){
+    const t = cleanMatToken(toks[i]);
+    if(!t || t === exclude || t === exclude2) continue;
     const vs = confusionVariants(t);
     for(let v=0;v<vs.length;v++) if(matIndex.has(vs[v])) return vs[v];
   }
@@ -488,6 +540,8 @@ let attemptStart = Date.now();     // last time a row was written / camera start
 function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:''}; }
 
 function resetSession(reason){
+  matSuggestions = [];
+  charSuggestions = [];
   const had = Object.keys(session.fields).length;
   session = newSession();
   reticle.classList.remove('partial','reject');
@@ -636,6 +690,8 @@ let ocrActive=false, ocrRun=0;
 let gateActive=true;
 let scanBusy=false;          // a still scan is running: the live loop stands down
 let lastOcrText='';          // what the text reader actually returned, for the card
+let matSuggestions=[];       // closest master numbers, offered as one-tap buttons
+let charSuggestions=[];      // competing Charge readings, offered as one-tap buttons
 let rawUnplaced='';          // last code that matched no rule
 let lastRaw='';              // last code seen at all, with its format
 let enhanceTick=0;
@@ -1189,7 +1245,16 @@ function vote(field, value){
   if(!value) return;
   const f = session.fields;
   if(f[field] && f[field].src==='bc') return;          // a barcode is never overruled
-  if(MANDATORY.indexOf(field) < 0){ if(!f[field]) put(field,value,'ocr',null,0); return; }
+
+  // EVERY field is voted, not just the mandatory two. On the real label the six
+  // reads returned expiry 14.09.2052 and 14.09.2063 for a date printed 2053, and
+  // "first read wins" filed one of them. A contradicted value is worse than a
+  // blank one - blank is visible, wrong is not.
+  if(MANDATORY.indexOf(field) < 0){
+    session.votes[field] = session.votes[field] || {};
+    session.votes[field][value] = (session.votes[field][value]||0)+1;
+    return;
+  }
 
   // The MATERIAL is checked against the master before it is even voted on: a
   // one-character repair makes two passes that read 3OO1195 and 3001195 agree,
@@ -1203,9 +1268,52 @@ function vote(field, value){
 
   session.votes[field] = session.votes[field] || {};
   session.votes[field][v] = (session.votes[field][v]||0)+1;
-  if(session.votes[field][v] >= NEED_VOTES){
+  if(orig) session.votePending = orig;
+
+  // The MATERIAL is filed as soon as two passes agree, because the master has
+  // already vouched for the value.
+  if(field === 'Mat' && session.votes[field][v] >= NEED_VOTES){
     if(put(field, v, 'ocr', null, 0) && orig) session.matOriginal = orig;
   }
+  // The CHARGE is NOT filed here. It has no vocabulary to check against, so a
+  // wrong one is undetectable, and on the real label the readings were
+  // 682607 x3 against 582507 x2 - a majority vote would have written the WRONG
+  // batch. It is resolved once, after all passes, and only when it wins clearly.
+}
+
+// Called after the last pass.
+function tally(field){
+  const v = session.votes[field];
+  if(!v) return [];
+  return Object.keys(v).map(function(k){ return {value:k, n:v[k]}; })
+                       .sort(function(a,b){ return b.n-a.n; });
+}
+
+// A value is filed only when it wins CLEANLY: either it was the only reading, or
+// it beat the runner-up by more than one. Everything else stays blank.
+function clearWinner(list, need){
+  if(!list.length) return null;
+  if(list.length === 1) return list[0].n >= (need||1) ? list[0].value : null;
+  if(list[0].n >= (need||1) && list[0].n > list[1].n + 1) return list[0].value;
+  return null;
+}
+
+function resolveVotes(){
+  // the Charge: no vocabulary can check it, so an unclear read is handed back to
+  // the operator as choices rather than settled by a majority of one
+  if(!heldField('Char')){
+    const list = tally('Char');
+    const win = clearWinner(list, NEED_VOTES);
+    if(win) put('Char', win, 'ocr', null, 0);
+    else if(list.length) charSuggestions = list.slice(0,4);
+  }
+  // everything else: file the clean winners, leave the contradicted ones blank
+  COLS.forEach(function(c){
+    if(MANDATORY.indexOf(c) >= 0) return;
+    if(heldField(c)) return;
+    const win = clearWinner(tally(c), 1);
+    if(win) put(c, win, 'ocr', null, 0);
+  });
 }
 
 // ============================================================================
@@ -1382,34 +1490,66 @@ async function scanLabel(){
     setStatus('Reading the barcode\u2026','busy');
     const got = await decodeLadder(crop);
     rawUnplaced = '';
+    const shot = still.how + ' ' + still.w + '\u00d7' + still.h;
     if(got){
       lastRaw = got.codes.map(function(c){
         return c.value + (c.format ? '  ['+c.format+']' : ''); }).join('  |  ')
-        + '  (' + got.how + ')';
+        + '  (' + got.how + ', ' + shot + ')';
       applyBarcodes(got.codes, tick);
     } else {
-      lastRaw = 'no barcode found in the photo';
+      // The capture path matters more than anything else here: 'photo' is the
+      // full sensor, 'video' is the preview frame and is no sharper than what the
+      // live loop already failed on. If this line says video, the phone has no
+      // ImageCapture and the label must fill more of the frame instead.
+      lastRaw = 'no barcode found \u2014 capture was ' + shot;
     }
     showRaw();
     if(ocrRun !== token) return;
 
     setStatus('Reading the text\u2026','busy');
     await ensureWorker(false);
+
+    // Scale into the readable range, then TWO preprocessing variants. Measured on
+    // the real label: contrast-stretch reads the material better on some passes,
+    // Otsu black-and-white reads the batch better on others. Reading both and
+    // voting across all of them is worth far more than three passes of one.
     const long = Math.max(crop.width, crop.height);
-    const forOcr = long > OCR_MAX_PX ? scaleCanvas(crop, OCR_MAX_PX/long, true)
-                                     : scaleCanvas(crop, 1, true);
-    for(let i=0;i<OCR_PASSES;i++){
-      if(ocrRun !== token) return;
-      await setPsm(PSM_PASSES[i % PSM_PASSES.length]);
-      const out = await worker.recognize(forOcr);
-      if(ocrRun !== token) return;
-      const txt = (out && out.data && out.data.text) || '';
-      lastOcrText = txt;                     // kept so the card can show it
-      const p = parseOcr(txt);
-      if(p._matOriginal) session.matOriginal = p._matOriginal;
-      for(const k in p){ if(k.charAt(0) !== '_') vote(k, p[k]); }
-      if(MANDATORY.every(function(k){ return session.fields[k]; })) break;
+    let f = 1;
+    if(long < OCR_MIN_PX) f = Math.min(4, OCR_MIN_PX/long);
+    else if(long > OCR_MAX_PX) f = OCR_MAX_PX/long;
+    const grey = scaleCanvas(crop, f, true);
+    let bw = null;
+    try{ bw = binarise(grey); }catch(_){}
+    const variants = bw ? [grey, bw] : [grey];
+
+    const texts = [];
+    for(let v=0; v<variants.length; v++){
+      for(let i=0;i<PSM_PASSES.length;i++){
+        if(ocrRun !== token) return;
+        await setPsm(PSM_PASSES[i]);
+        const out = await worker.recognize(variants[v]);
+        if(ocrRun !== token) return;
+        const txt = (out && out.data && out.data.text) || '';
+        if(txt.trim()) texts.push(txt);
+        const p = parseOcr(txt);
+        if(p._matOriginal) session.matOriginal = p._matOriginal;
+        for(const k in p){ if(k.charAt(0) !== '_') vote(k, p[k]); }
+        if(MANDATORY.every(function(k){ return session.fields[k]; })){ v = variants.length; break; }
+      }
     }
+    resolveVotes();
+    lastOcrText = texts.join('\n---\n');
+    // Nothing found by field label or by exact token? Then offer the closest
+    // master numbers as one-tap suggestions - never applied on their own.
+    // A number already read as the order, the batch or a lot is not a candidate
+    // material, however close it sits to one in the master. On the real label the
+    // production order 2003721 was offered as the top material suggestion.
+    const notMat = [];
+    ['Auftr','Char','L-Char','CH-Nr'].forEach(function(k){
+      const f = heldField(k); if(f) notMat.push(normId(f.value));
+      tally(k).forEach(function(x){ notMat.push(normId(x.value)); });
+    });
+    matSuggestions = heldField('Mat') ? [] : nearestMasters(texts.join('\n'), 3, notMat);
   }catch(e){
     console.warn(e);
     setStatus('Scan failed \u2014 add manually','bad');
@@ -1530,7 +1670,7 @@ function parseOcr(text){
   // Still no material? Look for one of the 399 anywhere in the text, ignoring
   // the field labels completely.
   if(!out.Mat){
-    const t = matFromTokens(j, out.Char ? normId(out.Char) : '');
+    const t = matFromTokens(j, out.Char ? normId(out.Char) : '', out.Auftr ? normId(out.Auftr) : '');
     if(t){ out.Mat = t; out._matByToken = true; }
   }
 
@@ -1657,6 +1797,21 @@ function openReview(proof){
   // If a mandatory field is missing after a scan, SHOW THE RAW TEXT. Without it
   // "it is not reading Mat.No" is unfixable from a distance - with it, the exact
   // corruption is visible and the pattern can be repaired.
+  if(matSuggestions.length && !String(current.Mat.value||'').trim()){
+    msgs.push('The material could not be read cleanly. Closest in the master list &mdash; '
+      + 'check the label and tap the right one:<br>'
+      + matSuggestions.map(function(s){
+          return '<button class="sugg" data-mat="'+s.m+'">'+s.m+'</button>';
+        }).join(' '));
+  }
+  if(charSuggestions.length && !String(current.Char.value||'').trim()){
+    msgs.push('The Charge was read more than one way and NOTHING was chosen for you. '
+      + 'Read it off the label and tap it:<br>'
+      + charSuggestions.map(function(s){
+          return '<button class="sugg" data-char="'+s.value+'">'+s.value
+               + '<span style="color:var(--ink-dim)"> \u00d7'+s.n+'</span></button>';
+        }).join(' '));
+  }
   const missing = MANDATORY.filter(function(k){ return !String(current[k].value||'').trim(); });
   if(missing.length && lastOcrText){
     msgs.push('The text reader saw this &mdash; read it out if the number is wrong:<br>'
@@ -1688,6 +1843,20 @@ function openReview(proof){
   review.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
+// tapping a suggestion fills the Material field; it is never filled for you
+// Tapping a suggestion records the operator's CHOICE in the session, not just in
+// the input box: openReview rebuilds the card from the session, so a value only
+// written to `current` would be wiped the moment the card redraws. Recorded as
+// 'typed' because that is what it is - a person read the label and decided.
+rnote.addEventListener('click', function(e){
+  if(!current || !e.target || !e.target.dataset) return;
+  const m = e.target.dataset.mat, c = e.target.dataset.char;
+  if(m){ put('Mat', m, 'typed', null, 0); matSuggestions = []; }
+  else if(c){ put('Char', c, 'typed', null, 0); charSuggestions = []; }
+  else return;
+  openReview(current._proof);
+});
+
 fieldsEl.addEventListener('input', function(e){
   const col = e.target.dataset.col;
   if(col && current) current[col].value = e.target.value;
@@ -1695,6 +1864,14 @@ fieldsEl.addEventListener('input', function(e){
 
 addBtn.addEventListener('click', function(){
   if(!current) return;
+  if(charSuggestions.length && !String(current.Char.value||'').trim()){
+    msgs.push('The Charge was read more than one way and NOTHING was chosen for you. '
+      + 'Read it off the label and tap it:<br>'
+      + charSuggestions.map(function(s){
+          return '<button class="sugg" data-char="'+s.value+'">'+s.value
+               + '<span style="color:var(--ink-dim)"> \u00d7'+s.n+'</span></button>';
+        }).join(' '));
+  }
   const missing = MANDATORY.filter(function(k){ return !String(current[k].value||'').trim(); });
   if(missing.length){
     rnote.className='rnote show bad';
