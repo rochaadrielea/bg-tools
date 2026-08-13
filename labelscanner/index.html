@@ -60,8 +60,11 @@
   .status.hit .dot{background:#fff;box-shadow:0 0 8px #fff;}
   .status.bad .dot{background:var(--bad);box-shadow:0 0 8px var(--bad);}
 
-  .camtools{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:3;}
-  .chip{font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(14,17,22,.7);border:1px solid var(--line);border-radius:20px;padding:7px 12px;backdrop-filter:blur(6px);cursor:pointer;user-select:none;}
+  /* v6.2: the controls used to be absolutely positioned INSIDE the camera view,
+     which covered the label you were trying to aim at - and with six chips they
+     wrapped over each other. They now sit ABOVE the view, in normal flow. */
+  .camtools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:20px;padding:9px 13px;cursor:pointer;user-select:none;}
   .chip.on{background:var(--signal);color:#08130E;border-color:var(--signal);}
   .chip.act{border-color:var(--warn);color:var(--warn);}
   /* v6.1: the hint used to sit INSIDE the camera view at top:52px, which assumed
@@ -73,7 +76,7 @@
   .rawline.show{display:block;}
   .rawline b{color:var(--ink);}
   .rawline.unplaced{border-color:var(--warn);color:#FFDCA8;}
-  .zoomwrap{margin-left:auto;display:flex;align-items:center;gap:8px;background:rgba(14,17,22,.7);border:1px solid var(--line);border-radius:20px;padding:4px 12px;backdrop-filter:blur(6px);}
+  .zoomwrap{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:20px;padding:5px 12px;}
   .zoomwrap span{font-family:var(--mono);font-size:12px;color:var(--ink-dim);}
   input[type=range]{width:100px;accent-color:var(--signal);}
 
@@ -136,12 +139,7 @@
 <div class="wrap">
   <div class="banner" id="banner"></div>
 
-  <div class="stage">
-    <video id="vid" playsinline muted autoplay></video>
-    <div class="reticle" id="reticle"></div>
-    <div class="splash" id="splash"><div class="mark" id="splashMark"></div><div class="what" id="splashTxt"></div></div>
-
-    <div class="camtools">
+  <div class="camtools" id="camtools">
       <div class="chip on" id="autoChip">Auto-add</div>
       <div class="chip" id="manualChip">Add manually</div>
       <div class="chip" id="scanChip">Scan label</div>
@@ -150,8 +148,14 @@
       <div class="chip" id="torchChip" style="display:none;">Light</div>
       <div class="zoomwrap" id="zoomWrap" style="display:none;">
         <span>zoom</span><input type="range" id="zoom" min="1" max="5" step="0.1" value="1">
-      </div>
     </div>
+  </div>
+
+
+  <div class="stage">
+    <video id="vid" playsinline muted autoplay></video>
+    <div class="reticle" id="reticle"></div>
+    <div class="splash" id="splash"><div class="mark" id="splashMark"></div><div class="what" id="splashTxt"></div></div>
 
     <div class="status" id="status"><span class="dot"></span><span id="statustxt">Camera off</span></div>
     <div class="idle" id="idle">
@@ -568,6 +572,7 @@ let stream=null, track=null, scanning=false, codeReader=null, frameTick=0;
 let nativeDetector=null, autoMode=true, lastBeep=0, worker=null;
 let ocrActive=false, ocrRun=0;
 let gateActive=true;
+let scanBusy=false;          // a still scan is running: the live loop stands down
 let rawUnplaced='';          // last code that matched no rule
 let lastRaw='';              // last code seen at all, with its format
 let enhanceTick=0;
@@ -721,7 +726,7 @@ async function nativeLoop(){
   let fails = 0;
   while(scanning){
     try{
-      let cv = drawCrop(1,false);
+      let cv = scanBusy ? null : drawCrop(1,false);
       if(cv){
         let codes = await nativeDetector.detect(cv);
         fails = 0;
@@ -794,7 +799,7 @@ function startZxing(){
 
 async function zxingCropLoop(){
   while(scanning){
-    const cv = drawCrop(1,false);
+    const cv = scanBusy ? null : drawCrop(1,false);
     if(cv){
       try{
         const res = codeReader.decodeFromCanvas(cv);
@@ -935,6 +940,13 @@ function showRaw(){
 }
 
 function onCodes(codes, tick){
+  // THE BUG THIS GUARD FIXES: during a still scan the label is sitting in front
+  // of the camera, so the live loop decodes it, and the "a new label always
+  // wins" rule below bumped ocrRun - cancelling the very scan that was reading
+  // that label. The scan then returned early and no card ever opened: it looked
+  // like the scanner read the label and did nothing with it.
+  if(scanBusy) return;
+
   // A barcode while text is being read means the label moved. The running OCR
   // is abandoned and its findings dropped: a new label always wins.
   if(ocrActive){ ocrRun++; ocrActive=false; scanChip.classList.remove('act'); }
@@ -1278,10 +1290,11 @@ async function decodeLadder(base){
 }
 
 async function scanLabel(){
-  if(ocrActive) return;
+  if(ocrActive || scanBusy) return;
   if(!vid.videoWidth){ setStatus('Turn the camera on first','busy'); return; }
   const token = ++ocrRun;
   ocrActive = true;                        // holds the clock: one deliberate label
+  scanBusy = true;                         // and the live loop stands down
   scanChip.classList.add('act');
   clearTimeout(graceTimer);
   try{
@@ -1322,9 +1335,15 @@ async function scanLabel(){
     console.warn(e);
     setStatus('Scan failed \u2014 add manually','bad');
   }finally{
+    scanBusy = false;
     if(ocrRun === token){ ocrActive=false; scanChip.classList.remove('act'); }
+    // IN THE FINALLY, NOT AFTER IT. Every `return` inside the try above exited
+    // the function and skipped this, so a scan that gave up early left the
+    // operator with nothing on screen and nothing in the table. Whatever the
+    // scan managed to read, the card now always opens so it can be completed
+    // by hand - the whole point of pressing the button.
+    openReview(proveSameLabel());
   }
-  openReview(proveSameLabel());
 }
 
 function digitFix(v){ return v.replace(/O/g,'0').replace(/B/g,'8').replace(/S/g,'5').replace(/[Il]/g,'1'); }
