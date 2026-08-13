@@ -1,57 +1,217 @@
 #!/usr/bin/env python3
-"""ADAB Compare — web app (Streamlit).
+"""ADAB Compare — web app (Streamlit), Beyond Gravity dark theme.
 
-Same engine as the desktop tool (adab_batch_compare.py), but reachable by anyone
-in the organisation from a browser: no install, no .exe. Upload the As-Design and
-the As-Built file(s), click Run, download the report.
+Same engine as the desktop tool (adab_batch_compare.py). Reachable by anyone in
+the org from a browser. Friendly, plain-language log; white text on the dark
+theme; parallel processing; pick-and-download reports (single or ZIP).
 
-Run locally / on a server:
-    pip install -r requirements.txt
-    streamlit run streamlit_app.py
-
-Files that must sit next to this one:
-    adab_batch_compare.py   (the engine)
-    matchcore/              (optional; the engine has a built-in fallback)
+Run on the server:
+    ~/bgtools/dash/quality/bin/streamlit run streamlit_app.py \
+        --server.address 0.0.0.0 --server.port 8502 --server.baseUrlPath adab
 """
 import os
+import re
+import io
 import glob
+import hashlib
+import zipfile
 import tempfile
+import datetime
 import traceback
 
 import streamlit as st
+import streamlit.components.v1 as components
 import adab_batch_compare as core
 
-# ------------------------------------------------ Beyond Gravity dark theme ----
+# shared feedback store (same DB the desktop tools write to — Adriele's standing
+# rule: every UI tool has a feedback button that saves to the quality database).
+APP_VERSION = "web-2026-08"
+try:
+    from feedback import submit_feedback, CATEGORIES, default_db_path
+    _FB_OK = True
+except Exception as _fb_err:          # feedback.py missing on the server, etc.
+    _FB_OK = False
+    _FB_IMPORT_ERR = str(_fb_err)
+    CATEGORIES = ["Bug / something broke", "Idea / improvement",
+                  "Wrong result", "Question", "Other"]
+    def default_db_path():
+        return os.path.join(os.path.expanduser("~"), ".beyondgravity", "feedback.db")
+
+
+def _dedupe(files):
+    """Count a file only once. Detects the SAME file even if it was renamed, by
+    hashing its content — so an identical upload isn't merged twice. Returns
+    (unique_files, skipped_names)."""
+    seen, uniq, dups = set(), [], []
+    for f in files or []:
+        try:
+            h = hashlib.md5(f.getvalue()).hexdigest()
+        except Exception:
+            h = f.name           # fall back to name if content can't be read
+        if h in seen:
+            dups.append(f.name)
+            continue
+        seen.add(h)
+        uniq.append(f)
+    return uniq, dups
+
+
+def _is_adab_output(f):
+    """True if an uploaded file is a report ADAB itself produced (so it must NOT
+    be used as the As-Design). Detected by our own naming convention."""
+    n = (getattr(f, "name", "") or "").lower()
+    return (n.startswith("adab_") or n.startswith("report complete")
+            or "missing items" in n)
+
+
+def _save_attachments(files, who):
+    """Save feedback attachments (screenshots / docs) next to the feedback DB,
+    return the saved file names (recorded in the entry's context)."""
+    if not files:
+        return []
+    import datetime
+    saved = []
+    try:
+        base = os.path.dirname(os.path.abspath(default_db_path()))
+        adir = os.path.join(base, "feedback_attachments")
+        os.makedirs(adir, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_who = re.sub(r"[^A-Za-z0-9_-]+", "_", (who or "anon"))[:20] or "anon"
+        for i, f in enumerate(files):
+            safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", f.name)[-60:]
+            fn = f"{stamp}_{safe_who}_{i+1}_{safe_name}"
+            with open(os.path.join(adir, fn), "wb") as out:
+                out.write(f.getbuffer())
+            saved.append(fn)
+    except Exception as e:
+        saved.append(f"(attachment save failed: {type(e).__name__}: {e})")
+    return saved
+
 st.set_page_config(page_title="ADAB Compare", page_icon="🛰️", layout="centered")
+
 st.markdown("""
 <style>
-:root { --bg:#081521; --card:#0F2536; --bd:#21455E; --ink:#EAF2F8;
-        --sub:#8FA9BC; --acc:#1E9BE0; --accb:#4FC3F7; }
-.stApp { background:#081521; color:#EAF2F8; }
-h1,h2,h3,h4,label,p,span,div { color:#EAF2F8; }
-.bg-head { background:linear-gradient(180deg,#050C14,#0C3A5C);
-           border-bottom:2px solid #1E9BE0; border-radius:10px;
-           padding:18px 22px; margin-bottom:8px; }
-.bg-head h1 { margin:0; font-size:26px; }
-.bg-head .dot { color:#4FC3F7; }
-.bg-head p { margin:2px 0 0; color:#BBD4E6; font-size:13px; }
-.stButton>button, .stDownloadButton>button {
-    background:#1E9BE0; color:white; border:0; border-radius:8px;
-    font-weight:700; padding:10px 18px; }
-.stButton>button:hover, .stDownloadButton>button:hover { background:#1685C4; color:white; }
-[data-testid="stFileUploaderDropzone"] { background:#0A1B29; border:1px solid #21455E; }
+:root { --acc:#1E9BE0; --accb:#4FC3F7; }
+.stApp { background:#081521; color:#FFFFFF; }
+/* hide Streamlit's white top toolbar / header / rainbow bar */
+header[data-testid="stHeader"], [data-testid="stToolbar"],
+[data-testid="stDecoration"], [data-testid="stStatusWidget"] { display:none !important; }
+#MainMenu, footer { visibility:hidden; }
+
+/* EVERY letter white */
+.stApp, .stApp p, .stApp label, .stApp span, .stApp div, .stApp li,
+h1,h2,h3,h4,h5,h6, [data-testid="stMarkdownContainer"] * { color:#FFFFFF !important; }
+.block-container { max-width:1000px; padding-top:1.0rem; padding-bottom:2rem; }
+
+.bg-head { background:linear-gradient(180deg,#050C14 0%,#0C3A5C 100%);
+           border-bottom:3px solid #1E9BE0; border-radius:14px;
+           padding:24px 28px; margin-bottom:18px; }
+.bg-head h1 { margin:0; font-size:38px; font-weight:800; }
+.bg-head .dot { color:#4FC3F7 !important; }
+.bg-head p { margin:6px 0 0; font-size:15px; }
+
+.sec { font-size:19px; font-weight:700; color:#4FC3F7 !important; margin:0 0 2px; }
+.hint { font-size:13.5px; margin-bottom:4px; }
+
+div[data-testid="stVerticalBlockBorderWrapper"]{
+    background:#0F2536; border:1px solid #21455E !important;
+    border-radius:14px; padding:12px 18px 16px; margin-bottom:14px; }
+
+[data-testid="stFileUploaderDropzone"]{ background:#0A1B29; border:1px dashed #2C5875; padding:20px; }
+[data-testid="stFileUploaderDropzone"] *{ color:#FFFFFF !important; }
+[data-testid="stFileUploaderDropzone"] button{
+    background:#1E9BE0 !important; color:#fff !important; border:0 !important;
+    font-weight:700 !important; padding:8px 22px !important; }
+/* Style Streamlit's per-file chips dark (instead of the ugly white pill) and
+   KEEP them visible — so a file that fails to upload shows its red error icon
+   here and the user can see exactly which one to re-add (Adriele). */
+[data-testid="stFileUploaderFile"]{ background:#0A1B29 !important;
+    border:1px solid #2C5875 !important; border-radius:8px !important;
+    margin-bottom:4px !important; color:#FFFFFF !important; }
+.okmsg{ color:#5AD08A !important; font-weight:700; font-size:14px; margin-top:8px; }
+
+.stButton>button, .stDownloadButton>button{
+    background:#1E9BE0; color:#fff !important; border:0; border-radius:10px;
+    font-weight:800; font-size:18px; padding:15px 22px; width:100%; }
+.stButton>button:hover, .stDownloadButton>button:hover{ background:#1685C4; }
+.stDownloadButton>button{ font-size:16px; padding:12px 18px; }
+
+/* button state while the engine works / when it finishes */
+.run-state{ border-radius:10px; font-weight:800; font-size:18px; text-align:center;
+            padding:15px 22px; width:100%; box-sizing:border-box; color:#fff !important;
+            letter-spacing:.4px; }
+/* WORKING: bright blue moving gradient with a glow (aerospace-serious) */
+.run-state.busy{
+    background:linear-gradient(90deg,#0C3A5C,#1E9BE0,#7FD4FF,#1E9BE0,#0C3A5C);
+    background-size:220% 100%; border:1px solid #7FD4FF;
+    box-shadow:0 0 20px rgba(127,212,255,.55);
+    animation:bgshine 7s ease-in-out infinite; }
+@keyframes bgshine { 0%{background-position:220% 0;} 100%{background-position:-220% 0;} }
+/* DONE / calm confirmation */
+.run-state.done{ background:linear-gradient(90deg,#0E7A38,#17A34A); }
+/* little white spinner shown inside the working button */
+.spin{ display:inline-block; width:15px; height:15px; margin-right:11px;
+       border:3px solid rgba(255,255,255,.35); border-top-color:#fff;
+       border-radius:50%; vertical-align:-2px; animation:spin 1.6s linear infinite; }
+@keyframes spin{ to{ transform:rotate(360deg);} }
+
+/* 3 · Report — make the download area stand out (Adriele: people should look here) */
+.report-drop{ border:2px dashed #1E9BE0; border-radius:12px; background:#0A1B29;
+    padding:30px 20px; text-align:center; font-size:16px; font-weight:600;
+    color:#BFE3F7 !important; }
+.report-drop .big{ display:block; font-size:30px; margin-bottom:6px; color:#4FC3F7 !important; }
+.report-drop b{ color:#FFFFFF !important; }
+.report-ready{ border:2px solid #4FC3F7; border-radius:12px; background:#0C2A3E;
+    padding:14px 16px; box-shadow:0 0 16px rgba(79,195,247,.35); margin-bottom:8px; }
+/* BIG red banner when a file fails to upload / process (Adriele) */
+.bigwarn{ background:#3A0E12; border:2px solid #E15554; border-radius:12px;
+    padding:18px 20px; margin-bottom:14px; box-shadow:0 0 16px rgba(225,85,84,.35); }
+.bigwarn .h{ color:#FF6B6B !important; font-size:20px; font-weight:800; margin-bottom:6px; }
+.bigwarn .l{ color:#FFD9D9 !important; font-size:15px; font-weight:600; }
+/* amber caution shown by the uploaders */
+.caution{ background:#2A2410; border:1px solid #C99A2E; border-radius:10px;
+    padding:11px 15px; margin-top:8px; }
+.caution .h{ color:#FFE9A8 !important; font-size:14px; font-weight:800; margin-bottom:3px; }
+.caution .l{ color:#F0DCA0 !important; font-size:13px; }
+.caution b{ color:#FFFFFF !important; }
+
+/* feedback box fields — dark, white text */
+.stTextArea textarea, .stTextInput input{
+    background:#0A1B29 !important; color:#FFFFFF !important; border:1px solid #2C5875 !important; }
+/* the "start writing" prompt text — readable, not near-invisible grey */
+.stTextArea textarea::placeholder, .stTextInput input::placeholder{
+    color:#8FB6D0 !important; opacity:1 !important; font-style:italic; }
+[data-baseweb="select"] > div{ background:#0A1B29 !important; border:1px solid #2C5875 !important; }
+[data-baseweb="select"] *{ color:#FFFFFF !important; }
+
 .stProgress > div > div > div > div { background-color:#1E9BE0; }
-code, .stCode { background:#06111C !important; }
+
+/* the friendly log box — dark blue, white letters */
+pre, code { background:#06111C !important; color:#FFFFFF !important; font-size:14px;
+            border:1px solid #21455E; border-radius:8px; line-height:1.5; }
+[data-testid="stCheckbox"] label p, [data-testid="stMultiSelect"] * { color:#FFFFFF !important; }
 </style>
 <div class="bg-head">
   <h1>ADAB Compare <span class="dot">●</span></h1>
-  <p>As-Design vs As-Built traceability · beyond gravity</p>
+  <p>As-Design vs As-Built traceability&nbsp;·&nbsp;beyond gravity</p>
 </div>
 """, unsafe_allow_html=True)
 
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-def _milestone(line):
+_CNT = re.compile(r"\[(\d+)/(\d+)\]")
+_READ = re.compile(r"read (\d+)/(\d+)")
+
+
+def _fraction(line):
+    """Progress 0..1 from an engine log line."""
     low = line.strip().lower()
+    m = _CNT.search(low)
+    if m:
+        return int(m.group(1)) / max(1, int(m.group(2)))
+    m = _READ.search(low)
+    if m:
+        return 0.15 + 0.45 * (int(m.group(1)) / max(1, int(m.group(2))))
     if low.startswith("as-design"):          return 0.10
     if low.startswith("combine:"):           return 0.15
     if "roles ->" in low:                    return 0.30
@@ -63,32 +223,201 @@ def _milestone(line):
     return None
 
 
+def _friendly(line):
+    """Turn a technical engine log line into a plain message for the user.
+    Returns None for lines that should stay hidden."""
+    m = line.strip()
+    low = m.lower()
+    r = _READ.search(low)
+    if r:
+        return f"Reading your files… {r.group(1)} of {r.group(2)}"
+    c = _CNT.search(low)
+    if c:
+        return f"✓ Report {c.group(1)} of {c.group(2)} finished"
+    if low.startswith("as-designed"):
+        return "Reading your As-Design file…"
+    if low.startswith("combine:"):
+        return "Combining your As-Built files into one…"
+    if low.startswith("comparing") and "parallel" in low:
+        return "Comparing your files (all at once)…"
+    if "roles ->" in low:
+        return "Checking which file is the design and which is the as-built…"
+    if "match engines" in low:
+        return "Matching part numbers and names…"
+    if "name engine" in low:
+        return "Looking for parts with the same name but a different number…"
+    if "line conservation" in low:
+        return "Keeping every line — nothing is dropped ✓"
+    if "distinct parts ->" in low:
+        mm = re.search(r"matched (\d+).*?missing (\d+).*?extra (\d+)", low)
+        if mm:
+            return (f"Matched {mm.group(1)} parts  ·  {mm.group(2)} only in your "
+                    f"design  ·  {mm.group(3)} only in the as-built")
+    if low.startswith(("done", "finished")):
+        return "Finished! Your report is ready below. ✓"
+    if "!!!" in m or "warning" in low or low.startswith("skipped") or "error" in low:
+        return "⚠ " + m
+    return None
+
+
+def _milestone_desc():   # placeholder kept for clarity
+    pass
+
+
+# --- inputs -----------------------------------------------------------------
+with st.container(border=True):
+    st.markdown('<div class="sec">1 · As-Design (the F- baseline)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hint">Click <b>Browse files</b> — one MBOM, or select several at '
+                'once (Ctrl+A). Several files are merged into one baseline. '
+                '<b>Put here what you treat as the design / baseline</b> — usually your MBOM, '
+                'but any file (even a previous report) is accepted; you choose the role.</div>',
+                unsafe_allow_html=True)
+    design_up_raw = st.file_uploader("As-Design", type=["xlsx", "xlsm", "xls", "csv"],
+                                     accept_multiple_files=True, key="design",
+                                     label_visibility="collapsed")
+    design_up, design_dups = _dedupe(design_up_raw)
+    if design_dups:
+        st.markdown(f'<div class="hint" style="color:#E0A423 !important;">↺ Skipped '
+                    f'{len(design_dups)} duplicate file(s) — same content as one already '
+                    f'added, so counted once: {", ".join(design_dups)}</div>',
+                    unsafe_allow_html=True)
+    if design_up:
+        if len(design_up) == 1:
+            st.markdown(f'<div class="okmsg">✓ Uploaded: {design_up[0].name}</div>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="okmsg">✓ Uploaded {len(design_up)} files (merged): '
+                        f'{", ".join(f.name for f in design_up)}</div>',
+                        unsafe_allow_html=True)
+
+with st.container(border=True):
+    st.markdown('<div class="sec">2 · As-Built source</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hint">Click <b>Browse files</b> — pick one file, or select several at '
+                'once (open the folder and choose all the files). Tick Combine to treat them as one list. '
+                '<b>Put here what was actually built</b> — a list, scan, SAP / mb51 export, or even a '
+                'previous report; any file is accepted.</div>',
+                unsafe_allow_html=True)
+    built_up_raw = st.file_uploader("As-Built", type=["xlsx", "xlsm", "xls", "csv"],
+                                    accept_multiple_files=True, key="built",
+                                    label_visibility="collapsed")
+    built_up, built_dups = _dedupe(built_up_raw)
+    if built_dups:
+        st.markdown(f'<div class="hint" style="color:#E0A423 !important;">↺ Skipped '
+                    f'{len(built_dups)} duplicate file(s) — same content as one already '
+                    f'added, so counted once: {", ".join(built_dups)}</div>',
+                    unsafe_allow_html=True)
+    if built_up:
+        if len(built_up) == 1:
+            st.markdown(f'<div class="okmsg">✓ Uploaded: {built_up[0].name}</div>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="okmsg">✓ Uploaded {len(built_up)} files: '
+                        f'{", ".join(f.name for f in built_up)}</div>',
+                        unsafe_allow_html=True)
+    combine = st.checkbox("Combine all As-Built files into one list (one report)", value=False)
+
+# Detector: watch the uploaders and show a red bar ONLY when a file fails to
+# upload, naming it (Adriele). The failure lives only in the browser, so this is
+# done client-side; it's fully wrapped in try/catch so it can never break the page.
+components.html("""
+<script>
+(function(){
+  try{
+    var doc = window.parent.document;
+    var BID = "adab-upload-fail-banner";
+    function looksRed(el){
+      try{
+        var s = window.parent.getComputedStyle(el);
+        function red(v){ var m=v&&v.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+          if(!m) return false; return (+m[1])>170 && (+m[2])<110 && (+m[3])<110; }
+        return red(s.color) || red(s.fill);
+      }catch(e){ return false; }
+    }
+    function scan(){
+      try{
+        var chips = doc.querySelectorAll('[data-testid="stFileUploaderFile"]');
+        var failed = [];
+        chips.forEach(function(ch){
+          var err = false;
+          if (ch.querySelector('[data-testid$="ErrorMessage"], [role="alert"]')) err = true;
+          if (!err){ var els=ch.querySelectorAll('*');
+            for (var i=0;i<els.length;i++){ if(looksRed(els[i])){ err=true; break; } } }
+          if (err){
+            var nm = ch.querySelector('[data-testid="stFileUploaderFileName"]');
+            var t = nm ? nm.textContent : (ch.textContent||"a file");
+            failed.push(t.replace(/\\s*\\d+(\\.\\d+)?\\s*(K|M|G)?B\\s*$/i,"").trim().slice(0,70));
+          }
+        });
+        var b = doc.getElementById(BID);
+        if (failed.length){
+          if(!b){ b=doc.createElement("div"); b.id=BID;
+            b.style.cssText="position:fixed;top:0;left:0;right:0;z-index:99999;"
+              +"background:#B4232A;color:#fff;padding:14px 22px;font-family:Arial,sans-serif;"
+              +"font-size:16px;font-weight:700;box-shadow:0 2px 12px rgba(0,0,0,.45);";
+            doc.body.appendChild(b); }
+          b.innerHTML = "⚠ These file(s) did NOT upload: "
+            + failed.map(function(n){return "<u>"+n+"</u>";}).join(",  ")
+            + " &nbsp;—&nbsp; remove them (✗) and add again (close them in Excel first).";
+        } else if (b){ b.remove(); }
+      }catch(e){}
+    }
+    setInterval(scan, 900); scan();
+  }catch(e){}
+})();
+</script>
+""", height=0)
+
+st.markdown('<div class="hint" style="margin:2px 2px 8px;">Report tabs are always '
+            '“In As-Built, not in Design” / “In Design, not in As-Built”.</div>',
+            unsafe_allow_html=True)
+
+btn_ph = st.empty()
+run = btn_ph.button("Run · As-Built vs As-Design", type="primary", key="runbtn")
+
+# progress + log always visible
 st.write("")
-design_up = st.file_uploader("**1 · As-Design (the F- baseline)**",
-                             type=["xlsx", "xlsm", "xls"], key="design")
-built_up = st.file_uploader("**2 · As-Built source** — one file, or several to combine",
-                            type=["xlsx", "xlsm", "xls"], accept_multiple_files=True,
-                            key="built")
-combine = st.checkbox("Combine all As-Built files into one list (one report)", value=False)
-st.caption("Report tabs are always “In As-Built, not in Design” / “In Design, not in As-Built”.")
+c1, c2 = st.columns([4, 1])
+status_ph = c1.empty()
+pct_ph = c2.empty()
+bar = st.progress(0.0)
+status_ph.markdown('<div class="sec" style="font-size:15px;color:#FFFFFF !important;">Ready.</div>',
+                   unsafe_allow_html=True)
+pct_ph.markdown('<div style="text-align:right;font-weight:800;color:#4FC3F7;font-size:17px;">0%</div>',
+                unsafe_allow_html=True)
 
-run = st.button("Run · As-Built vs As-Design", use_container_width=True, type="primary")
+st.markdown('<div class="hint" style="margin-top:10px;">What’s happening</div>', unsafe_allow_html=True)
+log_ph = st.empty()
+log_ph.code("Upload your files and press Run — I’ll tell you each step here.", language=None)
 
+
+# --- run --------------------------------------------------------------------
 if run:
-    if design_up is None or not built_up:
-        st.error("Please upload the As-Design file and at least one As-Built file.")
+    if not design_up or not built_up:
+        st.error("Please upload the As-Design file(s) and at least one As-Built file.")
         st.stop()
+
+    # button turns into a bright-blue moving gradient with a spinner so you can
+    # see the engine is working
+    btn_ph.markdown('<div class="run-state busy"><span class="spin"></span>'
+                    'Running the engine…</div>', unsafe_allow_html=True)
 
     work = tempfile.mkdtemp(prefix="adab_")
     out_dir = os.path.join(work, "out")
     os.makedirs(out_dir, exist_ok=True)
 
-    # save As-Design
-    design_path = os.path.join(work, design_up.name)
-    with open(design_path, "wb") as f:
-        f.write(design_up.getbuffer())
+    # As-Design: one file, or several merged into one baseline (pass a folder)
+    if len(design_up) == 1:
+        design_arg = os.path.join(work, design_up[0].name)
+        with open(design_arg, "wb") as f:
+            f.write(design_up[0].getbuffer())
+    else:
+        ddir = os.path.join(work, "design")
+        os.makedirs(ddir, exist_ok=True)
+        for uf in design_up:
+            with open(os.path.join(ddir, uf.name), "wb") as f:
+                f.write(uf.getbuffer())
+        design_arg = ddir
 
-    # save As-Built (one file -> pass file; many -> pass a folder)
     if len(built_up) == 1 and not combine:
         b0 = os.path.join(work, built_up[0].name)
         with open(b0, "wb") as f:
@@ -102,37 +431,197 @@ if run:
                 f.write(uf.getbuffer())
         built_arg = bdir
 
-    bar = st.progress(0.0, text="Starting…")
-    logbox = st.empty()
-    lines = []
+    shown = []
+    maxf = [0.0]
 
     def progress(msg):
-        lines.append(str(msg))
-        logbox.code("\n".join(lines[-200:]), language=None)
-        frac = _milestone(str(msg))
+        nice = _friendly(str(msg))
+        if nice:
+            shown.append(nice)
+            log_ph.code("\n".join(shown[-200:]), language=None)
+        frac = _fraction(str(msg))
         if frac is not None:
-            bar.progress(frac, text=str(msg).strip()[:80] or "Working…")
+            maxf[0] = max(maxf[0], frac)
+            bar.progress(maxf[0])
+            if nice:
+                status_ph.markdown(
+                    f'<div class="sec" style="font-size:15px;color:#FFFFFF !important;">{nice}</div>',
+                    unsafe_allow_html=True)
+            pct_ph.markdown(
+                f'<div style="text-align:right;font-weight:800;color:#4FC3F7;font-size:17px;">{int(maxf[0]*100)}%</div>',
+                unsafe_allow_html=True)
 
     try:
-        with st.spinner("Comparing…"):
-            core.run_compare(design_path, built_arg, out_dir,
-                             combine=combine, progress=progress,
-                             built_label="As Built")
-        bar.progress(1.0, text="Finished ✓")
+        results = core.run_compare(design_arg, built_arg, out_dir, combine=combine,
+                                   progress=progress, built_label="As Built",
+                                   workers=os.cpu_count())
+        bar.progress(1.0)
+        pct_ph.markdown('<div style="text-align:right;font-weight:800;color:#4FC3F7;font-size:17px;">100%</div>',
+                        unsafe_allow_html=True)
+        btn_ph.markdown('<div class="run-state done">✓ Finished — report is ready below</div>',
+                        unsafe_allow_html=True)
     except Exception as e:
-        st.error(f"Error: {e}")
+        btn_ph.markdown('<div class="run-state done" style="background:#B4232A;">✕ Stopped — see the message below</div>',
+                        unsafe_allow_html=True)
+        st.error(f"Something went wrong: {e}")
         st.code(traceback.format_exc())
         st.stop()
 
-    reports = sorted(glob.glob(os.path.join(out_dir, "*.xlsx")))
-    if not reports:
-        st.warning("No report was produced — check the log above.")
+    # read the reports into memory so they survive the download clicks (reruns).
+    # Stamp each run's files with the date + time so different runs never share a
+    # filename (Adriele) — you can tell runs apart and they don't overwrite.
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %Hh%Mm%Ss")  # e.g. 12h55m54s
+    reps = []
+    for rp in sorted(glob.glob(os.path.join(out_dir, "*.xlsx"))):
+        base, ext = os.path.splitext(os.path.basename(rp))
+        with open(rp, "rb") as f:
+            reps.append({"name": f"{base} {stamp}{ext}", "data": f.read()})
+    st.session_state["reports"] = reps
+    # bump a run id so the download widgets below get FRESH keys each run — this
+    # makes section 3 reset to the new results automatically (Adriele), instead of
+    # Streamlit keeping the previous run's selection.
+    st.session_state["run_id"] = st.session_state.get("run_id", 0) + 1
+
+    # collect any file that did NOT produce a report, so we can shout about it
+    problems = []
+    for r in (results or []):
+        if not isinstance(r, dict):
+            continue
+        if r.get("error"):
+            problems.append(f"{r.get('unit', 'a file')} — {r['error']}")
+        elif r.get("empty"):
+            problems.append(f"{r.get('unit', 'a file')} — no As-Built data found (empty file)")
+    # sanity: expect one FULL report per As-Built file when NOT combining
+    full_reports = [r for r in reps
+                    if not r["name"].upper().startswith("MISSING ITEMS")]
+    if not combine and len(built_up) > len(full_reports) and not problems:
+        problems.append(f"Only {len(full_reports)} of {len(built_up)} files produced "
+                        "a report — one or more could not be read.")
+    st.session_state["problems"] = problems
+
+
+# --- report / download (persists across download clicks) --------------------
+with st.container(border=True):
+    st.markdown('<div class="sec">3 · Report</div>', unsafe_allow_html=True)
+    _probs = st.session_state.get("problems")
+    if _probs:
+        items = "".join(f'<div class="l">• {msg}</div>' for msg in _probs)
+        st.markdown('<div class="bigwarn"><div class="h">⚠ Some files did NOT make it '
+                    'into a report</div>' + items +
+                    '<div class="l" style="margin-top:8px;">Re-add the file(s) above '
+                    'and run again. If you saw a red “Network Error” when uploading, '
+                    'that file didn’t reach the server — refresh (Ctrl+Shift+R) and '
+                    'add it again.</div></div>', unsafe_allow_html=True)
+    reps = st.session_state.get("reports")
+    rid = st.session_state.get("run_id", 0)   # fresh widget keys per run
+    if not reps:
+        st.markdown('<div class="report-drop"><span class="big">⬇</span>'
+                    'Your Excel report will appear <b>here</b> to download '
+                    'after you press <b>Run</b>.</div>', unsafe_allow_html=True)
+    elif len(reps) == 1:
+        st.success("Done — your report is ready.")
+        st.download_button(f"⬇  Download  {reps[0]['name']}", reps[0]["data"],
+                           file_name=reps[0]["name"], mime=XLSX_MIME,
+                           key=f"dl_single_{rid}")
     else:
-        st.success(f"Done — {len(reports)} report(s) ready.")
-        for rp in reports:
-            with open(rp, "rb") as f:
-                st.download_button(
-                    f"⬇ Download  {os.path.basename(rp)}", f.read(),
-                    file_name=os.path.basename(rp),
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True)
+        st.success(f"Done — {len(reps)} reports ready. Tick the ones you want, then download.")
+        names = [r["name"] for r in reps]
+        chosen = st.multiselect("Choose reports", names, default=names,
+                                label_visibility="collapsed", key=f"choose_{rid}")
+        if chosen:
+            buf = io.BytesIO()
+            # ZIP_STORED (no compression) — xlsx are already compressed, so this
+            # bundles almost instantly instead of re-compressing.
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+                for r in reps:
+                    if r["name"] in chosen:
+                        z.writestr(r["name"], r["data"])
+            st.download_button(f"⬇  Download selected ({len(chosen)}) as ZIP",
+                               buf.getvalue(), file_name="adab_reports.zip",
+                               mime="application/zip", key=f"dl_zip_{rid}")
+        with st.expander("…or download one at a time"):
+            for r in reps:
+                st.download_button(f"⬇  {r['name']}", r["data"],
+                                   file_name=r["name"], mime=XLSX_MIME,
+                                   key=f"one_{rid}_{r['name']}")
+
+
+# --- feedback: a clear "FEEDBACK? CLICK HERE" button that opens the form ------
+# Adriele: make it a bigger, obvious call-to-action; let people add their name
+# (optional) so a web note isn't just the anonymous server login.
+st.write("")
+if "show_fb" not in st.session_state:
+    st.session_state["show_fb"] = False
+fbcol, _fbsp = st.columns([2, 3])
+with fbcol:
+    if st.button("💬  FEEDBACK?  CLICK HERE", key="fb_toggle"):
+        st.session_state["show_fb"] = not st.session_state["show_fb"]
+
+if st.session_state["show_fb"]:
+    with st.container(border=True):
+        st.markdown('<div class="hint" style="margin-bottom:8px;">Spot a bug, '
+                    'have an idea, or something worked really well? Tell us — '
+                    'good and bad, it all goes straight to the quality team. '
+                    'Add your name if you’d like — it’s optional.</div>',
+                    unsafe_allow_html=True)
+        # show the thank-you here after a successful send (the fields have been
+        # cleared by then, so it appears on a fresh, empty form)
+        if st.session_state.pop("fb_flash", None):
+            st.success(st.session_state.pop("fb_flash_msg", "Thank you — your "
+                                            "feedback was saved. ✓"))
+        # a nonce in every widget key: bump it on send so all fields reset (the
+        # typed message clears) on the next run (Adriele)
+        nz = st.session_state.get("fb_nonce", 0)
+        fb_name = st.text_input("Your name (optional)", key=f"fb_name_{nz}",
+                                placeholder="Your name — optional",
+                                label_visibility="collapsed")
+        # make sure a positive option is offered so people know praise is welcome
+        FB_CATEGORIES = list(CATEGORIES)
+        if not any(("praise" in c.lower() or "worked well" in c.lower())
+                   for c in FB_CATEGORIES):
+            FB_CATEGORIES.insert(1, "Praise / what worked well 👍")
+        fb_cat = st.selectbox("Type", FB_CATEGORIES, key=f"fb_cat_{nz}")
+        fb_msg = st.text_area("Your feedback", key=f"fb_msg_{nz}", height=95,
+                              placeholder="Tell us what happened, what worked well, "
+                                          "a wrong result, or your idea…",
+                              label_visibility="collapsed")
+        st.markdown('<div class="hint" style="margin:2px 0 4px;">Attach a screenshot '
+                    'or a file (optional) — helps us see exactly what you mean.</div>',
+                    unsafe_allow_html=True)
+        fb_files = st.file_uploader("Attach files", accept_multiple_files=True,
+                                    key=f"fb_files_{nz}", label_visibility="collapsed")
+        bcol, _sp = st.columns([1, 3])          # small Send, not full width
+        with bcol:
+            send_fb = st.button("Send", key=f"fb_send_{nz}")
+        if send_fb:
+            if not fb_msg.strip():
+                st.warning("Please type your feedback before sending.")
+            elif not _FB_OK:
+                st.error("Feedback module isn’t available on the server "
+                         f"(feedback.py). Details: {_FB_IMPORT_ERR}")
+            else:
+                try:
+                    who = fb_name.strip()
+                    attached = _save_attachments(fb_files, who)
+                    ctx = {
+                        "submitted_by": who or "(anonymous)",
+                        "attachments": attached,
+                        "as_design_files": len(design_up) if design_up else 0,
+                        "as_built_files": len(built_up) if built_up else 0,
+                        "combine": bool(combine),
+                        "reports_ready": len(st.session_state.get("reports") or []),
+                    }
+                    submit_feedback("ADAB Compare (web)", APP_VERSION,
+                                    fb_cat, fb_msg.strip(), context=ctx)
+                    extra = (f" ({len(attached)} file(s) attached)"
+                             if attached else "")
+                    # clear the form: bump the nonce → fresh empty fields; show the
+                    # thank-you on the next run via the flash flags
+                    st.session_state["fb_flash"] = True
+                    st.session_state["fb_flash_msg"] = (
+                        f"Thank you{', ' + who if who else ''} for your feedback. Your participation is greatly appreciated. "
+                        f"was saved{extra}. ✓")
+                    st.session_state["fb_nonce"] = nz + 1
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not save your feedback: {e}")

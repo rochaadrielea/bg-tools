@@ -1,0 +1,12 @@
+baseline 2026-08-11T14:37:12
+nc rows            4644
+open (is_open=1)   267
+distinct nc_id     4644
+null nc_id         0
+capa rows          1911
+capa nc_id=0       0
+capa orphans       106
+open by system:
+   Blackout   17
+   EZ1        96
+   SAP        154

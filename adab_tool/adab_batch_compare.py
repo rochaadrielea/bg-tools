@@ -28,6 +28,7 @@ import os
 import re
 import warnings
 import openpyxl
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -274,8 +275,17 @@ ASBUILD_COLS_ALL = [
 # the material (ID), then Revision, Quantity, and the batch-relevant flags.
 # Nothing else is carried.
 MBOM_COLS_CONCISE = [
-    "Revision Name", "Description", "ID", "Revision", "Quantity", "Traceable", "Lot",
+    "Revision Name", "Description", "ID", "Revision", "Quantity", "Lot",
 ]
+# Header display names. The design part number lives in the internal field "ID",
+# but SAP calls that the Material number — so we SHOW it as "Material" in every
+# tab (Adriele's ask). The internal key stays "ID" everywhere in the code.
+HEADER_LABELS = {"ID": "Material"}
+
+
+def _disp(col):
+    """Column header as the USER should read it (SAP wording)."""
+    return HEADER_LABELS.get(col, col)
 # FIXED canonical As-Built columns — the ONLY As-Built fields carried anywhere
 # (Matched tab and the "In <source>, not in Design" tab). _adapt_source maps
 # every source onto these names; everything else is dropped.
@@ -313,6 +323,84 @@ def _pattern_material_col(headers, records):
         if frac > best[1]:
             best = (h, frac)
     return best[0] if best[1] >= 0.5 else None
+
+
+# --- self-learning column detector -----------------------------------------
+# Works out which column is the material number, description, revision, quantity,
+# batch and serial from the CONTENT of the values (not just the header name), so
+# any export/layout/language can be read. Deterministic + explainable: what it
+# picks is written to the Summary tab so a reviewer can keep an eye on it.
+_RE_REV = re.compile(r"^(?:[A-Z]{1,2}|\d{1,2}|[A-Z]\d{1,2}|[0-9]{1,2}[A-Z])$")
+
+
+def _hint(header, keys):
+    hl = str(header).casefold()
+    return any(k in hl for k in keys)
+
+
+def _col_stats(headers, records):
+    sample = [r for r in records if r][:500]
+    out = {}
+    for h in headers:
+        vals = [r.get(h) for r in sample if r.get(h) not in (None, "")]
+        n = len(vals)
+        if n < 3:
+            out[h] = None
+            continue
+        sv = [str(v).strip() for v in vals]
+        out[h] = {
+            "n": n,
+            "material": sum(_looks_material(v) for v in sv) / n,
+            "numeric": sum(1 for v in sv if _to_float(v) is not None) / n,
+            "revision": sum(1 for v in sv if _RE_REV.match(v.upper())) / n,
+            "boolean": sum(1 for v in sv if v.casefold() in
+                           ("true", "false", "yes", "no", "1", "0")) / n,
+            "avglen": sum(len(v) for v in sv) / n,
+            "words": sum(1 for v in sv if " " in v) / n,
+        }
+    return out
+
+
+def detect_roles(headers, records):
+    """Return {role: column_name} detected by content (+ header-name hint).
+    Roles: Material, Description, Revision, Quantity, Batch/Lot, Serial."""
+    sc = _col_stats(headers, records)
+
+    def pick(score_fn, min_score, hints):
+        best_h, best_v = None, 0.0
+        for h in headers:
+            s = sc.get(h)
+            if not s:
+                continue
+            v = score_fn(s)
+            if _hint(h, hints):
+                v += 0.45
+            if v > best_v:
+                best_h, best_v = h, v
+        return best_h if best_v >= min_score else None
+
+    material = pick(lambda s: s["material"], 0.55,
+                    ("material", "part number", "part no", "component", "matnr",
+                     "artikel", "item id", "teilenummer")) \
+        or pick(lambda s: s["material"] * 0.9, 0.5, ("id",))
+    quantity = pick(lambda s: s["numeric"] if s["avglen"] <= 6 else 0.0, 0.6,
+                    ("qty", "quantity", "menge", "anzahl", "stück", "stuck"))
+    revision = pick(lambda s: s["revision"], 0.6, ("rev", "stand", "version"))
+    description = pick(lambda s: min(1.0, s["avglen"] / 22.0) * 0.7 + s["words"] * 0.3,
+                       0.45, ("desc", "bezeichnung", "kurztext", "benennung",
+                              "short text"))
+    batch = pick(lambda s: 0.25 if s["avglen"] >= 3 else 0.0, 0.3,
+                 ("charge", "batch", "lot", "los"))
+    serial = pick(lambda s: 0.25 if s["avglen"] >= 3 else 0.0, 0.3,
+                  ("serial", "serien", "seriennummer", "sn"))
+    return {"Material": material, "Description": description, "Revision": revision,
+            "Quantity": quantity, "Batch/Lot": batch, "Serial": serial}
+
+
+def _roles_summary(roles):
+    """One-line 'Material=<col>, Description=<col>, ...' for the report."""
+    parts = [f"{k}={v}" for k, v in roles.items() if v]
+    return "; ".join(parts) if parts else "(none detected)"
 
 
 def _adapt_source(headers, records):
@@ -488,10 +576,23 @@ def load_bom(path):
     Reads the sheet with the most material-looking rows (not blindly wb.active),
     so a CLEAN file whose active sheet is 'Attention' is still read from 'Labels'.
     """
-    wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
-    ws = _best_sheet(wb)
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".csv":
+        # CSV: sniff the delimiter (comma / semicolon / tab), read all rows.
+        import csv as _csv
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as fh:
+            sample = fh.read(8192)
+            fh.seek(0)
+            try:
+                dialect = _csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            except Exception:
+                dialect = _csv.excel
+            rows = [tuple(r) for r in _csv.reader(fh, dialect)]
+    else:
+        wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
+        ws = _best_sheet(wb)
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
     if not rows:
         return [], []
     # Find the REAL header row. A file exported from a previous ADAB run (or any
@@ -609,27 +710,46 @@ def _norm_key(v):
     return re.sub(r"\s+", " ", str(v).strip().upper())
 
 
-def design_key(rec):
-    """Design match key — the engineering part number in the design BOM.
-    Prefers 'ID'; falls back to Part Number / Material so ANY parts list can be
-    used as the As-Design side, not only a Teamcenter MBOM."""
-    for col in ("ID", "Part Number", "Material"):
-        v = rec.get(col)
+# Part-number column names we recognise, case-insensitively, incl. EBOM / SAP /
+# German variants ("Material ID", "Material Number", "Materialnummer", ...).
+_PN_NAMES = ("ID", "Part Number", "Part No", "Part No.", "Material",
+             "Material ID", "Material Id", "Material Number", "Material No",
+             "Materialnummer", "Matnr", "Mat Nr", "Component", "Component ID")
+
+
+def _first_val(rec, names):
+    """First non-empty value among the given column names, matched
+    case-insensitively (so 'Material ID' / 'material id' both hit)."""
+    lower = None
+    for n in names:
+        v = rec.get(n)
         if v not in (None, ""):
             return _norm_key(v)
+    # case-insensitive fallback (built once per call, cheap for our sizes)
+    lower = {str(k).strip().lower(): k for k in rec.keys()}
+    for n in names:
+        k = lower.get(n.lower())
+        if k is not None:
+            v = rec.get(k)
+            if v not in (None, ""):
+                return _norm_key(v)
     return ""
+
+
+def design_key(rec):
+    """Design match key — the engineering part number in the design BOM. Prefers
+    'ID'; falls back to Part Number / Material / Material ID (EBOM, SAP, German
+    exports) so ANY parts list can be the As-Design side, not only a TC MBOM."""
+    return _first_val(rec, _PN_NAMES)
 
 
 def built_key(rec):
-    """Built match key — the part number on the built/list side. Prefers
-    'Part Number', then 'Material', then 'ID'. The fallback matters: a design-
-    style file (only an 'ID' column) or a manual list can now be used as the
-    As-Built side too, instead of reading as ZERO parts."""
-    for col in ("Part Number", "Material", "ID"):
-        v = rec.get(col)
-        if v not in (None, ""):
-            return _norm_key(v)
-    return ""
+    """Built match key — the part number on the built/list side. Same recognised
+    names as the design side (ID / Part Number / Material / Material ID / …), so a
+    design-style file OR an EBOM / SAP list can be the As-Built side too."""
+    return _first_val(rec, ("Part Number", "Part No", "Material", "Material ID",
+                            "Material Id", "Material Number", "Materialnummer",
+                            "Matnr", "ID", "Component"))
 
 
 def _to_float(v):
@@ -950,6 +1070,17 @@ def write_summary_tab(wb, counts, unit_name, label="As-Built", meta=None):
             w.font = Font(name="Arial", size=11, bold=True, color="9C0006")
             w.fill = PatternFill("solid", fgColor="FFC7CE")
             row += 1
+        # column detector — what each side's columns were read as (keep an eye)
+        if meta.get("design_cols"):
+            c = ws.cell(row=row, column=1,
+                        value=f"Columns detected  ·  As-Design:  {meta['design_cols']}")
+            c.font = sm
+            row += 1
+        if meta.get("built_cols"):
+            c = ws.cell(row=row, column=1,
+                        value=f"Columns detected  ·  As-Built:  {meta['built_cols']}")
+            c.font = sm
+            row += 1
         row += 1
     ws.cell(row=row, column=1,
             value="Distinct part numbers. Each count is a set operation on part "
@@ -1195,10 +1326,14 @@ def write_matched_tab(wb, matched, mbom_cols, asb_cols,
     if mc_cols:
         _band(ws, 1, witness_c0, "Description witness", hf, hfill)
 
-    # suffix headers that appear on both sides so they are unambiguous
-    common = set(mbom_cols) & set(asb_cols)
-    mbom_hdr = [f"{c} (Design)" if c in common else c for c in mbom_cols]
-    asb_hdr = [f"{c} (Built)" if c in common else c for c in asb_cols]
+    # suffix headers that appear on both sides so they are unambiguous.
+    # Compare on the DISPLAY name (so design "ID" -> "Material" collides with the
+    # As-Built "Material" and both get a (Design)/(Built) suffix).
+    mbom_disp = [_disp(c) for c in mbom_cols]
+    asb_disp = [_disp(c) for c in asb_cols]
+    common = set(mbom_disp) & set(asb_disp)
+    mbom_hdr = [f"{d} (Design)" if d in common else d for d in mbom_disp]
+    asb_hdr = [f"{d} (Built)" if d in common else d for d in asb_disp]
     field_headers = ["Status"] + mbom_hdr + asb_hdr + mc_cols
     for c, h in enumerate(field_headers, start=1):
         cell = ws.cell(row=2, column=c, value=h)
@@ -1277,7 +1412,7 @@ def write_single_side_tab(wb, title, records, cols, note, note_fill):
     nb.fill = PatternFill("solid", fgColor=note_fill)
 
     for c, h in enumerate(cols, start=1):
-        cell = ws.cell(row=2, column=c, value=h)
+        cell = ws.cell(row=2, column=c, value=_disp(h))
         cell.font = hf
         cell.fill = hfill
         cell.alignment = Alignment(horizontal="left")
@@ -1293,10 +1428,81 @@ def write_single_side_tab(wb, title, records, cols, note, note_fill):
         ws.column_dimensions[get_column_letter(c)].width = 20
 
 
+# Accept ANY spreadsheet type people bring: xlsx / xlsm / xls / csv (and xltx).
+_INPUT_PATTERNS = ("*.xlsx", "*.xlsm", "*.xls", "*.xltx", "*.csv")
+
+
+def _list_inputs(folder):
+    files = []
+    for pat in _INPUT_PATTERNS:
+        files += glob.glob(os.path.join(folder, pat))
+    return sorted(f for f in set(files)
+                  if not os.path.basename(f).startswith("~$"))
+
+
+def write_missing_items(wb, unmatched_design, cols, label="As-Built"):
+    """LAST tab — MISSING ITEMS: one row per DISTINCT design part that is in the
+    As-Design but was NOT found in the As-Built. This is the headline the user
+    cares about, so it is DEDUPED to distinct parts (not every BOM position),
+    with a Positions count and the total design Quantity."""
+    seen, order = {}, []
+    for d in unmatched_design:
+        k = design_key(d)
+        if not k:
+            continue
+        if k not in seen:
+            seen[k] = {"rec": d, "positions": 0, "qty": 0.0, "hasqty": False}
+            order.append(k)
+        e = seen[k]
+        e["positions"] += 1
+        q = _to_float(d.get("Quantity"))
+        if q is not None:
+            e["qty"] += q
+            e["hasqty"] = True
+
+    ws = wb.create_sheet(title="Missing Items")
+    thin = Font(name="Arial", size=9)
+    hf = Font(name="Arial", size=9, bold=True)
+    hfill = PatternFill("solid", fgColor=COL_HEADER)
+    fill = PatternFill("solid", fgColor=COL_MISSING)
+
+    note = (f"MISSING ITEMS — {len(order)} distinct part(s) that are IN THE "
+            f"AS-DESIGN but were NOT FOUND in the {label}. One row per part "
+            f"(Positions = how many BOM positions it has; Quantity = total).")
+    nb = ws.cell(row=1, column=1, value=note)
+    nb.font = hf
+    nb.fill = fill
+
+    out_cols = list(cols) + ["Positions"]
+    for c, h in enumerate(out_cols, start=1):
+        cell = ws.cell(row=2, column=c, value=_disp(h))
+        cell.font = hf
+        cell.fill = hfill
+        cell.alignment = Alignment(horizontal="left")
+
+    for i, k in enumerate(sorted(order), start=3):
+        e = seen[k]
+        rec = e["rec"]
+        for c, col in enumerate(cols, start=1):
+            if col == "Quantity":
+                v = round(e["qty"], 4) if e["hasqty"] else ""
+            else:
+                v = cell_val(col, get(rec, col))
+            ws.cell(row=i, column=c, value=v).font = thin
+            ws.cell(row=i, column=c).fill = fill
+        pc = ws.cell(row=i, column=len(out_cols), value=e["positions"])
+        pc.font = thin
+        pc.fill = fill
+
+    ws.freeze_panes = "A3"
+    for c in range(1, len(out_cols) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 20
+    return len(order)
+
+
 def resolve_design(design_arg):
     if os.path.isdir(design_arg):
-        files = [f for f in glob.glob(os.path.join(design_arg, "*.xls*"))
-                 if not os.path.basename(f).startswith("~$")]
+        files = _list_inputs(design_arg)
         if len(files) != 1:
             raise SystemExit(f"Design folder must hold exactly one file, found {len(files)}")
         return files[0]
@@ -1312,7 +1518,7 @@ def _sheet_safe(text, limit=31):
 def _one_report(out_path, name, built_headers, built_recs,
                 design_recs, design_headers, design_recs_noL0,
                 mbom_cols_concise, design_qty_by_id, log,
-                built_label="As-Built", design_name=""):
+                built_label="As-Built", design_name="", doc_name=""):
     """Build ONE ADAB report for a set of built records against the design.
 
     built_label names the As-Built source (e.g. 'Scan', 'Manual', 'Reserved',
@@ -1394,9 +1600,15 @@ def _one_report(out_path, name, built_headers, built_recs,
         log(f"  !!! ROLE WARNING: {swap_warn}")
     log(f"  Roles -> As-Design: {design_name or '(design)'} [{design_kind}]  |  "
         f"As-Built ({built_label}): {name} [{built_kind}]")
+    # self-learning column detector — record what each side's columns were read
+    # as, so it can be shown in the Summary ("keep an eye on it", Adriele).
+    design_roles = detect_roles(design_headers, design_recs)
+    built_roles = detect_roles(built_headers, built_recs)
     meta = {"design_name": design_name, "design_kind": design_kind,
             "built_name": name, "built_kind": built_kind,
-            "built_label": built_label, "swap_warn": swap_warn}
+            "built_label": built_label, "swap_warn": swap_warn,
+            "design_cols": _roles_summary(design_roles),
+            "built_cols": _roles_summary(built_roles)}
 
     # per-source-type behaviour (which checks apply, wording)
     profile = profile_for(built_label)
@@ -1448,29 +1660,22 @@ def _one_report(out_path, name, built_headers, built_recs,
     built_is_list = any(b.get("_is_scan") for b in built_recs_noL0)
     extra_cols = (list(ASBUILT_CANONICAL) if built_is_list
                   else actual_cols(built_headers, built_recs_noL0))
+    # NO BLANK GAPS (Adriele): only write rows that actually have something in the
+    # displayed columns. Empty source rows (blank/spacer lines that carry no part
+    # data) would otherwise render as empty rows scattered through the tab.
+    extras = [r for r in unmatched_built
+              if any(str(get(r, c)).strip() for c in extra_cols)]
     write_single_side_tab(
-        wb, _sheet_safe(f"In {built_label}, not in Design"), unmatched_built,
+        wb, _sheet_safe(f"In {built_label}, not in Design"), extras,
         extra_cols,
         note=f"{recon['extra']} distinct part(s) IN {built_label.upper()} but "
-             f"NOT IN THE DESIGN ({len(unmatched_built)} line(s); {key_label} "
+             f"NOT IN THE DESIGN ({len(extras)} line(s); {key_label} "
              f"not in the design baseline)",
         note_fill=COL_DEVIATED)
-    write_single_side_tab(
-        wb, _sheet_safe(f"In Design, not in {built_label}"), unmatched_design,
-        mbom_cols_concise,
-        note=f"{recon['missing']} distinct part(s) IN THE DESIGN but NOT IN "
-             f"{built_label.upper()} - shown here as {len(unmatched_design)} "
-             f"BOM position(s) (same part can occupy several positions). See Summary.",
-        note_fill=COL_MISSING)
-
-    # THE DESCRIPTION ENGINE, made visible: rescue same-description/diff-number
-    # pairs from the extras vs the missing. This is where the vectorisation earns
-    # its keep — turning false extras/missing into reviewable real matches.
-    rescued = write_description_rescue_tab(wb, unmatched_built, unmatched_design,
-                                           vectorizer, key_label=key_label)
-    log(f"  Name engine: {rescued} same-name candidate(s) found among the "
-        f"{recon['extra']} extra / {recon['missing']} missing "
-        f"(see 'Review - Name match').")
+    # LAST tab = "Missing Items": DISTINCT design parts in the As-Design but NOT
+    # found in the As-Built (Adriele: this is what matters; one row per part).
+    write_missing_items(wb, unmatched_design, mbom_cols_concise,
+                        label=built_label)
 
     try:
         wb.save(out_path)
@@ -1484,6 +1689,24 @@ def _one_report(out_path, name, built_headers, built_recs,
         f"positions: matched-lines {len(matched)}, "
         f"unmatched-built-lines {len(unmatched_built)}, "
         f"unmatched-design-positions {len(unmatched_design)}")
+
+    # ALSO write a STANDALONE "missing items" file (Adriele) so the actionable
+    # list can be downloaded on its own, next to the full report. doc_name is the
+    # As-Built unit for a per-file report, or "" for the combined run.
+    miss_base = "missing items" if not doc_name else f"missing items - {doc_name}"
+    miss_path = os.path.join(os.path.dirname(out_path), _safe_name(miss_base) + ".xlsx")
+    try:
+        mwb = openpyxl.Workbook()
+        mwb.remove(mwb.active)
+        write_missing_items(mwb, unmatched_design, mbom_cols_concise,
+                            label=built_label)
+        mwb.save(miss_path)
+        log(f"  Missing-items file -> {os.path.basename(miss_path)}")
+    except PermissionError:
+        log(f"  COULD NOT SAVE {os.path.basename(miss_path)} — it's open in Excel.")
+    except Exception as e:
+        log(f"  Missing-items file skipped ({type(e).__name__}: {e}).")
+
     return {"unit": name, "matched": len(matched), "deviations": deviations,
             "unmatched_built": len(unmatched_built),
             "unmatched_design": len(unmatched_design),
@@ -1492,8 +1715,93 @@ def _one_report(out_path, name, built_headers, built_recs,
             "parts_over": recon["over"]}
 
 
+# ---------------------------------------------------------------------------
+# PARALLEL workers. When many As-Built files are given (Adriele: "sometimes 40"),
+# each file's report is independent, so we run them across a process pool. These
+# helpers are module-level so they can be pickled/sent to worker processes.
+# ---------------------------------------------------------------------------
+_WK_DESIGN = None   # (design_headers, design_recs) — loaded ONCE per worker
+
+
+def _load_merge(files):
+    """Load one or MANY files and merge their rows into one (headers unioned).
+    Used so the As-Design (and combined As-Built) can be several files at once."""
+    headers, recs = [], []
+    for f in files:
+        h, r = load_bom(f)
+        recs.extend(r)
+        for x in h:
+            if x not in headers:
+                headers.append(x)
+    return headers, recs
+
+
+def _wk_init(design_files):
+    """Pool initializer: load (and merge) the As-Design once in each worker."""
+    global _WK_DESIGN
+    _WK_DESIGN = _load_merge(design_files)
+
+
+def _wk_load(bf):
+    """Worker: just read one file (used by COMBINE mode to read in parallel)."""
+    try:
+        return bf, load_bom(bf), None
+    except Exception as e:
+        return bf, None, f"{type(e).__name__}: {e}"
+
+
+def _wk_one(task):
+    """Worker: build ONE report for one As-Built file. Returns (result, logtext);
+    the log text is captured (not streamed) because parallel workers can't share
+    one live log."""
+    (bf, name, out_path, mbom_cols_concise, design_qty_by_id,
+     built_label, design_name, doc_name) = task
+    design_headers, design_recs = _WK_DESIGN
+    design_recs_noL0 = [d for d in design_recs if not _is_level0(d)]
+    buf = []
+    try:
+        built_headers, built_recs = load_bom(bf)
+        res = _one_report(out_path, name, built_headers, built_recs, design_recs,
+                          design_headers, design_recs_noL0, mbom_cols_concise,
+                          design_qty_by_id, buf.append, built_label=built_label,
+                          design_name=design_name, doc_name=doc_name)
+    except Exception as e:
+        return {"unit": name, "error": f"{type(e).__name__}: {e}"}, "\n".join(buf)
+    return res, "\n".join(buf)
+
+
+_OUT_PREFIXES = ("adab_", "MISSING ITEMS from ", "missing items - ", "missing items",
+                 "report complete - ", "report complete")
+
+
+def _clean_base(name):
+    """Strip ADAB's own output naming from a file base, so re-feeding a previous
+    report as an input never compounds names (e.g. 'MISSING ITEMS from MISSING
+    ITEMS from ...' or '..._ALL__20260806_125554_ALL__20260806_125645'). Removes
+    leading 'adab_' / 'MISSING ITEMS from ' (repeated), any '_ALL__<date>_<time>'
+    run-stamps, and a trailing '_ALL'."""
+    b = name.strip()
+    # remove run-stamp chains added on download: old '__YYYYMMDD_HHMMSS' and new
+    # ' YYYY-MM-DD HH-MM-SS', with an optional '_ALL' in front, wherever they appear.
+    b = re.sub(r"(_ALL)?__\d{8}_\d{6}", "", b)
+    b = re.sub(r"\s\d{4}-\d{2}-\d{2}[ _]\d{2}[-:]\d{2}[-:]\d{2}", "", b)
+    b = re.sub(r"\s\d{4}-\d{2}-\d{2}[ _]\d{2}h\d{2}m\d{2}s", "", b).strip()
+    changed = True
+    while changed:
+        changed = False
+        for p in _OUT_PREFIXES:
+            if b.lower().startswith(p.lower()):
+                b = b[len(p):].strip()
+                changed = True
+        if b.endswith("_ALL"):
+            b = b[:-4].strip()
+            changed = True
+    return b or name
+
+
 def run_compare(design_arg, built_dir, out_dir, prefix="ADAB_Report",
-                combine=False, progress=None, built_label="As-Built"):
+                combine=False, progress=None, built_label="As-Built",
+                workers=None):
     """Core comparison. Callable from CLI or GUI.
 
     design_arg  : As-Design — a single file OR a folder holding exactly one.
@@ -1516,20 +1824,43 @@ def run_compare(design_arg, built_dir, out_dir, prefix="ADAB_Report",
         else:
             print(msg)
 
-    design_file = resolve_design(design_arg)
-    design_base = os.path.splitext(os.path.basename(design_file))[0]
+    n_workers = max(1, workers or (os.cpu_count() or 1))
+
+    # As-Design may be ONE file, a folder, or (from the web) several files that
+    # should be MERGED into one baseline.
+    if os.path.isdir(design_arg):
+        design_files = _list_inputs(design_arg)
+        if not design_files:
+            raise ValueError("No As-Design file found in that folder.")
+    else:
+        design_files = [design_arg]
+    design_base = _clean_base(os.path.splitext(os.path.basename(design_files[0]))[0])
+    if len(design_files) > 1:
+        design_base += "_MERGED"
+    design_name = (os.path.basename(design_files[0]) if len(design_files) == 1
+                   else f"{len(design_files)} design files (merged)")
     try:
-        design_headers, design_recs = load_bom(design_file)
+        design_headers, design_recs = _load_merge(design_files)
     except PermissionError:
         raise ValueError(
-            f"Cannot open the As-Design file:\n  {design_file}\n"
-            "It looks like it's open in Excel — close it and run again.")
+            "Cannot open an As-Design file — it looks like it's open in Excel. "
+            "Close it and run again.")
     except Exception as e:
         raise ValueError(
-            f"Could not read the As-Design file:\n  {design_file}\n"
-            f"{type(e).__name__}: {e}\n"
+            f"Could not read the As-Design file(s): {type(e).__name__}: {e}\n"
             "If it's on OneDrive, right-click it > 'Always keep on this device'.")
     design_recs_noL0 = [d for d in design_recs if not _is_level0(d)]
+    # SAFE RESCUE: if NO recognised part-number column exists on the design side
+    # (design_key empty everywhere), let the content detector find it and copy it
+    # into 'ID' so an unusual layout still compares. Only triggers when matching
+    # would otherwise read ZERO parts, so it can't change a working run.
+    if design_recs_noL0 and not any(design_key(d) for d in design_recs_noL0[:2000]):
+        _mat = detect_roles(design_headers, design_recs).get("Material")
+        if _mat:
+            for d in design_recs:
+                if d.get("ID") in (None, "") and d.get(_mat) not in (None, ""):
+                    d["ID"] = d.get(_mat)
+            log(f"  Column detector: read '{_mat}' as the design part number.")
     mbom_cols_concise = present_nonempty(MBOM_COLS_CONCISE, design_headers,
                                          design_recs_noL0)
     mbom_cols_full = present_nonempty(MBOM_COLS_ALL, design_headers,
@@ -1540,17 +1871,14 @@ def run_compare(design_arg, built_dir, out_dir, prefix="ADAB_Report",
         q = _to_float(d.get("Quantity"))
         if k and q is not None:
             design_qty_by_id[k] = design_qty_by_id.get(k, 0.0) + q
-    log(f"As-Designed: {os.path.basename(design_file)} "
+    log(f"As-Designed: {design_name} "
         f"({len(design_recs_noL0)} parts, {len(mbom_cols_concise)} concise cols)")
 
     # As-Built input may be a single FILE or a FOLDER of files.
     if os.path.isfile(built_dir):
         built_files = [built_dir]
     else:
-        built_files = sorted(
-            f for f in glob.glob(os.path.join(built_dir, "*.xls*"))
-            if not os.path.basename(f).startswith("~$")
-        )
+        built_files = _list_inputs(built_dir)
     if not built_files:
         raise ValueError("No As-Built file(s) found — pick a file or a folder "
                          "that contains .xlsx/.xlsm files.")
@@ -1562,32 +1890,52 @@ def run_compare(design_arg, built_dir, out_dir, prefix="ADAB_Report",
     # ---- COMBINE: merge every As-Built file into ONE list -> ONE report -----
     if combine:
         all_headers, all_recs, used = [], [], []
-        for bf in built_files:
-            try:
-                bh, br = load_bom(bf)
-            except Exception as e:
-                log(f"  SKIPPED {os.path.basename(bf)}: "
-                    f"{type(e).__name__}: {e}")
-                continue
+
+        def _merge(bf, bh, br):
             all_recs.extend(br)
             for h in bh:
                 if h not in all_headers:
                     all_headers.append(h)
             used.append(os.path.basename(bf))
+
+        if n_workers > 1 and len(built_files) > 1:
+            log(f"COMBINE: reading {len(built_files)} files in parallel "
+                f"({min(n_workers, len(built_files))} workers)...")
+            with ProcessPoolExecutor(
+                    max_workers=min(n_workers, len(built_files))) as ex:
+                got = 0
+                for bf, res, err in ex.map(_wk_load, built_files):
+                    got += 1
+                    if err:
+                        log(f"  SKIPPED {os.path.basename(bf)}: {err}")
+                        continue
+                    _merge(bf, res[0], res[1])
+                    log(f"  read {got}/{len(built_files)}")
+        else:
+            for bf in built_files:
+                try:
+                    bh, br = load_bom(bf)
+                except Exception as e:
+                    log(f"  SKIPPED {os.path.basename(bf)}: "
+                        f"{type(e).__name__}: {e}")
+                    continue
+                _merge(bf, bh, br)
         log(f"COMBINE: merged {len(used)} As-Built file(s) into one list "
             f"({len(all_recs)} rows) -> single 'full assembly' report.")
-        out_path = os.path.join(
-            out_dir, _safe_name(f"{lead}_{design_base}_ALL") + ".xlsx")
+        out_path = os.path.join(out_dir, _safe_name("report complete") + ".xlsx")
         results.append(_one_report(
             out_path, "ALL (full assembly)", all_headers, all_recs,
             design_recs, design_headers, design_recs_noL0,
             mbom_cols_concise, design_qty_by_id, log, built_label=built_label,
-            design_name=os.path.basename(design_file)))
-        log("\nDone. One combined report written (6 tabs).")
+            design_name=design_name, doc_name=""))
+        log("\nDone. One combined report written (5 tabs).")
         return results
 
     # ---- default: one report per unit ---------------------------------------
+    # Build the task list first (names + output paths), then run them — in
+    # PARALLEL when there are several files (Adriele: up to ~40 at once).
     seen_names = {}
+    tasks = []
     for bf in built_files:
         name = sheet_name_for(bf)
         if name in seen_names:
@@ -1599,32 +1947,47 @@ def run_compare(design_arg, built_dir, out_dir, prefix="ADAB_Report",
                 f"({os.path.basename(bf)}); writing as '{base}_{suffix}'")
             name = f"{base}_{suffix}"
         seen_names[name] = os.path.basename(bf)
-
-        try:
-            built_headers, built_recs = load_bom(bf)
-        except PermissionError:
-            log(f"  SKIPPED {name}: '{os.path.basename(bf)}' is open in Excel "
-                f"(or locked). Close it and run again.")
-            results.append({"unit": name, "error": "file open in Excel"})
-            continue
-        except Exception as e:
-            log(f"  SKIPPED {name}: could not read '{os.path.basename(bf)}' "
-                f"-> {type(e).__name__}: {e}")
-            log("           (if it's on OneDrive, right-click > 'Always keep "
-                "on this device')")
-            results.append({"unit": name, "error": str(e)})
-            continue
-
-        built_base = os.path.splitext(os.path.basename(bf))[0]
+        built_base = _clean_base(os.path.splitext(os.path.basename(bf))[0])
         out_path = os.path.join(
-            out_dir, _safe_name(f"{lead}_{design_base}_{built_base}") + ".xlsx")
-        results.append(_one_report(
-            out_path, name, built_headers, built_recs,
-            design_recs, design_headers, design_recs_noL0,
-            mbom_cols_concise, design_qty_by_id, log, built_label=built_label,
-            design_name=os.path.basename(design_file)))
+            out_dir, _safe_name(f"report complete - {built_base}") + ".xlsx")
+        tasks.append((bf, name, out_path, mbom_cols_concise, design_qty_by_id,
+                      built_label, design_name, built_base))
 
-    log("\nDone. One report per unit written (6 tabs each).")
+    n = len(tasks)
+    if n_workers > 1 and n > 1:
+        log(f"Comparing {n} files in parallel ({min(n_workers, n)} workers)...")
+        with ProcessPoolExecutor(max_workers=min(n_workers, n),
+                                 initializer=_wk_init,
+                                 initargs=(design_files,)) as ex:
+            futs = [ex.submit(_wk_one, t) for t in tasks]
+            done = 0
+            for fut in as_completed(futs):
+                res, _txt = fut.result()
+                results.append(res)
+                done += 1
+                extra = f" — ERROR: {res['error']}" if res.get("error") else ""
+                log(f"  [{done}/{n}] {res.get('unit', '?')} done{extra}")
+    else:
+        for (bf, name, out_path, mcc, dqbi, blabel, dname, docn) in tasks:
+            try:
+                built_headers, built_recs = load_bom(bf)
+            except PermissionError:
+                log(f"  SKIPPED {name}: '{os.path.basename(bf)}' is open in Excel "
+                    f"(or locked). Close it and run again.")
+                results.append({"unit": name, "error": "file open in Excel"})
+                continue
+            except Exception as e:
+                log(f"  SKIPPED {name}: could not read '{os.path.basename(bf)}' "
+                    f"-> {type(e).__name__}: {e}")
+                results.append({"unit": name, "error": str(e)})
+                continue
+            results.append(_one_report(
+                out_path, name, built_headers, built_recs,
+                design_recs, design_headers, design_recs_noL0,
+                mcc, dqbi, log, built_label=blabel, design_name=dname,
+                doc_name=docn))
+
+    log(f"\nDone. {n} report(s) written (5 tabs each).")
     return results
 
 

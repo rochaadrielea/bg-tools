@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SAS · NC Dashboard</title>
+<script src="plotly.min.js"></script>
+<style>
+:root{
+  --bg:#081521; --card:#0F2536; --card2:#123049; --line:#1c3b57;
+  --ink:#e8f1fa; --muted:#8ba7c2; --accent:#1E9BE0; --bright:#4FC3F7;
+  --green:#3fb56b; --amber:#e0a63e; --red:#e5533e; --grey:#5b7590;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Segoe UI",system-ui,-apple-system,sans-serif;font-size:14px}
+a{color:var(--bright);text-decoration:none}
+.wrap{max-width:1320px;margin:0 auto;padding:20px 22px 80px}
+
+/* header */
+header{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+  border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:8px}
+header h1{font-size:22px;font-weight:600;margin:0;letter-spacing:.3px}
+header .sub{color:var(--muted);font-size:13px}
+header .spacer{flex:1}
+.btn{background:var(--card2);color:var(--ink);border:1px solid var(--line);
+  border-radius:6px;padding:7px 13px;font-size:13px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#04121e;font-weight:600}
+.btn.small{padding:4px 9px;font-size:12px}
+
+/* global filter bar */
+.gbar{background:var(--card);border:1px solid var(--line);border-radius:8px;
+  margin:12px 0 18px;overflow:hidden}
+.gbar .head{display:flex;align-items:center;gap:12px;padding:11px 15px;cursor:pointer;
+  user-select:none}
+.gbar .head .count{color:var(--muted);font-size:13px}
+.gbar .body{display:none;padding:4px 15px 15px;border-top:1px solid var(--line);
+  flex-wrap:wrap;gap:16px}
+.gbar.open .body{display:flex}
+.fgrp{display:flex;flex-direction:column;gap:4px}
+.fgrp label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.fgrp input,.fgrp select{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+  border-radius:5px;padding:6px 8px;font-size:13px;min-width:130px}
+.chips{display:flex;flex-wrap:wrap;gap:5px;max-width:340px}
+.chip{background:var(--bg);border:1px solid var(--line);border-radius:14px;
+  padding:3px 10px;font-size:12px;cursor:pointer;color:var(--muted)}
+.chip.on{background:var(--accent);color:#04121e;border-color:var(--accent);font-weight:600}
+
+/* sections */
+section{margin:26px 0}
+.sec-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.sec-head .idx{font-size:12px;color:var(--accent);font-weight:700;
+  border:1px solid var(--accent);border-radius:5px;padding:2px 7px;letter-spacing:1px}
+.sec-head h2{font-size:16px;font-weight:600;margin:0}
+.sec-head .fbtn{margin-left:auto}
+.sec-head .cnt{color:var(--muted);font-size:12px}
+.sec-filters{display:none;gap:14px;flex-wrap:wrap;background:var(--card);
+  border:1px solid var(--line);border-radius:7px;padding:11px 14px;margin-bottom:12px}
+.sec-filters.open{display:flex}
+
+/* grid of chart cards */
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.grid.one{grid-template-columns:1fr}
+.card{background:var(--card);border:1px solid var(--line);border-radius:9px;
+  padding:13px 15px 8px}
+.card h3{margin:0 0 2px;font-size:13.5px;font-weight:600}
+.card .hint{color:var(--muted);font-size:11.5px;margin:0 0 8px}
+.plot{width:100%;height:280px}
+.plot.short{height:200px}
+.card.narrow{max-width:520px}
+.card table.mini{max-height:340px}
+.plot.tall{height:400px}
+
+/* kpi strip */
+.kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:11px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:9px;
+  padding:12px 13px}
+.kpi .v{font-size:23px;font-weight:700;line-height:1}
+.kpi .l{color:var(--muted);font-size:11px;margin-top:5px;text-transform:uppercase;
+  letter-spacing:.4px}
+.kpi.warn .v{color:var(--amber)} .kpi.bad .v{color:var(--red)}
+
+/* raw view */
+.raw{margin-top:6px;border-top:1px solid var(--line);padding-top:8px}
+.raw .bar{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);
+  flex-wrap:wrap}
+.raw .bar b{color:var(--bright)}
+.raw table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11.5px;
+  display:block;max-height:300px;overflow:auto}
+.raw th,.raw td{text-align:left;padding:4px 7px;border-bottom:1px solid var(--line);
+  white-space:nowrap}
+.raw th{position:sticky;top:0;background:var(--card2);color:var(--muted);
+  text-transform:uppercase;font-size:10px;letter-spacing:.4px}
+.raw td.num{text-align:right}
+
+/* dq panel */
+.dqrow{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.dqcell{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:13px}
+.dqcell .v{font-size:22px;font-weight:700}
+.dqcell.flag .v{color:var(--amber)}
+.dqcell .l{color:var(--muted);font-size:12px;margin-top:4px}
+.dqcell .bar{height:5px;background:var(--bg);border-radius:3px;margin-top:8px;overflow:hidden}
+.dqcell .bar i{display:block;height:100%;background:var(--amber)}
+
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(4,10,18,.72);display:none;
+  align-items:flex-start;justify-content:center;z-index:50;padding:60px 16px}
+.modal.open{display:flex}
+.sheet{background:var(--card);border:1px solid var(--line);border-radius:11px;
+  padding:20px 22px;max-width:520px;width:100%;max-height:85vh;overflow:auto}
+.sheet h3{margin:0 0 12px}
+.sheet label{display:block;font-size:12px;color:var(--muted);margin:11px 0 4px}
+.sheet input,.sheet select,.sheet textarea{width:100%;background:var(--bg);
+  color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px}
+.sheet textarea{min-height:90px;resize:vertical}
+.sheet .row{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:var(--card2);border:1px solid var(--accent);color:var(--ink);
+  padding:10px 18px;border-radius:8px;display:none;z-index:60}
+.empty{background:var(--card);border:1px dashed var(--line);border-radius:9px;
+  padding:40px;text-align:center;color:var(--muted)}
+.feedback-fab{position:fixed;right:18px;bottom:18px;z-index:40}
+@media(max-width:1000px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(4,1fr)}
+  .dqrow{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>SAS · NC Dashboard</h1>
+  <span class="sub" id="scopeline">KDS SAS Emmen</span>
+  <span class="spacer"></span>
+  <button class="btn" onclick="openUpload()">Load export</button>
+  <button class="btn" onclick="location.reload()">Refresh</button>
+</header>
+
+<!-- global filter bar -->
+<div class="gbar" id="gbar">
+  <div class="head" onclick="toggle('gbar')">
+    <b>Filters</b>
+    <span class="count" id="gcount"></span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn small" onclick="event.stopPropagation();resetGlobal()">Reset all</button>
+  </div>
+  <div class="body">
+    <div class="fgrp"><label>Opened from</label><input type="date" id="g_from"></div>
+    <div class="fgrp"><label>Opened to</label><input type="date" id="g_to"></div>
+    <div class="fgrp"><label>Type</label><div class="chips" id="g_types"></div></div>
+    <div class="fgrp"><label>Status</label><div class="chips" id="g_statuses"></div></div>
+  </div>
+</div>
+
+<div id="board"></div>
+
+</div><!-- /wrap -->
+
+<!-- feedback FAB -->
+<button class="btn primary feedback-fab" onclick="openFeedback()">Feedback</button>
+
+<!-- upload modal -->
+<div class="modal" id="uploadModal">
+  <div class="sheet">
+    <h3>Load NC export</h3>
+    <p class="hint" style="color:var(--muted)">Drop the NC's Overview export (.xlsx).
+      It replaces the current data. Only KDS SAS Emmen rows are kept.</p>
+    <label>Export file</label>
+    <input type="file" id="up_file" accept=".xlsx,.xlsm,.xls">
+    <label>Mode</label>
+    <select id="up_mode">
+      <option value="rebuild">Replace all (rebuild)</option>
+      <option value="append">Add / update (append)</option>
+    </select>
+    <div class="row">
+      <button class="btn" onclick="closeModal('uploadModal')">Cancel</button>
+      <button class="btn primary" onclick="doUpload()">Load</button>
+    </div>
+  </div>
+</div>
+
+<!-- feedback modal -->
+<div class="modal" id="feedbackModal">
+  <div class="sheet">
+    <h3>Send feedback</h3>
+    <label>Your name (optional)</label><input id="fb_name">
+    <label>Type</label>
+    <select id="fb_cat">
+      <option>Idea</option><option>Bug / wrong result</option>
+      <option>Data question</option><option>Praise / what worked well</option>
+    </select>
+    <label>Message</label><textarea id="fb_msg"></textarea>
+    <label>Attachment (optional)</label><input type="file" id="fb_file">
+    <div class="row">
+      <button class="btn" onclick="closeModal('feedbackModal')">Cancel</button>
+      <button class="btn primary" onclick="sendFeedback()">Send</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PALETTE={Closed:'#3fb56b',Open:'#e0a63e',Deleted:'#e5533e',
+  'Z3 - Production NC':'#1E9BE0','Z2 - Procurem. Complaint':'#8b6fd6',
+  Minor:'#4FC3F7',Major:'#e5533e',Unclassified:'#5b7590'};
+const PLOT_BG='rgba(0,0,0,0)';
+const LAYOUT={autosize:true,paper_bgcolor:PLOT_BG,plot_bgcolor:PLOT_BG,
+  font:{color:'#c9dcee',size:11},margin:{l:56,r:18,t:52,b:44,autoexpand:true},
+  legend:{orientation:'h',y:1.12,yanchor:'bottom',x:0,font:{size:10}},
+  modebar:{bgcolor:'rgba(0,0,0,0)',color:'#6d8ba6',activecolor:'#4FC3F7',
+    orientation:'h'},
+  xaxis:{gridcolor:'#173247',zerolinecolor:'#173247',automargin:true},
+  yaxis:{gridcolor:'#173247',zerolinecolor:'#173247',automargin:true}};
+// toolbar on every chart: save image, zoom in / out, pan, autoscale, reset
+const CONF={responsive:true,displaylogo:false,displayModeBar:true,
+  modeBarButtonsToRemove:['select2d','lasso2d','toggleSpikelines',
+    'hoverClosestCartesian','hoverCompareCartesian'],
+  toImageButtonOptions:{format:'png',scale:2}};
+// distinct colour per month, used by the "over time" stacked charts
+const MONTH_COLS=['#1E9BE0','#4FC3F7','#3fb56b','#e0a63e','#e5533e','#8b6fd6',
+  '#2dd4bf','#f472b6','#a3e635','#fb923c','#60a5fa','#c084fc'];
+function monthColor(i){return MONTH_COLS[i%MONTH_COLS.length];}
+// shorten long axis labels; full value stays in the hover and in the click
+function shortLabel(s,n){s=String(s);return s.length>n?s.slice(0,n-1)+'…':s;}
+
+let STATE={global:{types:[],statuses:[],date_from:'',date_to:''},
+           section:{}, options:null};
+
+// ---- filter model ----
+function globalFilters(){
+  const g=STATE.global;
+  return {types:g.types,statuses:g.statuses,
+    date_from:g.date_from||null,date_to:g.date_to||null};
+}
+function sectionFilters(sec){
+  // merge global with this section's own selections
+  const base=globalFilters();
+  const s=STATE.section[sec]||{};
+  return Object.assign({},base,s);
+}
+
+async function api(path,body){
+  const r=await fetch('api/'+path,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  return r.json();
+}
+
+// ---- boot ----
+async function boot(){
+  const d=await api('data',{filters:globalFilters()});
+  if(d.empty){document.getElementById('board').innerHTML=
+    '<div class="empty">No data loaded yet.<br>Click <b>Load export</b> to add the NC export.</div>';
+    return;}
+  STATE.options=d.options;
+  buildGlobalChips();
+  document.getElementById('gcount').textContent=d.filtered+' of '+d.all+' NCs';
+  render(d);
+}
+
+function buildGlobalChips(){
+  chipSet('g_types',STATE.options.types,'types','global',shortType);
+  chipSet('g_statuses',STATE.options.statuses,'statuses','global');
+  const gf=document.getElementById('g_from'),gt=document.getElementById('g_to');
+  gf.min=gt.min=STATE.options.date_min; gf.max=gt.max=STATE.options.date_max;
+  gf.onchange=()=>{STATE.global.date_from=gf.value;refreshAll();};
+  gt.onchange=()=>{STATE.global.date_to=gt.value;refreshAll();};
+}
+
+function chipSet(elid,values,key,scope,labelFn){
+  const el=document.getElementById(elid);el.innerHTML='';
+  values.forEach(v=>{
+    const c=document.createElement('span');c.className='chip';
+    c.textContent=labelFn?labelFn(v):v;
+    c.onclick=()=>{toggleChip(scope,key,v,c,elid);};
+    const arr=(scope==='global'?STATE.global[key]:(STATE.section[scope]||{})[key])||[];
+    if(arr.includes(v))c.classList.add('on');
+    el.appendChild(c);});
+}
+function toggleChip(scope,key,v,c){
+  let arr;
+  if(scope==='global'){arr=STATE.global[key]=STATE.global[key]||[];}
+  else{STATE.section[scope]=STATE.section[scope]||{};
+       arr=STATE.section[scope][key]=STATE.section[scope][key]||[];}
+  const i=arr.indexOf(v);
+  if(i>=0){arr.splice(i,1);c.classList.remove('on');}
+  else{arr.push(v);c.classList.add('on');}
+  if(scope==='global')refreshAll(); else refreshSection(scope);
+}
+function shortType(t){return t.startsWith('Z2')?'Z2 Supplier':
+  t.startsWith('Z3')?'Z3 Production':t;}
+
+async function refreshAll(){
+  const d=await api('data',{filters:globalFilters()});
+  document.getElementById('gcount').textContent=d.filtered+' of '+d.all+' NCs';
+  render(d);
+}
+
+const CAP={
+  status_prod:"Production NCs only — everything that is not a supplier problem. Customer complaints have their own chart.",
+  status_supp:"Supplier NCs only (Z2 procurement complaints, and any NC whose cause is Supplier).",
+  by_part:"Which parts get the most production NCs. Longest bar = most problems.",
+  batch_z3_status:"Production NCs per batch, and how many are still open. Supplier and customer complaints are not in this chart.",
+  batch_cc:"Customer complaints per batch.",
+  batch_class:"Minor vs Major per batch. Major = the serious ones (class 4-5).",
+  batch_copq:"What each batch cost us in poor-quality money (CHF).",
+  batch_defect_heat:"Which batch had which kind of defect. Darker = more.",
+  z2_month_status:"Supplier complaints opened each month, and how many are still open.",
+  vendor_pareto:"Which suppliers cause the most NCs (bars) and cost the most (line).",
+  z2_vendor_month:"Supplier NCs over time, one colour per month.",
+  springs:"Production NCs on the spring assemblies, by status.",
+  backlog_age:"How long the still-open production NCs have been waiting (supplier and customer complaints excluded).",
+  defect_pareto:"Which problems happen most. The yellow line shows that a few types cause most NCs.",
+  disposition:"What we decided to do with the NC parts. Scrap is the costly one (red).",
+  top_copq:"The 10 single NCs that cost us the most (CHF).",
+  copq_month:"Poor-quality cost per month (CHF).",
+  cause_month_heat:"When each kind of problem showed up. Darker = more that month."
+};
+// ---- render all sections ----
+function render(d){
+  const b=document.getElementById('board');b.innerHTML='';
+  b.appendChild(kpiStrip(d.kpi));
+  b.appendChild(sec('2','Status',['types','statuses'],[
+    card('status_prod','Production NCs by status',CAP['status_prod'],mkBar(d.status_prod,'#1E9BE0')),
+    card('status_supp','Supplier NCs by status',CAP['status_supp'],mkBar(d.status_supp,'#8b6fd6')),
+    card('by_part','NCs per part',CAP['by_part'],mkBar(d.by_part,'#1E9BE0','h'),true),
+  ]));
+  b.appendChild(sec('3','Batches',['batches','types','classes'],[
+    card('batch_z3_status','Production NCs per batch',CAP['batch_z3_status'],mkStacked(d.batch_z3_status,['Closed','Open','Deleted'])),
+    card('batch_cc','Customer complaints per batch',CAP['batch_cc'],mkBar(d.batch_cc,'#8b6fd6')),
+    card('batch_class','Minor / Major per batch',CAP['batch_class'],mkStacked(d.batch_class,['Minor','Major','Unclassified'])),
+    card('batch_copq','Cost of poor quality per batch',CAP['batch_copq'],mkBar(d.batch_copq,'#e0a63e')),
+    card('batch_defect_heat','Batch × defect code',CAP['batch_defect_heat'],mkHeat(d.batch_defect_heat),true),
+  ],'one'));
+  b.appendChild(sec('4','Suppliers (Z2)',['vendors','statuses'],[
+    card('z2_month_status','Z2 supplier NCs per month',CAP['z2_month_status'],mkStacked(d.z2_month_status,['Closed','Open','Deleted'])),
+    card('vendor_pareto','Vendor Pareto',CAP['vendor_pareto'],mkPareto2(d.vendor_pareto)),
+    card('z2_vendor_month','Z2 NCs by supplier over time',CAP['z2_vendor_month'],mkStacked(d.z2_vendor_month,d.months),true),
+  ],'one'));
+  b.appendChild(sec('5','Springs',['statuses'],[
+    card('springs','Springs NCs by status',CAP['springs'],mkBar(d.springs,'#1E9BE0')),
+  ]));
+  b.appendChild(sec('6','Open backlog',[],[
+    card('backlog_age','Open NCs by age',CAP['backlog_age'],mkBar(d.backlog_age,'#e0a63e')),
+  ]));
+  b.appendChild(sec('6b','',[],[
+    cardTable('backlog_oldest','10 oldest open production NCs',d.backlog_oldest),
+  ],'one'));
+  b.appendChild(sec('7','Defects & cost',['dispositions','defect_codes'],[
+    card('defect_pareto','Defect code Pareto',CAP['defect_pareto'],mkPareto(d.defect_pareto)),
+    card('disposition','Disposition mix',CAP['disposition'],mkDisposition(d.disposition)),
+    card('top_copq','Top 10 NCs by cost',CAP['top_copq'],mkBar(d.top_copq,'#e5533e','h')),
+    card('copq_month','CoPQ per month',CAP['copq_month'],mkBar(d.copq_month,'#e0a63e')),
+    card('cause_month_heat','Month × defect cause',CAP['cause_month_heat'],mkHeat(d.cause_month_heat),true),
+  ],'one'));
+  b.appendChild(dqPanel(d.dq));
+  reattachRaw();
+}
+
+// ---- KPI strip ----
+function kpiStrip(k){
+  const s=document.createElement('section');
+  s.innerHTML='<div class="kpis">'+[
+    kpi(k.total,'Total NCs'),kpi(k.open,'Open','warn'),kpi(k.closed,'Closed'),
+    kpi(k.deleted,'Deleted'),kpi(chf(k.copq_total),'CoPQ total'),
+    kpi(chf(k.copq_ytd),'CoPQ 2026'),kpi(k.lead_median+' d','Median lead'),
+    kpi(k.scrap,'Scrap','bad'),
+  ].join('')+'</div>';
+  return s;
+}
+function kpi(v,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="v">'+v+
+  '</div><div class="l">'+l+'</div></div>';}
+function chf(v){return (v/1000).toFixed(0)+'k';}
+
+// ---- section wrapper (collapsible filters + raw view) ----
+function sec(idx,title,filterKeys,cards,gridCls){
+  const s=document.createElement('section');s.dataset.sec=idx;
+  const fid='sf_'+idx;
+  let filterHtml='';
+  if(filterKeys.length){
+    filterHtml='<div class="sec-filters" id="'+fid+'"></div>';
+  }
+  s.innerHTML=(title?'<div class="sec-head"><span class="idx">'+idx+'</span><h2>'+title+'</h2>'+
+    (filterKeys.length?'<button class="btn small fbtn" onclick="toggleSec(\''+fid+'\')">Filters</button>':'')+
+    '</div>':'')+filterHtml+'<div class="grid '+(gridCls||'')+'"></div>';
+  const grid=s.querySelector('.grid');
+  cards.forEach(c=>grid.appendChild(c));
+  if(filterKeys.length) setTimeout(()=>buildSecFilters(idx,fid,filterKeys),0);
+  return s;
+}
+function buildSecFilters(idx,fid,keys){
+  const el=document.getElementById(fid);if(!el)return;el.innerHTML='';
+  const map={types:['Type',STATE.options.types,shortType],
+    statuses:['Status',STATE.options.statuses],
+    batches:['Batch',STATE.options.batches],
+    classes:['Class',STATE.options.classes],
+    dispositions:['Disposition',STATE.options.dispositions],
+    vendors:['Vendor',STATE.options.vendors.slice(0,12)],
+    defect_codes:['Defect code',STATE.options.defect_codes]};
+  keys.forEach(k=>{
+    const [lab,vals,fn]=map[k];
+    const g=document.createElement('div');g.className='fgrp';
+    g.innerHTML='<label>'+lab+'</label>';
+    const chips=document.createElement('div');chips.className='chips';
+    const cid='sec_'+idx+'_'+k;chips.id=cid;g.appendChild(chips);el.appendChild(g);
+    setTimeout(()=>chipSet(cid,vals,k,idx,fn),0);
+  });
+}
+function toggleSec(fid){document.getElementById(fid).classList.toggle('open');}
+
+async function refreshSection(idx){
+  // re-fetch full payload with this section's merged filters, redraw only its plots
+  const d=await api('data',{filters:sectionFilters(idx)});
+  const s=document.querySelector('section[data-sec="'+idx+'"]');
+  if(!s)return;
+  // rebuild just the cards region
+  const map=SECDEF[idx];
+  const grid=s.querySelector('.grid');grid.innerHTML='';
+  map.cards(d).forEach(c=>grid.appendChild(c));
+  reattachRaw();
+}
+
+// section card definitions reused by refreshSection
+const SECDEF={
+  '2':{cards:d=>[card('status_prod','Production NCs by status',CAP['status_prod'],mkBar(d.status_prod,'#1E9BE0')),
+    card('status_supp','Supplier NCs by status',CAP['status_supp'],mkBar(d.status_supp,'#8b6fd6')),
+    card('by_part','NCs per part',CAP['by_part'],mkBar(d.by_part,'#1E9BE0','h'),true)]},
+  '3':{cards:d=>[card('batch_z3_status','Production NCs per batch',CAP['batch_z3_status'],mkStacked(d.batch_z3_status,['Closed','Open','Deleted'])),
+    card('batch_cc','Customer complaints per batch',CAP['batch_cc'],mkBar(d.batch_cc,'#8b6fd6')),
+    card('batch_class','Minor / Major per batch',CAP['batch_class'],mkStacked(d.batch_class,['Minor','Major','Unclassified'])),
+    card('batch_copq','CoPQ per batch',CAP['batch_copq'],mkBar(d.batch_copq,'#e0a63e')),
+    card('batch_defect_heat','Batch × defect code',CAP['batch_defect_heat'],mkHeat(d.batch_defect_heat),true)]},
+  '4':{cards:d=>[card('z2_month_status','Z2 supplier NCs per month',CAP['z2_month_status'],mkStacked(d.z2_month_status,['Closed','Open','Deleted'])),
+    card('vendor_pareto','Vendor Pareto',CAP['vendor_pareto'],mkPareto2(d.vendor_pareto)),
+    card('z2_vendor_month','Z2 NCs by supplier over time',CAP['z2_vendor_month'],mkStacked(d.z2_vendor_month,d.months),true)]},
+  '5':{cards:d=>[card('springs','Springs NCs by status',CAP['springs'],mkBar(d.springs,'#1E9BE0'))]},
+  '7':{cards:d=>[card('defect_pareto','Defect code Pareto',CAP['defect_pareto'],mkPareto(d.defect_pareto)),
+    card('disposition','Disposition mix',CAP['disposition'],mkDisposition(d.disposition)),
+    card('top_copq','Top 10 NCs by cost',CAP['top_copq'],mkBar(d.top_copq,'#e5533e','h')),
+    card('copq_month','CoPQ per month',CAP['copq_month'],mkBar(d.copq_month,'#e0a63e')),
+    card('cause_month_heat','Month × defect cause',CAP['cause_month_heat'],mkHeat(d.cause_month_heat),true)]},
+};
+
+// ---- chart card + raw view ----
+function card(id,title,hint,plotSpec,tall){
+  const c=document.createElement('div');c.className='card';c.dataset.chart=id;
+  c.innerHTML='<h3>'+title+'</h3><p class="hint">'+hint+'</p>'+
+    '<div class="plot'+(tall?' tall':'')+'" id="p_'+id+'"></div>'+
+    '<div class="raw" id="raw_'+id+'" style="display:none"></div>';
+  c._spec=plotSpec; c._click=plotSpec.click; c._scope=plotSpec.scope||null;
+  setTimeout(()=>drawPlot(id,plotSpec),0);
+  return c;
+}
+function cardTable(id,title,rows){
+  const c=document.createElement('div');c.className='card';
+  c.innerHTML='<h3>'+title+'</h3><p class="hint">The open production NCs waiting longest. Supplier NCs and customer complaints are listed on their own charts. Scroll sideways for all columns.</p>';
+  const box=document.createElement('div');box.className='raw';
+  box.style.borderTop='none';box.style.paddingTop='0';
+  box.appendChild(rawTable({cols:RAWDEF.cols,labels:RAWDEF.labels,rows:rows}));
+  c.appendChild(box);
+  return c;
+}
+let RAWDEF={cols:['notification','notif_type','origin','status','opened','closed','leadtime',
+  'batch','material','defect_class_label','defect_code','cause','disposition',
+  'vendor_clean','copq'],
+  labels:{notification:'NC',notif_type:'Type',origin:'Origin',status:'Status',opened:'Opened',
+  closed:'Closed',leadtime:'Leadtime',batch:'Batch',material:'Material',
+  defect_class_label:'Class',defect_code:'Defect code',cause:'Cause',
+  disposition:'Disposition',vendor_clean:'Vendor',copq:'CoPQ'}};
+
+function drawPlot(id,spec){
+  const el=document.getElementById('p_'+id);if(!el)return;
+  Plotly.newPlot(el,spec.data,Object.assign({},LAYOUT,spec.layout||{}),CONF);
+  el._isplot=true;
+  if(spec.clickField){
+    el.on('plotly_click',ev=>{
+      const pt=ev.points[0];
+      let val=spec.clickValue?spec.clickValue(pt):(pt.label||pt.x||pt.y);
+      openRaw(id,{col:spec.clickField,value:val},spec.scope||null);
+    });
+  }
+}
+
+// re-fit every plot to its card on resize / browser zoom
+let _rzT;
+function resizeAllPlots(){
+  document.querySelectorAll('.plot').forEach(el=>{
+    if(el._isplot){try{Plotly.Plots.resize(el);}catch(e){}}
+  });
+}
+window.addEventListener('resize',()=>{clearTimeout(_rzT);_rzT=setTimeout(resizeAllPlots,150);});
+
+async function openRaw(chartId,click,scope){
+  const card=document.querySelector('.card[data-chart="'+chartId+'"]');
+  const sec=card.closest('section').dataset.sec;
+  const filters=sec?sectionFilters(sec):globalFilters();
+  const body={filters:filters,click:click,scope:scope||card._scope||null};
+  const r=await api('raw',body);
+  const box=document.getElementById('raw_'+chartId);
+  box.style.display='block';box.innerHTML='';
+  const bar=document.createElement('div');bar.className='bar';
+  bar.innerHTML='Filtered by <b>'+click.value+'</b> · '+r.count+' NCs ';
+  const clr=document.createElement('button');clr.className='btn small';
+  clr.textContent='Clear';clr.onclick=()=>{box.style.display='none';box.innerHTML='';};
+  const xls=document.createElement('button');xls.className='btn small';
+  xls.textContent='Download Excel';
+  xls.onclick=()=>downloadRaw(filters,click,scope||card._scope||null);
+  bar.appendChild(clr);bar.appendChild(xls);box.appendChild(bar);
+  box.appendChild(rawTable(r));
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function rawTable(r){
+  const t=document.createElement('table');
+  const num=new Set(['leadtime','copq']);
+  let h='<tr>';r.cols.forEach(c=>h+='<th>'+r.labels[c]+'</th>');h+='</tr>';
+  let body='';
+  (r.rows||[]).forEach(row=>{body+='<tr>';r.cols.forEach(c=>{
+    let v=row[c];if(c==='copq'&&v!=='')v=Number(v).toLocaleString();
+    if((c==='opened'||c==='closed')&&v)v=String(v).slice(0,10);
+    body+='<td class="'+(num.has(c)?'num':'')+'">'+(v===undefined?'':v)+'</td>';});
+    body+='</tr>';});
+  t.innerHTML=h+body;return t;
+}
+async function downloadRaw(filters,click,scope){
+  const r=await fetch('api/export',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({filters:filters,click:click,scope:scope||null})});
+  const blob=await r.blob();const u=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=u;a.download='SAS_NCs.xlsx';a.click();
+  URL.revokeObjectURL(u);
+}
+function reattachRaw(){/* plots redraw with their own click handlers via drawPlot */}
+
+// ---- plotly spec builders ----
+function mkBar(d,color,orient){
+  const h=orient==='h';
+  const shortL=d.labels.map(l=>shortLabel(l,h?34:20));
+  const labs=h?shortL.slice().reverse():shortL;
+  const full=h?d.labels.slice().reverse():d.labels;
+  const vals=h?d.values.slice().reverse():d.values;
+  let cols=color;
+  if(d.colors&&d.colors.length===d.labels.length)cols=d.colors;
+  else if(d.labels.every(l=>PALETTE[l]))cols=d.labels.map(l=>PALETTE[l]);
+  if(h&&Array.isArray(cols))cols=cols.slice().reverse();
+  const vmax=Math.max(0,...d.values);
+  const data=[{type:'bar',orientation:h?'h':'v',
+    x:h?vals:labs,y:h?labs:vals,
+    customdata:full,marker:{color:cols},
+    hovertemplate:'%{customdata}<br>%{'+(h?'x':'y')+'} NCs<extra></extra>'}];
+  if(d.labels.length<=4)data[0].width=d.labels.length<=2?0.35:0.5;
+  const head=vmax>0?vmax*1.18:1;
+  return {data:data,click:d.click,clickField:d.click,scope:d.scope,
+    clickValue:pt=>pt.customdata||(h?pt.y:pt.x),
+    layout:h?{showlegend:false,margin:{l:170,r:28,t:56,b:36},
+      yaxis:{automargin:true},xaxis:{range:[0,head],rangemode:'tozero'}}:
+      {showlegend:false,margin:{l:56,r:18,t:56,b:44},
+       yaxis:{range:[0,head],rangemode:'tozero'}}};
+}
+function mkStacked(d,order){
+  const keys=(order||Object.keys(d.series)).filter(s=>d.series[s]);
+  // a month-stacked chart (keys look like 2026-05) gets one colour per month
+  const isMonths=keys.length>0&&/^\d{4}-\d{2}$/.test(keys[0]);
+  const short=d.rows.map(r=>shortLabel(r,20));
+  const data=keys.map((s,i)=>({
+    type:'bar',name:legName(s),x:short,y:d.series[s],
+    customdata:d.rows,
+    marker:{color:isMonths?monthColor(i):(PALETTE[s]||'#5b7590')},
+    hovertemplate:'%{customdata}<br>'+legName(s)+': %{y} NCs<extra></extra>'}));
+  // few categories -> keep bars a sane width instead of giant slabs
+  if(d.rows.length<=4)data.forEach(t=>t.width=d.rows.length<=2?0.35:0.5);
+  return {data:data,click:d.click,clickField:d.click,scope:d.scope,
+    clickValue:pt=>pt.customdata||pt.x,
+    layout:{barmode:'stack',margin:{l:56,r:18,t:56,b:44}}};
+}
+function legName(s){return s.startsWith('Z2')?'Z2 Supplier':
+  s.startsWith('Z3')?'Z3 Production':s;}
+function mkPareto(d){
+  const short=d.labels.map(l=>shortLabel(l,22));
+  return {data:[
+    {type:'bar',x:short,y:d.values,marker:{color:'#1E9BE0'},name:'Count',
+     customdata:d.labels,
+     hovertemplate:'%{customdata}<br>%{y} NCs<extra></extra>'},
+    {type:'scatter',x:short,y:d.cum,yaxis:'y2',mode:'lines+markers',
+     line:{color:'#e0a63e'},name:'Running total',
+     customdata:d.labels.map((l,i)=>[l,d.values[i]]),
+     hovertemplate:'%{customdata[0]}<br>Running total: %{y}% of all NCs'+
+       '<br>this type: %{customdata[1]} NCs<extra></extra>'}],
+    click:d.click,clickField:d.click,scope:d.scope,
+    clickValue:pt=>(Array.isArray(pt.customdata)?pt.customdata[0]:pt.customdata)||pt.x,
+    layout:{yaxis2:{overlaying:'y',side:'right',range:[0,100],
+      gridcolor:'transparent',ticksuffix:'%'},margin:{l:44,r:44,t:56,b:95},
+      xaxis:{tickangle:-40,automargin:true}}};
+}
+function mkPareto2(d){
+  const short=d.labels.map(l=>shortLabel(l,20));
+  return {data:[
+    {type:'bar',x:short,y:d.count,marker:{color:'#8b6fd6'},name:'NC count',
+     customdata:d.labels,
+     hovertemplate:'%{customdata}<br>%{y} NCs<extra></extra>'},
+    {type:'scatter',x:short,y:d.copq,yaxis:'y2',mode:'lines+markers',
+     line:{color:'#e0a63e'},name:'Cost (CHF)',customdata:d.labels,
+     hovertemplate:'%{customdata}<br>Cost: %{y:,} CHF<extra></extra>'}],
+    click:d.click,clickField:d.click,scope:d.scope,
+    clickValue:pt=>pt.customdata||pt.x,
+    layout:{yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent'},
+      margin:{l:44,r:52,t:56,b:105},xaxis:{tickangle:-40,automargin:true}}};
+}
+function mkDisposition(d){
+  const colors=d.labels.map(l=>l===d.highlight?'#e5533e':'#3a6a8f');
+  return {data:[{type:'pie',labels:d.labels,values:d.values,hole:.5,
+    marker:{colors:colors},textinfo:'label+value',textfont:{size:10},
+    hovertemplate:'%{label}<br>%{value} NCs (%{percent})<extra></extra>'}],
+    click:d.click,clickField:d.click,scope:d.scope,clickValue:pt=>pt.label,
+    layout:{margin:{l:8,r:8,t:8,b:8},showlegend:false}};
+}
+function mkHeat(d){
+  const rowsShort=d.rows.map(r=>shortLabel(r,18));
+  const colsShort=d.cols.map(c=>shortLabel(c,18));
+  const cd=d.rows.map(r=>d.cols.map(c=>[r,c]));
+  return {data:[{type:'heatmap',z:d.z,x:colsShort,y:rowsShort,customdata:cd,
+    colorscale:[[0,'#0d2033'],[0.5,'#1E9BE0'],[1,'#4FC3F7']],
+    hovertemplate:'%{customdata[0]} · %{customdata[1]}<br>%{z} NCs<extra></extra>',
+    showscale:true}],
+    click:'heat',clickField:d.row_col,scope:d.scope,
+    clickValue:pt=>(pt.customdata?pt.customdata[0]:pt.y),
+    layout:{margin:{l:140,r:48,t:56,b:110},xaxis:{tickangle:-40,automargin:true},
+      yaxis:{automargin:true}}};
+}
+
+// ---- data quality ----
+function dqPanel(dq){
+  const s=document.createElement('section');
+  const cells=[
+    ['Defect class blank',dq.defect_class_blank],
+    ['Disposition not assigned',dq.disposition_missing],
+    ['CoPQ unbooked',dq.copq_unbooked],
+    ['Model missing',dq.model_missing],
+  ];
+  s.innerHTML='<div class="sec-head"><span class="idx">8</span><h2>Data quality</h2>'+
+    '<span class="cnt">of '+dq.total+' NCs</span></div><div class="dqrow">'+
+    cells.map(([l,v])=>{const pct=Math.round(100*v/dq.total);
+      return '<div class="dqcell'+(v>0?' flag':'')+'"><div class="v">'+v+
+        '</div><div class="l">'+l+'</div><div class="bar"><i style="width:'+
+        pct+'%"></i></div></div>';}).join('')+'</div>';
+  return s;
+}
+
+// ---- modals / feedback / upload ----
+function toggle(id){document.getElementById(id).classList.toggle('open');}
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+function openUpload(){openModal('uploadModal');}
+function openFeedback(){openModal('feedbackModal');}
+function resetGlobal(){STATE.global={types:[],statuses:[],date_from:'',date_to:''};
+  document.getElementById('g_from').value='';document.getElementById('g_to').value='';
+  buildGlobalChips();refreshAll();}
+
+async function doUpload(){
+  const f=document.getElementById('up_file').files[0];
+  if(!f){toast('Choose a file first');return;}
+  const fd=new FormData();fd.append('file',f);
+  fd.append('mode',document.getElementById('up_mode').value);
+  toast('Loading…');
+  const r=await fetch('api/upload',{method:'POST',body:fd});
+  const j=await r.json();
+  if(j.ok){closeModal('uploadModal');toast('Loaded '+j.rows+' NCs');
+    STATE.section={};boot();}
+  else toast('Error: '+j.error);
+}
+async function sendFeedback(){
+  const fd=new FormData();
+  fd.append('message',document.getElementById('fb_msg').value);
+  fd.append('name',document.getElementById('fb_name').value);
+  fd.append('category',document.getElementById('fb_cat').value);
+  const f=document.getElementById('fb_file').files[0];if(f)fd.append('file',f);
+  await fetch('api/feedback',{method:'POST',body:fd});
+  closeModal('feedbackModal');toast('Thanks — feedback saved');
+  document.getElementById('fb_msg').value='';
+}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;
+  t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',2600);}
+
+boot();
+</script>
+</body>
+</html>

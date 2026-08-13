@@ -48,14 +48,21 @@
    background:#FBFCFE;cursor:grab;touch-action:none;}
  .stage.big{height:380px;}.stage.sm{height:290px;}
  .stage.dragging{cursor:grabbing;}
- .canvas{position:absolute;inset:0;transform-origin:0 0;will-change:transform;}
+ /* The canvas is translated for panning only. It must NOT be scaled and must
+    NOT carry will-change:transform — that promotes it to a GPU raster layer,
+    so any scale blows up bitmap pixels and the text goes soft and clipped.
+    Zoom is done by resizing the plot itself (see makeZoom), which redraws the
+    SVG sharp at the new size. */
+ .canvas{position:absolute;inset:0;transform-origin:0 0;}
  .canvas>div{width:100%;height:100%;}
- .zbadge{display:none;}
+ .zbadge{position:absolute;right:10px;top:10px;z-index:5;background:var(--navy);color:#fff;
+   font-size:.68rem;font-weight:700;padding:3px 8px;border-radius:20px;opacity:.85;display:none;}
+ .zbadge.on{display:block;}
  .zreset{position:absolute;right:10px;bottom:10px;z-index:5;background:#fff;color:var(--navy);
    border:1px solid var(--navy);border-radius:8px;font-size:.68rem;font-weight:700;padding:4px 9px;cursor:pointer;}
  .rowlabel{font-size:.8rem;color:#7A8894;margin:14px 0 4px;font-weight:600;}
  .donuts{display:flex;gap:14px;flex-wrap:wrap;}
- .donut{flex:1 1 340px;border:1px solid var(--line);border-radius:12px;padding:12px;}
+ .donut{flex:1 1 340px;min-width:320px;border:1px solid var(--line);border-radius:12px;padding:12px;}
  .donut.secondary{opacity:.8;}
  .dhead{display:flex;align-items:center;gap:10px;}
  .dhead h3{margin:0;font-size:.98rem;color:var(--navy);}
@@ -64,6 +71,10 @@
  .dhead .restore:hover{border-color:var(--navy);}
  .donut p{margin:4px 0 6px;font-size:.73rem;color:#5B6B78;}
  .donut .empty{color:#7A8894;font-size:.85rem;padding:40px 0;text-align:center;}
+ .legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:.72rem;color:#5B6B78;}
+ .legend span{display:inline-flex;align-items:center;gap:5px;cursor:pointer;}
+ .legend i{width:9px;height:9px;border-radius:2px;display:inline-block;}
+ .legend span.off{opacity:.45;text-decoration:line-through;}
  .reportwrap{margin-top:16px;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
  .reporthead{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#F7F8FB;border-bottom:1px solid var(--line);}
  .reporthead h3{margin:0;font-size:1rem;color:var(--navy);}.reporthead .cnt{font-size:.8rem;color:#5B6B78;}
@@ -145,28 +156,35 @@
   <div class="donuts" id="rowSecondary"></div>
 
   <!-- donut cards (moved between rows by JS) -->
-  <template id="cardTpl"></template>
   <div id="cardStore" style="display:none;">
     <div class="donut" id="card_detarea"><div class="dhead"><h3>Open — by detection area</h3>
       <button class="restore" data-dim="detarea">Clear filter</button></div>
       <p class="dcap" id="cap_detarea"></p>
       <div class="stage sm" id="stage_detarea">
-        <div class="canvas"><div id="detarea"></div></div></div></div>
+        <div class="zbadge"></div><button class="zreset">Reset view</button>
+        <div class="canvas"><div id="detarea"></div></div></div>
+      <div class="legend" id="leg_detarea"></div></div>
     <div class="donut" id="card_defect"><div class="dhead"><h3>Open — by defect type</h3>
       <button class="restore" data-dim="defect">Clear filter</button></div>
       <p class="dcap" id="cap_defect"></p>
       <div class="stage sm" id="stage_defect">
-        <div class="canvas"><div id="defect"></div></div></div></div>
+        <div class="zbadge"></div><button class="zreset">Reset view</button>
+        <div class="canvas"><div id="defect"></div></div></div>
+      <div class="legend" id="leg_defect"></div></div>
     <div class="donut" id="card_dept"><div class="dhead"><h3>Done — RCA by department</h3>
       <button class="restore" data-dim="dept">Clear filter</button></div>
       <p class="dcap" id="cap_dept"></p>
       <div class="stage sm" id="stage_dept">
-        <div class="canvas"><div id="dept"></div></div></div></div>
+        <div class="zbadge"></div><button class="zreset">Reset view</button>
+        <div class="canvas"><div id="dept"></div></div></div>
+      <div class="legend" id="leg_dept"></div></div>
     <div class="donut" id="card_cause"><div class="dhead"><h3>Done — root-cause category</h3>
       <button class="restore" data-dim="cause">Clear filter</button></div>
       <p class="dcap" id="cap_cause"></p>
       <div class="stage sm" id="stage_cause">
-        <div class="canvas"><div id="cause"></div></div></div></div>
+        <div class="zbadge"></div><button class="zreset">Reset view</button>
+        <div class="canvas"><div id="cause"></div></div></div>
+      <div class="legend" id="leg_cause"></div></div>
   </div>
 
   <div class="reportwrap">
@@ -179,9 +197,16 @@
 <script>
 var DATA=JSON.parse(document.getElementById('data').textContent);
 var NC=DATA.nc, RCA=DATA.rca;
-var CLASS_COLORS={"LLV":"#1E2761","MLV":"#F26E21","SLV":"#5A63A0","Vulcan":"#4CAF50","(no project)":"#B0B0B0"};
+// Four launcher classes, matching the launcher_class column the ingest writes.
+var CLASS_COLORS={"LLV":"#1E2761","MLV":"#F26E21","SLV":"#5A63A0","SAS":"#1baf7a","(no class)":"#B0B0B0"};
 var STATUS={"CAPA open":"#E53E3E","CAPA done":"#2f9e44"};
 var PAL=["#1E2761","#F26E21","#2a78d6","#1baf7a","#eda100","#9085e9","#e34948","#5A63A0","#4CAF50","#e87ba4","#00838a","#B0B0B0","#c98500","#199e70"];
+
+// Labels are only drawn on slices big enough to hold them. Everything else is
+// named in the legend under the chart and in the tooltip. Without this, a donut
+// with 25 categories writes every label at once and they pile up across the
+// middle of the ring — the mess that appeared on refresh.
+var UNIFORM={minsize:10,mode:'hide'};
 
 var ncDept={}, ncCause={};
 RCA.forEach(function(r){(ncDept[r.nc_id]=ncDept[r.nc_id]||{})[r.dept]=1;(ncCause[r.nc_id]=ncCause[r.nc_id]||{})[r.cause]=1;});
@@ -216,14 +241,8 @@ function curSet(scopeSelf){
 function countBy(rows,key){var m={};rows.forEach(function(r){var k=r[key]||"(blank)";m[k]=(m[k]||0)+1;});
   var a=Object.keys(m).map(function(k){return [k,m[k]];});a.sort(function(x,y){return y[1]-x[1];});return a;}
 
-// ---- icicle: ALWAYS shows both CAPA open + done (scoped only by launcher/cls),
-// so the bottom row is the open/done split. Clicking an open/done box switches
-// which donut pair is shown (same as the View toggle). ----
+// ---- icicle ----
 function icicleRows(){
-  // Filter by the DONUT dims (detection area, defect, dept, cause) but NOT by
-  // launcher/cls or the open/done mode — so all launcher/class rows stay
-  // visible AND the CAPA open / CAPA done box numbers reflect the current
-  // donut selection (press a slice -> the CAPA open box shows that count).
   return NC.filter(function(r){
     if(S.detarea.size&&!S.detarea.has(r.detection_area))return false;
     if(S.defect.size&&!S.defect.has(r.defect_code_text))return false;
@@ -245,7 +264,14 @@ function icicleFig(){
   });
   return [{type:'icicle',ids:ids,labels:labels,parents:parents,values:values,branchvalues:'total',
     tiling:{orientation:'v',pad:1},marker:{colors:colors,line:{width:1,color:'#fff'}},
-    texttemplate:'%{label}<br><b>%{value}</b>',textfont:{size:10,family:'system-ui'},insidetextfont:{size:10,color:'#ffffff'},
+    texttemplate:'%{label}<br><b>%{value}</b>',textfont:{size:11,family:'system-ui'},
+    insidetextfont:{size:11,color:'#ffffff'},
+    // Centre the label in its box. Plotly's icicle default is 'top left', which
+    // puts the text hard against the top edge of the box — and for the first
+    // row that edge IS the edge of the plot, so the text was being sliced in
+    // half. Centring means a label is either fully drawn or (via uniformtext)
+    // not drawn at all. Never half.
+    textposition:'middle center',
     hovertemplate:'<b>%{label}</b><br>%{value} NCs<extra></extra>',root:{color:'#EEF1F7'},
     level:'',maxdepth:4,pathbar:{visible:false}}];
 }
@@ -254,21 +280,25 @@ function ICICLE_CLICK(e){
   if(id==='All'){S.launcher.clear();S.cls.clear();}
   else if(p.length===2)toggle('launcher',p[1]);
   else if(p.length===3)toggle('cls',p[2]);
-  else if(p.length===4)setMode(p[3]==='CAPA open'?'open':'done'); // open/done box switches the donuts
+  else if(p.length===4)setMode(p[3]==='CAPA open'?'open':'done');
   updateAll(true);
-  // Plotly zooms into the clicked branch (its native drill). We keep that as a
-  // "zoom in" gesture; the Reset view button (undrill) brings the full tree back.
+  // Plotly drills into the clicked branch on its own, AFTER this handler runs.
+  // Left alone, one click both filters AND zooms the tree into that branch, so
+  // the whole width becomes one box and its label collides with the top edge.
+  // A click here means "filter", nothing else — so undo the drill every time.
+  undrill();
 }
 function undrill(){
-  // Plotly's native drill-in fires AFTER our click handler. Force the icicle
-  // back to the root level a couple of times so a click filters but never
-  // leaves the tree zoomed into a branch. (Reset view calls this too.)
+  // Three passes: Plotly applies its drill asynchronously and the exact frame
+  // varies with data size, so one restyle is not reliably late enough.
   requestAnimationFrame(function(){try{Plotly.restyle('chart',{level:''});}catch(e){}});
-  setTimeout(function(){try{Plotly.restyle('chart',{level:''});}catch(e){}},220);
+  setTimeout(function(){try{Plotly.restyle('chart',{level:''});}catch(e){}},120);
+  setTimeout(function(){try{Plotly.restyle('chart',{level:''});}catch(e){}},400);
 }
 function drawIcicle(){
   Plotly.react('chart',icicleFig(),
-    {margin:{t:24,l:6,r:6,b:6},paper_bgcolor:'rgba(0,0,0,0)',font:{family:'system-ui'}},
+    {margin:{t:10,l:6,r:6,b:6},paper_bgcolor:'rgba(0,0,0,0)',font:{family:'system-ui'},
+     uniformtext:UNIFORM},
     {displayModeBar:false,responsive:true});
 }
 
@@ -280,10 +310,6 @@ var DON={
   cause:{status:'done',src:'rca',key:'cause'}
 };
 function donutRows(dim){
-  // FUNNEL: filter this donut ONLY by the dims chosen BEFORE it (upstream).
-  // So the first pick's donut stays full; each later donut narrows to fit the
-  // earlier picks; and you can still multi-pick inside this donut (it is not
-  // filtered by itself).
   var d=DON[dim], ups=upstreamDims(dim);
   function upPass(r,isRCA){
     for(var k=0;k<ups.length;k++){var u=ups[k];
@@ -303,17 +329,34 @@ function donutRows(dim){
 }
 function drawDonut(dim){
   var d=DON[dim], rows=donutRows(dim), el=document.getElementById(dim);
+  var leg=document.getElementById('leg_'+dim);
   if(!rows.length){el.innerHTML='<div class="empty">No rows for this selection.</div>';
+    if(leg)leg.innerHTML='';
     document.getElementById('cap_'+dim).textContent=(d.status==='done'&&mode==='open')?'Switch to CAPA done to use this.':'Nothing in selection.';return;}
   var arr=countBy(rows,d.key),labels=arr.map(function(x){return x[0];}),vals=arr.map(function(x){return x[1];});
   var setSel=S[dim];
   var cols=labels.map(function(l,i){return (setSel.size&&!setSel.has(l))?'#D9DEE8':PAL[i%PAL.length];});
   var pulls=labels.map(function(l){return setSel.has(l)?0.09:0;});
   Plotly.react(dim,[{type:'pie',labels:labels,values:vals,hole:0.5,pull:pulls,sort:true,
-    marker:{colors:cols,line:{color:'#fff',width:1}},textposition:'inside',textinfo:'percent+label',
+    marker:{colors:cols,line:{color:'#fff',width:1}},
+    textposition:'inside',insidetextorientation:'radial',textinfo:'percent',
     hovertemplate:'<b>%{label}</b><br>%{value} (%{percent})<extra></extra>'}],
-    {margin:{t:6,l:6,r:6,b:6},showlegend:false,font:{family:'system-ui',size:12}},{displayModeBar:false,responsive:true});
-  document.getElementById('cap_'+dim).textContent='Click to filter (multi). '+rows.length+' rows. Scroll to zoom.';
+    {margin:{t:6,l:6,r:6,b:6},showlegend:false,font:{family:'system-ui',size:12},
+     uniformtext:UNIFORM},
+    {displayModeBar:false,responsive:true});
+  // The names live here rather than on the slices: a legend row stays readable
+  // at any slice size, and clicking it filters exactly like clicking the slice.
+  if(leg){
+    var top=arr.slice(0,12);
+    leg.innerHTML=top.map(function(x,i){
+      var off=(setSel.size&&!setSel.has(x[0]))?' off':'';
+      return '<span class="lg'+off+'" data-dim="'+dim+'" data-val="'+String(x[0]).replace(/"/g,'&quot;')+'">'+
+             '<i style="background:'+PAL[i%PAL.length]+'"></i>'+x[0]+' ('+x[1]+')</span>';}).join('')
+      +(arr.length>top.length?'<span style="opacity:.7">+'+(arr.length-top.length)+' more — hover the ring</span>':'');
+    [].forEach.call(leg.querySelectorAll('.lg'),function(sp){
+      sp.onclick=function(){setMode(DON[dim].status);toggle(dim,sp.getAttribute('data-val'));updateAll(true);};});
+  }
+  document.getElementById('cap_'+dim).textContent='Click a slice or a legend name to filter (multi). '+rows.length+' rows. Scroll to zoom.';
 }
 
 var REPCOLS=["nc_id","Launcher","Project","Class","CAPA","status_state","owner","detection_area","defect_code_text","created_on"];
@@ -342,16 +385,14 @@ function layout(){
   var prim=document.getElementById('rowPrimary'),sec=document.getElementById('rowSecondary');
   function mv(dim,to){to.appendChild(document.getElementById('card_'+dim));}
   var openC=['detarea','defect'],doneC=['dept','cause'];
-  // appendChild re-parents (moves) the card nodes; never innerHTML='' — that would DESTROY them.
   var pList=(mode==='open')?openC:doneC, sList=(mode==='open')?doneC:openC;
   pList.forEach(function(d){mv(d,prim);document.getElementById('card_'+d).classList.remove('secondary');});
   sList.forEach(function(d){mv(d,sec);document.getElementById('card_'+d).classList.add('secondary');});
   document.getElementById('primLabel').textContent=(mode==='open')?'CAPA OPEN — where found & what defect':'CAPA DONE — root cause';
   document.getElementById('secLabel').textContent=(mode==='open')?'CAPA done (click to switch)':'CAPA open (click to switch)';
 }
-// ---- CAPA closure-rate-to-target calculator (same concept as the NC one) ----
+
 function openNowCount(){
-  // CAPA-open NCs matching the current launcher/class (+ area/defect) selection.
   return NC.filter(function(r){ if(r.CAPA!=='CAPA open')return false;
     if(S.launcher.size&&!S.launcher.has(r.Launcher))return false;
     if(S.cls.size&&!S.cls.has(r.Class))return false;
@@ -380,8 +421,6 @@ function computeReach(){
 }
 
 function updateAll(rebuildIcicle){
-  // maintain the funnel order: append any newly-selected dim (one per click),
-  // drop dims that were cleared.
   ['launcher','cls','detarea','defect','dept','cause'].forEach(function(d){
     if(S[d].size&&order.indexOf(d)<0) order.push(d);});
   order=order.filter(function(d){return S[d].size>0;});
@@ -389,7 +428,6 @@ function updateAll(rebuildIcicle){
   layout();
   ['detarea','defect','dept','cause'].forEach(drawDonut);
   curNC=curSet();
-  // refresh the calculator's "CAPA open now" to the current selection, recompute.
   document.getElementById('rOpen').value=openNowCount();
   computeReach();
   document.getElementById('ncCount').textContent=curNC.length.toLocaleString();
@@ -405,18 +443,68 @@ function updateAll(rebuildIcicle){
   document.getElementById('noflt').style.display=anyFilter()?'none':'inline';
   drawReport();
   [].forEach.call(document.querySelectorAll('#chips .x'),function(x){x.onclick=function(){S[x.getAttribute('data-dim')].delete(x.getAttribute('data-val'));updateAll(true);};});
+  // The cards were just re-parented, which can change their width. Redraw at
+  // the new size on the next frame so nothing is laid out against stale
+  // geometry — that mismatch is what threw labels across the page on refresh.
+  resizeAll();
 }
 
-// ---- pan/zoom on any stage ----
-function makeZoom(stage){var canvas=stage.querySelector('.canvas'),badge=stage.querySelector('.zbadge');var scale=1,tx=0,ty=0;
-  function ap(){canvas.style.transform='translate('+tx+'px,'+ty+'px) scale('+scale+')';if(badge)badge.textContent=Math.round(scale*100)+'%';}
-  stage.addEventListener('wheel',function(e){e.preventDefault();var r=stage.getBoundingClientRect(),cx=e.clientX-r.left,cy=e.clientY-r.top;
-    var f=e.deltaY<0?1.15:1/1.15,ns=Math.min(8,Math.max(1,scale*f));tx=cx-(cx-tx)*(ns/scale);ty=cy-(cy-ty)*(ns/scale);scale=ns;if(scale===1){tx=0;ty=0;}ap();},{passive:false});
-  var drag=false,sx=0,sy=0;stage.addEventListener('mousedown',function(e){drag=true;sx=e.clientX-tx;sy=e.clientY-ty;stage.classList.add('dragging');});
-  window.addEventListener('mousemove',function(e){if(!drag)return;tx=e.clientX-sx;ty=e.clientY-sy;ap();});
+// ---- zoom: REDRAW the plot larger, never scale the rendered pixels ----
+// The old version put `transform: scale()` on a will-change layer, so zooming
+// magnified a bitmap: text went soft, slices spilled past the card, and the
+// picture got worse the further you zoomed. Plotly draws SVG, so growing the
+// plot element and asking Plotly to resize redraws every line and label crisply
+// at the new size — and because the font stays 11-12px while the chart grows,
+// thin slices become readable instead of just bigger.
+var ZOOMS=[];
+function makeZoom(stage){
+  var canvas=stage.querySelector('.canvas');
+  var inner=canvas.firstElementChild;          // the div Plotly drew into
+  var badge=stage.querySelector('.zbadge');
+  var reset=stage.querySelector('.zreset');
+  var scale=1,tx=0,ty=0,pending=false;
+  function paint(){
+    inner.style.width=(scale*100)+'%';
+    inner.style.height=(scale*100)+'%';
+    canvas.style.transform='translate('+tx+'px,'+ty+'px)';
+    if(badge){badge.textContent=Math.round(scale*100)+'%';
+      badge.classList.toggle('on',scale>1.01);}
+    if(!pending){pending=true;requestAnimationFrame(function(){
+      pending=false;try{Plotly.Plots.resize(inner);}catch(e){}});}
+  }
+  function clamp(){
+    // Keep the plot covering the stage: no dragging it off into empty space.
+    var r=stage.getBoundingClientRect();
+    var maxX=r.width*(scale-1), maxY=r.height*(scale-1);
+    tx=Math.min(0,Math.max(-maxX,tx)); ty=Math.min(0,Math.max(-maxY,ty));
+  }
+  stage.addEventListener('wheel',function(e){
+    e.preventDefault();
+    var r=stage.getBoundingClientRect(),cx=e.clientX-r.left,cy=e.clientY-r.top;
+    var f=e.deltaY<0?1.15:1/1.15,ns=Math.min(6,Math.max(1,scale*f));
+    if(ns===scale)return;
+    tx=cx-(cx-tx)*(ns/scale);ty=cy-(cy-ty)*(ns/scale);scale=ns;
+    if(scale<=1.001){scale=1;tx=0;ty=0;} else clamp();
+    paint();
+  },{passive:false});
+  var drag=false,sx=0,sy=0;
+  stage.addEventListener('mousedown',function(e){
+    if(scale<=1)return;                     // nothing to pan at 100%
+    drag=true;sx=e.clientX-tx;sy=e.clientY-ty;stage.classList.add('dragging');});
+  window.addEventListener('mousemove',function(e){
+    if(!drag)return;tx=e.clientX-sx;ty=e.clientY-sy;clamp();paint();});
   window.addEventListener('mouseup',function(){drag=false;stage.classList.remove('dragging');});
-  stage.addEventListener('dblclick',function(){scale=1;tx=0;ty=0;ap();});
-  var rb=stage.querySelector('.zreset');if(rb)rb.onclick=function(ev){ev.stopPropagation();scale=1;tx=0;ty=0;ap();};}
+  stage.addEventListener('dblclick',function(){scale=1;tx=0;ty=0;paint();});
+  if(reset)reset.onclick=function(ev){ev.stopPropagation();scale=1;tx=0;ty=0;paint();};
+  var api={repaint:paint,el:inner};
+  ZOOMS.push(api);
+  return api;
+}
+function resizeAll(){
+  requestAnimationFrame(function(){
+    ZOOMS.forEach(function(z){try{Plotly.Plots.resize(z.el);}catch(e){}});
+  });
+}
 
 function bindPlotly(){
   document.getElementById('chart').on('plotly_click',ICICLE_CLICK);
@@ -438,11 +526,9 @@ window.__click=function(dim,val){setMode(DON[dim].status);toggle(dim,val);update
 window.__icicle=function(id){var p=id.split('/');if(id==='All'){S.launcher.clear();S.cls.clear();}else if(p.length===2)toggle('launcher',p[1]);else if(p.length===3)toggle('cls',p[2]);else if(p.length===4)setMode(p[3]==='CAPA open'?'open':'done');updateAll(true);};
 window.__state=function(){var o={mode:mode};['launcher','cls','detarea','defect','dept','cause'].forEach(function(d){o[d]=Array.from(S[d]);});return JSON.stringify(o);};
 
-// ---- init the closure-rate calculator (defaults + live recompute) ----
 (function(){
   var today=new Date();
   document.getElementById('rDeadline').value=new Date(today.getTime()+90*864e5).toISOString().slice(0,10);
-  // inflow default = avg new NCs / week over the last 12 weeks (browser-side date math is fine here)
   var cut=new Date(today.getTime()-84*864e5);
   var recent=NC.filter(function(r){var d=new Date(r.created_on);return d>=cut&&d<=today;}).length;
   document.getElementById('rInflow').value=(Math.round((recent/12)*10)/10)||0;
@@ -452,9 +538,21 @@ window.__state=function(){var o={mode:mode};['launcher','cls','detarea','defect'
 
 drawIcicle();updateAll(false);bindPlotly();
 ['icStage','stage_detarea','stage_defect','stage_dept','stage_cause'].forEach(function(id){makeZoom(document.getElementById(id));});
-// Reset view also un-drills the icicle (undo any native drill), plus the zoom
-// reset that makeZoom already binds on the same button.
 document.getElementById('icReset').addEventListener('click',function(){undrill();});
+
+// Redraw whenever the page is actually resized. The component is rendered
+// inside an iframe whose width is settled by Streamlit AFTER the first paint,
+// so a chart laid out at that first width ends up drawn against geometry that
+// no longer exists — labels land in the wrong place and the whole thing looks
+// scrambled until you interact with it. Watching the container and redrawing
+// removes the race for good.
+if(window.ResizeObserver){
+  var ro=new ResizeObserver(function(){resizeAll();});
+  ro.observe(document.querySelector('.wrap'));
+}
+window.addEventListener('resize',resizeAll);
+window.addEventListener('load',resizeAll);
+setTimeout(resizeAll,200); setTimeout(resizeAll,800);
 </script>
 </body>
 </html>

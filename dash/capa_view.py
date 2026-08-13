@@ -1,27 +1,22 @@
 """
 capa_view.py — the CAPA tab, rendered inside app.py via `capa_view.render()`.
 
-A zoomable "pizza" (Plotly sunburst) that goes from the big picture down to the
-detail: Launcher class -> Project -> Classification -> CAPA open/done. Click a
-wedge to zoom in, click the middle to zoom out, and the report table below
-always shows exactly what you're looking at. A burnout split by launcher class
-(LLV / MLV / SLV) sits on top, and an RCA-by-department pizza on the side.
+A zoomable "pizza" (Plotly sunburst/icicle) that goes from the big picture down
+to the detail: Launcher class -> Project -> Classification -> CAPA status. A
+burnout split by launcher class sits on top, and an RCA-by-department pizza on
+the side.
 
-RULE (Adriele, current): EVERY NC owes a CAPA. So an NC with no CAPA record on
-file = CAPA OPEN (outstanding), whether the NC is closed or not. An NC that has
-a CAPA record (RCA / CA / PA / Ext-8D) = CAPA DONE.
+CAPA STATUS — CORRECTED (Adriele): the source of truth is the **Capa Board**
+sheet (its `capa_status`), NOT "does the NC have a record". Each CAPA on the
+board is Closed / Overdue / Open. Per NC:
+    CAPA done    = its CAPA(s) are all Closed
+    CAPA overdue = it has a CAPA marked Overdue
+    CAPA open    = it has a CAPA still open (or blank) and not overdue
+An NC with **no CAPA on the board is not shown here** — it is not "open". This
+kills the old phantom (2,755 "open" that were really just NCs without a record).
 
-  * "Done" now includes Ext-8D (external supplier 8D). It is a corrective-action
-    record like the others, so an NC whose only action is an Ext-8D counts as
-    covered. (Before the ingest fix, Ext-8D rows were dropped and 131 covered
-    NCs wrongly showed as open.)
-
-Launcher classes — confirmed against the CAPA tracker's own "Affected Project"
-column, which literally prefixes LLV_ / MLV_ / SLV_:
-    LLV = Ariane (A6) + Relativity (RS) + MHI_H3 (H3)   [+ Atlas, Vulcan share the LLV prefix]
-    MLV = Vega
-    SLV = Flexline + SAS
-    (Vulcan is kept as its own bucket; no-project rows show as '(no project)')
+Launcher class is read straight from the DB column `launcher_class`, which folds
+Vulcan into LLV and keeps SAS standalone (LLV / MLV / SLV / SAS).
 
 This module exposes render(); app.py calls it from inside the "CAPA" tab.
 Page config and the password gate live in app.py, not here.
@@ -39,13 +34,34 @@ import streamlit.components.v1 as components
 DB_FILE = "quality.db"
 FEEDBACK_DB = "dashboard_feedback.db"   # persistent — ingest.py never touches it
 
-LAUNCHER = {"Ariane": "LLV", "Relativity": "LLV", "MHI_H3": "LLV",
-            "Vega": "MLV", "Flexline": "SLV", "SAS": "SLV", "Vulcan": "Vulcan"}
-OPEN, DONE = "CAPA open", "CAPA done"
-STATUS_COLORS = {OPEN: "#E53E3E", DONE: "#4CAF50"}
-# fixed colours per launcher class so the burnout bars read consistently
+# CAPA states come from the Capa Board (capa_status), not from record-existence.
+DONE = "CAPA done"        # board status = Closed
+OPEN = "CAPA open"        # board status = Open / blank (outstanding, not overdue)
+OVERDUE = "CAPA overdue"  # board status = Overdue
+STATUS_COLORS = {DONE: "#4CAF50", OPEN: "#F2A900", OVERDUE: "#E53E3E"}
+# Launcher class read straight from the DB (Vulcan folded into LLV, SAS alone).
+CLASS_ORDER = ["LLV", "MLV", "SLV", "SAS", "(no class)"]
 CLASS_COLORS = {"LLV": "#1E2761", "MLV": "#F26E21", "SLV": "#5A63A0",
-                "Vulcan": "#4CAF50", "(no project)": "#B0B0B0"}
+                "SAS": "#1C7293", "(no class)": "#B0B0B0"}
+
+
+def _norm_status(s):
+    s = str(s).strip().lower()
+    if s == "closed":
+        return "Closed"
+    if s == "overdue":
+        return "Overdue"
+    return "Open"   # 'open' or blank -> still outstanding
+
+
+def _board_state(status_list):
+    """Collapse an NC's CAPA-record statuses (from the Capa Board) into one
+    state. Overdue wins, then any not-closed = open, else done."""
+    if any(s == "Overdue" for s in status_list):
+        return OVERDUE
+    if any(s != "Closed" for s in status_list):
+        return OPEN
+    return DONE
 
 
 # =========================================================================
@@ -103,38 +119,81 @@ def _plotly_js():
         return f.read()
 
 
-@st.cache_data(ttl=300)
-def load_nc():
-    con = sqlite3.connect(DB_FILE)
-    nc = pd.read_sql(
-        "SELECT nc_id, project, classification, owner, detection_area, "
-        "defect_code_text, created_on, closure_date, is_open, status_state "
-        "FROM nc", con)
-    capa_ncs = set(pd.read_sql("SELECT DISTINCT nc_id FROM capa", con)["nc_id"])
-    con.close()
-    nc["Launcher"] = nc["project"].map(LAUNCHER).fillna("(no project)")
-    nc["Project"] = nc["project"].fillna("(no project)")
+_STATUS_BUCKET = {"Closed": DONE, "Overdue": OVERDUE, "Open": OPEN}
 
-    nc["Class"] = nc["classification"].apply(_classify)
-    nc["CAPA"] = nc["nc_id"].apply(lambda x: DONE if x in capa_ncs else OPEN)
-    return nc
+
+@st.cache_data(ttl=300)
+def load_capa_rows():
+    """ONE ROW PER CAPA on the Capa Board — the source of truth. Each CAPA is
+    counted by its own board Status: Closed = done, Overdue = overdue, anything
+    else (Open / blank) = open. Every row also carries its NC's context (project,
+    class, owner, detection area) via a left join, so the drill and the detail
+    table work. Launcher class comes from the board's own 'Affected Project'
+    prefix (LLV folds in Vulcan, SAS stands alone)."""
+    con = sqlite3.connect(DB_FILE)
+    df = pd.read_sql(
+        "SELECT c.nc_id, c.capa_type, c.capa_status, "
+        "c.launcher_class AS capa_launcher, "
+        "n.project, n.launcher_class AS nc_launcher, n.classification, "
+        "n.owner, n.detection_area, n.defect_code_text, n.created_on, "
+        "n.status_state "
+        "FROM capa c LEFT JOIN nc n ON c.nc_id = n.nc_id", con)
+    con.close()
+    df["CAPA"] = df["capa_status"].map(_norm_status).map(_STATUS_BUCKET).fillna(OPEN)
+    df["Launcher"] = df["capa_launcher"].fillna(df["nc_launcher"]).fillna("(no class)")
+    df["Project"] = df["project"].fillna("(no project)")
+    df["Class"] = df["classification"].apply(_classify)
+    return df
+
+
+@st.cache_data(ttl=300)
+def load_capa_ncs():
+    """ONE ROW PER NC that has a CAPA on the Capa Board — this is what the whole
+    tab counts. A single NC usually carries several CAPA lines on the board (RCA +
+    correction + corrective + preventive), so counting board *lines* inflated the
+    numbers into the thousands (LLV read ~1149). We instead count **NCs**: each
+    NC's CAPA state is the worst of its board lines — any Overdue -> overdue, else
+    any not-Closed -> open, else done. Now LLV reads its real NC count (~451)."""
+    rows = load_capa_rows()   # per CAPA line
+
+    def _collapse(status_series):
+        return _board_state([_norm_status(s) for s in status_series])
+
+    agg = (rows.groupby("nc_id", as_index=False)
+           .agg(Launcher=("Launcher", "first"),
+                Project=("Project", "first"),
+                Class=("Class", "first"),
+                owner=("owner", "first"),
+                detection_area=("detection_area", "first"),
+                defect_code_text=("defect_code_text", "first"),
+                created_on=("created_on", "first"),
+                status_state=("status_state", "first"),
+                CAPA=("capa_status", _collapse)))
+    return agg
 
 
 @st.cache_data(ttl=300)
 def load_rca_departments():
     """RCA rows joined to their NC so they carry Launcher / Project / Class.
-    This lets the RCA donuts follow the SAME drill as the icicle: pick a
-    launcher and the department + root-cause donuts re-scope to it."""
+    This lets the RCA donuts follow the SAME drill as the icicle."""
     con = sqlite3.connect(DB_FILE)
     df = pd.read_sql(
         "SELECT c.nc_id, "
         "COALESCE(c.origin_area_l1,'(not recorded)') AS dept, "
         "COALESCE(c.rc_category_l1,'(not recorded)') AS cause, "
-        "n.project AS project, n.classification AS classification "
+        "n.project AS project, n.launcher_class AS launcher_class, "
+        "n.classification AS classification "
         "FROM capa c LEFT JOIN nc n ON c.nc_id = n.nc_id "
         "WHERE c.capa_type='RCA'", con)
     con.close()
-    df["Launcher"] = df["project"].map(LAUNCHER).fillna("(no project)")
+    # One RCA per NC for the donuts (ingest no longer dedups the capa table, so
+    # do it here): prefer a row that actually records an origin/cause.
+    df["_score"] = ((df["dept"] != "(not recorded)").astype(int)
+                    + (df["cause"] != "(not recorded)").astype(int))
+    df = (df.sort_values("_score", kind="stable")
+            .drop_duplicates(subset=["nc_id"], keep="last")
+            .drop(columns=["_score"]).reset_index(drop=True))
+    df["Launcher"] = df["launcher_class"].fillna("(no class)")
     df["Project"] = df["project"].fillna("(no project)")
     df["Class"] = df["classification"].apply(_classify)
     return df
@@ -144,9 +203,9 @@ def load_rca_departments():
 # zoomable vertical icicle (replaces the sunburst) — mouse-only pan/zoom
 # =========================================================================
 def _build_icicle_data(df):
-    """Launcher -> Class -> CAPA open/done, as Plotly icicle arrays.
+    """Launcher -> Class -> CAPA status, as Plotly icicle arrays.
     Values are counts; colours: navy root, launcher-class colour, grey class,
-    red/green CAPA leaves."""
+    green/amber/red CAPA leaves."""
     ids, labels, parents, values, colors = [], [], [], [], []
     tot = len(df)
     if tot == 0:
@@ -299,55 +358,67 @@ def capa_page_html(nc_df, rca_df):
 def render():
     feedback_widget()
     st.title("CAPA — Root Cause & Actions")
-    st.caption("Rule: every NC owes a CAPA. No CAPA on record = **CAPA open** "
-               "(even if the NC is closed). 'Done' counts RCA, CA, PA and "
-               "Ext-8D (external supplier 8D).")
+    st.caption("Source: the **Capa Board** sheet only. Numbers count **NCs** — "
+               "each NC's CAPA state is the worst of its board lines: **overdue** "
+               "if any line is overdue, else **open** if any line is still open, "
+               "else **done**. LLV includes Vulcan; SAS stands alone.")
 
-    nc = load_nc()
+    nc = load_capa_ncs()
+    if nc.empty:
+        st.info("No CAPA records found on the board in `quality.db`. "
+                "Run the ingest with the CAPA tracker present.")
+        return
 
-    # ---- burnout split by launcher class (LLV / MLV / SLV) --------------
+    # ---- burnout split by launcher class -------------------------------
     st.subheader("CAPA burnout by launcher class")
-    st.caption("Each launcher class: how many of its NCs still owe a CAPA "
-               "(red) vs how many are covered (green). LLV = Ariane + RS + H3, "
-               "MLV = Vega, SLV = Flexline + SAS.")
-    burn = (nc.groupby(["Launcher", "CAPA"]).size()
-              .reset_index(name="n"))
-    # keep a stable class order
-    _order = ["LLV", "MLV", "SLV", "Vulcan", "(no project)"]
-    burn["Launcher"] = pd.Categorical(burn["Launcher"], categories=_order,
+    st.caption("Each launcher class, counting **NCs**: **done** (green, all board "
+               "lines Closed) vs **open** (amber) vs **overdue** (red). "
+               "LLV includes Vulcan; SAS stands alone.")
+    burn = (nc.groupby(["Launcher", "CAPA"]).size().reset_index(name="n"))
+    burn["Launcher"] = pd.Categorical(burn["Launcher"], categories=CLASS_ORDER,
                                       ordered=True)
     burn = burn.sort_values("Launcher")
     figb = px.bar(burn, x="Launcher", y="n", color="CAPA",
                   color_discrete_map=STATUS_COLORS, text="n",
-                  category_orders={"Launcher": _order})
-    figb.update_layout(barmode="stack", height=320,
+                  category_orders={"Launcher": CLASS_ORDER,
+                                   "CAPA": [DONE, OPEN, OVERDUE]})
+    figb.update_layout(barmode="stack", height=340,
                        margin=dict(t=10, l=0, r=0, b=0),
                        xaxis_title="", yaxis_title="NCs",
                        legend_title_text="")
     figb.update_traces(textposition="inside")
     st.plotly_chart(figb, width='stretch')
 
-    # a small coverage table under the burnout
+    # coverage table under the burnout
     piv = (nc.pivot_table(index="Launcher", columns="CAPA", values="nc_id",
                           aggfunc="count", fill_value=0)
-             .reindex(_order).dropna(how="all"))
-    for _col in (OPEN, DONE):
+             .reindex(CLASS_ORDER).dropna(how="all"))
+    for _col in (DONE, OPEN, OVERDUE):
         if _col not in piv.columns:
             piv[_col] = 0
-    piv["Total"] = piv[OPEN] + piv[DONE]
+    piv["Total"] = piv[DONE] + piv[OPEN] + piv[OVERDUE]
     piv["Coverage"] = (100 * piv[DONE] / piv["Total"].replace(0, 1)).round(0)
-    piv = piv.rename(columns={OPEN: "Open", DONE: "Done"})
-    st.dataframe(piv[["Open", "Done", "Total", "Coverage"]]
+    piv = piv.rename(columns={DONE: "Done", OPEN: "Open", OVERDUE: "Overdue"})
+    st.dataframe(piv[["Done", "Open", "Overdue", "Total", "Coverage"]]
                  .style.format({"Coverage": "{:.0f}%"}),
                  width='stretch')
+    st.caption("Counting NCs. ‘Done’ = all board lines Closed · ‘Overdue’ = has an "
+               "overdue line · ‘Open’ = still open · ‘Coverage’ = done ÷ total.")
 
     st.divider()
 
     # ---- the full cross-filter CAPA view (one self-contained HTML/JS page) --
-    # Linked brushing: click the icicle OR either donut and the whole view +
-    # the Excel download follow the selection; clear a chip (or Clear all) and
-    # it returns to the full view. Rebuilt from the LIVE DB on every run, so it
-    # always reflects the latest ingest. This is the same page that will run
-    # standalone on the internal server; here it is embedded via components.html.
+    # Only the CAPAs that still need action: open + overdue. The done ones are
+    # already counted in the burnout / coverage above; here we focus the drill on
+    # what is still outstanding, so the pizza never reads in the thousands.
+    st.subheader("Still open — cross-filter the outstanding CAPAs")
+    st.caption("This panel shows **only open and overdue** CAPAs (done ones are "
+               "excluded). Counting NCs. Click the pizza to drill; the donuts and "
+               "table follow your selection.")
+    nc_action = nc[nc["CAPA"].isin([OPEN, OVERDUE])].reset_index(drop=True)
+    if nc_action.empty:
+        st.info("No open or overdue CAPAs in the board — all are closed.")
+        return
     rca_df = load_rca_departments()
-    components.html(capa_page_html(nc, rca_df), height=2150, scrolling=False)
+    rca_df = rca_df[rca_df["nc_id"].isin(set(nc_action["nc_id"]))].reset_index(drop=True)
+    components.html(capa_page_html(nc_action, rca_df), height=2150, scrolling=False)

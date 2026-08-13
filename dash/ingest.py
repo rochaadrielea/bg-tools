@@ -40,10 +40,11 @@ Usage:
     python ingest.py
 """
 
+import os
 import re
 import sqlite3
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 
 import pandas as pd
 
@@ -59,6 +60,12 @@ CAPA_SHEET = "Requestor"
 # 'CAPA open' on the burnout. It is kept as its own type so the RCA-only views
 # (pizza, root-cause) are unaffected — they filter capa_type='RCA' explicitly.
 CAPA_TYPES = ["RCA", "CA", "PA", "EXT-8D"]
+
+# EZ1 / EZYone go-live. Ambiguous tracker dates (both parts <=12) on EZ1/Blackout
+# rows that would land BEFORE this are read day-first instead of month-first, so
+# a 3-August NC written "03/08/2026" stops appearing in March. If the real
+# go-live is a different month, change this one line and re-run.
+EZ1_GO_LIVE = date(2026, 5, 1)
 
 # Column maps live at module level so validate.py can check the real mapping
 # rather than a hand-kept copy of it. Two lists that can disagree WILL disagree:
@@ -299,6 +306,38 @@ def clean_text(val):
     return v
 
 
+# ---- Detection-area consolidation (data treatment) --------------------------
+# The same detection area is recorded two different ways: the old SAP free-text
+# ("Incoming inspection") and the new NC-tracker letter-codes ("II: Incoming
+# Inspection"). Left as-is, one real area shows up as two separate bars in
+# "Open NCs by Area". This map collapses the pairs that are UNAMBIGUOUSLY the
+# same area onto one canonical name. Matching is case-insensitive; anything not
+# listed here is kept exactly as recorded (so we never merge things that only
+# look similar — e.g. 'M: Machining' vs 'Manufacturing' are left separate).
+DETECTION_AREA_CANON = {
+    "ii: incoming inspection": "Incoming inspection",
+    "incoming inspection":     "Incoming inspection",
+    "cc: customer complaint":  "Customer complaint",
+    "customer complaint":      "Customer complaint",
+    "s: supplier":             "Supplier",
+    "supplier":                "Supplier",
+    "b: bonding":              "Bonding",
+    "bonding":                 "Bonding",
+    "t: testing":              "Test",
+    "test":                    "Test",
+    "p: post delivery":        "Post delivery",
+    "post delivery":           "Post delivery",
+}
+
+
+def canon_detection_area(val):
+    """Collapse detection-area synonyms to one canonical name (see map above)."""
+    v = clean_text(val)
+    if v is None:
+        return None
+    return DETECTION_AREA_CANON.get(v.strip().lower(), v)
+
+
 def parse_date(val, dayfirst=True):
     """Parse a date cell to ISO. `dayfirst` must match the source's convention.
 
@@ -320,6 +359,75 @@ def parse_date(val, dayfirst=True):
 def parse_date_us(val):
     """Month-first date, for the NC tracker."""
     return parse_date(val, dayfirst=False)
+
+
+def parse_ncr_date(val, not_before=None, not_after=None):
+    """Parse a tracker date that may be M/D/Y OR D/M/Y — the source mixes both.
+
+    The tracker is typed by several people: most rows are US month-first
+    (6/23/2026), but some are European day-first (13/07/2026, 31/07/2026), and a
+    few are genuinely ambiguous (03/08/2026 — 8 March or 3 August?).
+
+    Rule:
+      * a token > 12 fixes the format unambiguously;
+      * an ambiguous date defaults to month-first (the file's dominant style),
+        BUT flips to day-first if month-first would land before `not_before`
+        (the EZ1 go-live), OR after `not_after` (a creation date cannot be in
+        the future). That turns a July/August EZ1 written "03/08/2026" back into
+        3 August instead of the phantom 8 March.
+
+    NOTE: only the TEXT (CSV) path reaches this branch. In an .xlsx these cells
+    arrive as real datetimes and return early below — Excel already picked an
+    orientation and ingest must not second-guess it.
+
+    Deterministic and explainable — it never relies on pandas guessing.
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    if isinstance(val, datetime):
+        return val.date().isoformat()
+    s = str(val).strip()
+    if not s or s == '\xa0':
+        return None
+    p = s.replace(".", "/").replace("-", "/").split("/")
+    if len(p) == 3 and p[0].isdigit() and p[1].isdigit() and p[2].isdigit():
+        a, b, y = int(p[0]), int(p[1]), int(p[2])
+        if y < 100:
+            y += 2000
+
+        def mk(mo, da):
+            try:
+                return date(y, mo, da)
+            except ValueError:
+                return None
+
+        if a > 12 and b <= 12:
+            d = mk(b, a)                       # unambiguous day-first
+        elif b > 12 and a <= 12:
+            d = mk(a, b)                       # unambiguous month-first
+        elif a <= 12 and b <= 12:             # ambiguous
+            dm, dd = mk(a, b), mk(b, a)        # month-first, day-first
+            # The tracker is European DD/MM/YYYY (e.g. '06.08.2026' = 6 August),
+            # so an ambiguous date is read DAY-FIRST. Month-first mis-read
+            # '06.08.2026' as 8 June and dropped a closure into the wrong month.
+            if not_after and dd and dd > not_after and dm and dm <= not_after:
+                d = dm      # day-first would be in the future -> use month-first
+            elif not_before and dd and dd < not_before and dm and dm >= not_before:
+                d = dm      # day-first before go-live -> use month-first
+            else:
+                d = dd or dm
+        else:
+            d = None
+        if d:
+            return d.isoformat()
+    # Fallback for ISO or anything unusual — try month-first, then day-first.
+    try:
+        return pd.to_datetime(s, dayfirst=False).date().isoformat()
+    except Exception:
+        try:
+            return pd.to_datetime(s, dayfirst=True).date().isoformat()
+        except Exception:
+            return None
 
 
 def clean_level(val):
@@ -346,6 +454,27 @@ def clean_capa_type(val):
     return v if v in CAPA_TYPES else None
 
 
+def clean_capa_status(val):
+    """Normalise the Capa Board 'Status' to Closed / Overdue / Open.
+
+    This is the CAPA tracker's OWN status (from the Capa Board tab) and is the
+    source of truth for 'CAPA open / overdue' — NOT a rule invented downstream.
+    Blank, '#VALUE!' (a broken sheet formula) and '0' -> None (unknown)."""
+    if pd.isna(val):
+        return None
+    v = str(val).strip()
+    if not v or v in ("\xa0", "#VALUE!", "#N/A", "0"):
+        return None
+    vl = v.lower()
+    if vl.startswith("close"):
+        return "Closed"
+    if vl.startswith("overdue"):
+        return "Overdue"
+    if vl.startswith("open"):
+        return "Open"
+    return v.title()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 1: Load the CAPA / RCA tracker
 # ══════════════════════════════════════════════════════════════════════════════
@@ -367,9 +496,13 @@ def load_capa():
 
     try:
         xl = pd.ExcelFile(path)
-        sheet = CAPA_SHEET if CAPA_SHEET in xl.sheet_names else xl.sheet_names[0]
-        if sheet != CAPA_SHEET:
-            print(f"  ! Sheet '{CAPA_SHEET}' not found, using '{sheet}'. Tabs: {xl.sheet_names}")
+        # Prefer the 'Capa Board' tab: it is a superset of 'Requestor' and, unlike
+        # it, carries the tracker's own Status + Due Date — the source of truth for
+        # CAPA open/overdue (Adriele). Trailing space in the real tab name is real.
+        _prefer = ["Capa Board ", "Capa Board", CAPA_SHEET]
+        sheet = next((s for s in _prefer if s in xl.sheet_names), xl.sheet_names[0])
+        if sheet not in ("Capa Board ", "Capa Board"):
+            print(f"  ! 'Capa Board' tab not found, using '{sheet}'. Tabs: {xl.sheet_names}")
 
         # Auto-detect the header row: the row containing 'NC/SCAR'
         probe = pd.read_excel(path, sheet_name=sheet, header=None, nrows=12, dtype=str)
@@ -402,21 +535,26 @@ def load_capa():
         return None
 
     def _clean_id(x):
-        # Match the SAP loader's nc_id format exactly, or the join silently fails
+        # Match the SAP loader's nc_id format exactly, or the join silently fails.
+        # '0' is the placeholder people type for "nothing" (same as clean_level):
+        # 78 board lines carry nc_id='0'. Without this guard they all collapse
+        # into one phantom NC in the CAPA tab. Treat '0'/'' as no id.
         if pd.isna(x):
             return None
         if isinstance(x, (int, float)):
             try:
-                return str(int(x))
+                r = str(int(x))
             except Exception:
-                return clean_text(x)
-        s = clean_text(x)
-        if s is None:
-            return None
-        try:                      # '213952.0' -> '213952'
-            return str(int(float(s)))
-        except Exception:
-            return s
+                r = clean_text(x)
+        else:
+            s = clean_text(x)
+            if s is None:
+                return None
+            try:                      # '213952.0' -> '213952'
+                r = str(int(float(s)))
+            except Exception:
+                r = s
+        return None if r in ("0", "", None) else r
 
     out = pd.DataFrame()
     out["nc_id"] = df[c_nc].apply(_clean_id)
@@ -451,6 +589,16 @@ def load_capa():
     out["launcher_class"] = (df[_c_proj].apply(capa_launcher_class)
                              if _c_proj else "(no class)")
 
+    # CAPA STATUS + dates from the Capa Board — the tracker's own truth for
+    # open/overdue (Adriele: this tab is the source). If the file only has the
+    # 'Requestor' sheet these columns won't exist and stay None.
+    _c_status = pick("Status")
+    out["capa_status"] = df[_c_status].apply(clean_capa_status) if _c_status else None
+    for _tgt, _src in [("due_date", pick("Due Date")),
+                       ("open_date", pick("Open Date")),
+                       ("close_date", pick("Close Date"))]:
+        out[_tgt] = df[_src].apply(parse_ncr_date) if _src else None
+
     n_raw = len(out)
     out = out[out["nc_id"].notna()].copy()
     n_no_id = n_raw - len(out)
@@ -459,17 +607,13 @@ def load_capa():
     out = out[out["capa_type"].notna()].copy()
     n_bad_type = n_before_type - len(out)
 
-    # ---- Dedup on (nc_id, capa_type), keeping the row with the most content ----
-    # The same NC+type can appear twice: once filled, once all-N/A. Sorting by
-    # content score and keeping the last means a filled row always wins over a
-    # blank one, regardless of the order they sit in the sheet.
-    _score_cols = _level_cols + _ctx_cols
-    out["_score"] = out[_score_cols].notna().sum(axis=1)
-    out = (out.sort_values(["nc_id", "capa_type", "_score"], kind="stable")
-              .drop_duplicates(subset=["nc_id", "capa_type"], keep="last")
-              .drop(columns=["_score"])
-              .reset_index(drop=True))
-    n_dupes = (n_before_type - n_bad_type) - len(out)
+    # NO dedup on (nc_id, capa_type). An NC legitimately has several actions of
+    # the same type (the board numbers them 'ID Number 1, 2, 3…'), so every valid
+    # CAPA line is kept — the CAPA count/status must match the Capa Board line for
+    # line (Adriele: "take the data only from the Capa Board"). The RCA donuts in
+    # capa_view.py de-duplicate per NC on their own so they are not double-counted.
+    out = out.reset_index(drop=True)
+    n_dupes = 0
 
     # ---- Reporting ----
     _by_type = out["capa_type"].value_counts().to_dict()
@@ -488,6 +632,10 @@ def load_capa():
           f"RC Category L1 filled: {n_r1}/{n_rca} RCA rows")
     _by_class = out["launcher_class"].value_counts().to_dict()
     print(f"    Launcher class: " + " | ".join(f"{k}: {v}" for k, v in _by_class.items()))
+    if "capa_status" in out.columns and out["capa_status"].notna().any():
+        _by_status = out["capa_status"].value_counts(dropna=False).to_dict()
+        print(f"    CAPA status (from Capa Board): "
+              + " | ".join(f"{k}: {v}" for k, v in _by_status.items()))
     return out
 
 
@@ -505,14 +653,26 @@ def read_tracker_file(f):
     and no error anywhere. Accepting CSV removes that silent failure.
 
     CSV specifics: SharePoint writes UTF-8 with a BOM, so the first header comes
-    back as '\ufeffSystem' unless the encoding says utf-8-sig. Every column is
+    back as '﻿System' unless the encoding says utf-8-sig. Every column is
     read as text and the cleaners do the typing, which matches how the Excel
     path already behaves.
     """
     if f.suffix.lower() == ".csv":
         print(f"  Reading {f.name} (CSV export of '{TRACKER_SHEET}')...")
-        df = pd.read_csv(f, encoding="utf-8-sig", dtype=str)
-        df.columns = [str(c).strip().lstrip("\ufeff") for c in df.columns]
+        # Encoding varies by who exported it: SharePoint writes UTF-8 (BOM),
+        # but an Excel "Save as CSV" on a German Windows writes cp1252/latin-1
+        # (a stray non-breaking space is byte 0xA0, which is NOT valid UTF-8).
+        # Try the likely encodings in order rather than crash on the wrong one.
+        df = None
+        for _enc in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                df = pd.read_csv(f, encoding=_enc, dtype=str)
+                break
+            except UnicodeDecodeError:
+                continue
+        if df is None:
+            df = pd.read_csv(f, encoding="latin-1", dtype=str, engine="python")
+        df.columns = [str(c).strip().lstrip("﻿") for c in df.columns]
         return df
 
     xl = pd.ExcelFile(f)
@@ -529,13 +689,23 @@ def load_tracker():
     """Load and clean the NCR Cutover Tracker (.xlsx, .xlsm or .csv)."""
     # Workbook first: if both are present the workbook is the live file and the
     # CSV is usually an older export sitting next to it.
+    # Match the tracker by several real-world names people have saved it under:
+    # NCR_Cutover_Tracker…, NCtracker…, …NC_Tracker…  (xls/xlsm/csv). The 'CAPA'
+    # workbook also contains the word 'Tracker', so we never match a bare
+    # '*Tracker*' — only names that carry NC / NCR, which the CAPA file does not.
     f = (find_file("NCR_Cutover_Tracker*.xlsx")
          or find_file("NCR_Cutover_Tracker*.xlsm")
+         or find_file("NCtracker*.xlsx")
+         or find_file("NCtracker*.xlsm")
+         or find_file("*NC_Tracker*.xlsx")
+         or find_file("*NC_Tracker*.xlsm")
          or find_file("NCR_Cutover_Tracker*.csv")
+         or find_file("NCtracker*.csv")
          or find_file("*NC_Tracker*.csv"))
     if not f:
-        print("  ⚠ No NCR_Cutover_Tracker file (.xlsx / .xlsm / .csv) found in data/ "
-              "— skipping tracker. The dashboard will show SAP rows only.")
+        print("  ⚠ No tracker file (NCR_Cutover_Tracker / NCtracker / NC_Tracker; "
+              ".xlsx / .xlsm / .csv) found in data/ — skipping tracker. "
+              "The dashboard will show SAP rows only.")
         return pd.DataFrame()
 
     df = read_tracker_file(f)
@@ -572,14 +742,30 @@ def load_tracker():
     df["owner"] = df["owner"].apply(clean_owner)
     df["project"] = df["project"].apply(clean_project)
     df["launcher_class"] = df["project"].apply(launcher_class)
-    df["created_on"] = df["created_on"].apply(parse_date_us)
-    df["closure_date"] = df["closure_date"].apply(parse_date_us)
+
+    # Dates — the tracker MIXES M/D and D/M (typed by several people). Use the
+    # per-token/plausibility parser: on EZ1/Blackout rows an ambiguous date that
+    # would fall before EZ1 go-live is read day-first (fixes "EZ1 in March").
+    # 'system' is still the raw string at this point, which is what we want.
+    _nb = df["system"].apply(
+        lambda s: EZ1_GO_LIVE if str(s).strip() in ("EZ1", "Blackout") else None)
+    _today = date.today()   # a creation/closure date cannot be in the future
+    df["created_on"] = [parse_ncr_date(v, nb, _today) for v, nb in zip(df["created_on"], _nb)]
+    df["closure_date"] = [parse_ncr_date(v, nb, _today) for v, nb in zip(df["closure_date"], _nb)]
     if "disposition_date" in df.columns:
-        df["disposition_date"] = df["disposition_date"].apply(parse_date_us)
+        df["disposition_date"] = [parse_ncr_date(v, nb, _today)
+                                  for v, nb in zip(df["disposition_date"], _nb)]
 
     for col in df.columns:
         if col not in ("created_on", "closure_date", "disposition_date", "launcher_class"):
             df[col] = df[col].apply(clean_text)
+
+    # An EZ1 row often has a blank ID-Blackout but carries a TC ID (NC_… / IR-…).
+    # 34 rows in the 11.08 tracker are exactly this. Fall back to tc_id so those
+    # NCs are not left without any identifier. (TRACKER_REQUIRED_COLS only checks
+    # the column exists, not that every row has a value.)
+    if "tc_id" in df.columns:
+        df["nc_id"] = df["nc_id"].where(df["nc_id"].notna(), df["tc_id"])
 
     # Derived
     # Three states, not two. A blank Status is NOT 'closed' — treating it as
@@ -868,7 +1054,175 @@ def merge_data(tracker_df, sap_df):
     # project from SAP during the fill above gets the matching class.
     merged["launcher_class"] = merged["project"].apply(launcher_class)
 
+    # Data treatment: collapse detection-area synonyms so one real area is not
+    # counted twice under two spellings (SAP wording vs tracker letter-code).
+    merged["detection_area"] = merged["detection_area"].apply(canon_detection_area)
+
     print(f"  Merged total: {len(merged)} rows")
+    return merged
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STEP 4b: NEW-SYSTEM (Teamcenter / EZ1) NC export
+# ══════════════════════════════════════════════════════════════════════════════
+# A Teamcenter export of the new-system NCs. Every row is keyed by an IR- number
+# in an 'Object' cell like "IR-001660/A;1-NC_1783..."; the NC_ part (when present)
+# is the same TC ID the cutover tracker carries, which is how we avoid counting a
+# migrated NC twice. The file name is a timestamp, so it is found by CONTENT:
+# the only xls* in data/ (that is not the SAP overview or CAPA) whose first sheet
+# has an 'Object' column full of IR- numbers.
+import re as _re
+
+def _parse_dt(v):
+    """Creation Date in this export is a real datetime string; return ISO date."""
+    if v is None or str(v).strip() == "" or str(v).lower() == "nan":
+        return None
+    try:
+        return pd.to_datetime(v).date().isoformat()
+    except Exception:
+        return None
+
+
+def load_new_system():
+    import glob
+    cands = [p for p in glob.glob(str(DATA_DIR / "*.xls*"))
+             if not os.path.basename(p).startswith("~$")]
+    path = None
+    for p in sorted(cands, key=lambda p: os.path.getmtime(p), reverse=True):
+        base = os.path.basename(p).upper()
+        if any(k in base for k in ("NC_S_OVERVIEW", "OVERVIEW", "CAPA", "NCR_CUTOVER")):
+            continue
+        try:
+            head = pd.read_excel(p, sheet_name=0, nrows=6, dtype=str)
+        except Exception:
+            continue
+        cols = [str(c).strip() for c in head.columns]
+        if "Object" in cols and head["Object"].astype(str).str.contains("IR-").any():
+            path = p
+            break
+    if not path:
+        print("  (no new-system NC export found in data/ — skipping)")
+        return pd.DataFrame()
+
+    print(f"  Reading new-system export {os.path.basename(path)} ...")
+    df = pd.read_excel(path, sheet_name=0, dtype=str)
+    df.columns = [str(c).strip() for c in df.columns]
+
+    def col(name):
+        return df[name] if name in df.columns else pd.Series([None] * len(df))
+
+    out = pd.DataFrame()
+    out["nc_id"] = df["Object"].apply(
+        lambda o: (_re.search(r"(IR-\d+)", str(o)).group(1)
+                   if _re.search(r"(IR-\d+)", str(o)) else None))
+    out["tc_id"] = df["Object"].apply(
+        lambda o: (_re.search(r"(NC_\d+)", str(o)).group(1)
+                   if _re.search(r"(NC_\d+)", str(o)) else None))
+    out["owner"] = col("Issue Owner").apply(clean_owner)
+    out["created_on"] = col("Creation Date").apply(_parse_dt)
+    out["description"] = df["Object"].apply(
+        lambda o: _re.sub(r"^IR-\d+/[^-]*-", "", str(o)).strip() or None)
+
+    out = out[out["nc_id"].notna()].copy()
+    out = out.drop_duplicates(subset=["nc_id"], keep="first").reset_index(drop=True)
+
+    # Fields the export does not carry. A brand-new NC with no closure recorded
+    # is treated as OPEN (status is filled in later once the tracker catches it).
+    out["system"] = "EZ1"
+    out["sap_notif"] = None
+    out["is_open"] = 1
+    out["status"] = "OPEN"
+    out["status_state"] = "Open"
+    out["is_supplier_nc"] = 0            # internal unless the tracker says otherwise
+    out["source"] = "ez1_new"
+    out["project"] = None
+    out["launcher_class"] = out["project"].apply(launcher_class)
+    print(f"    {len(out)} new-system NCs "
+          f"({out['tc_id'].notna().sum()} carry a TC ID, "
+          f"{out['tc_id'].isna().sum()} IR-only)")
+    return out
+
+
+def _norm_nc(v):
+    """A Teamcenter TC ID reduced to NC_<digits> (ignore any trailing _xxxx)."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    m = _re.search(r"(NC_\d+)", str(v))
+    return m.group(1) if m else None
+
+
+def _norm_ir(v):
+    """An IR number reduced to its integer, so IR-1393 == IR-001393 == IR-1393."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    m = _re.search(r"IR[-\s]?0*(\d+)", str(v))
+    return f"IR-{int(m.group(1))}" if m else None
+
+
+def merge_new_system(merged, new_df):
+    """Fold the new-system export into the merged nc table WITHOUT double-counting.
+
+    An NC that is in the new system AND in the tracker is ONE physical NC — it
+    must appear once (Adriele). The tracker records a migrated NC by its TC ID
+    (NC_…) and/or by its IR number (IR-001640), sometimes both in one cell and
+    with different zero-padding (IR-1393 vs IR-001393). So overlap is decided on
+    BOTH keys, normalised:
+
+        new NC's TC ID  matches a tracker TC ID   -> same NC, or
+        new NC's IR no. matches a tracker IR no.  -> same NC
+
+    On a match we keep the detailed tracker row and just attach the IR number
+    (column ir_number); we do NOT append a duplicate. Only NCs that match neither
+    key are genuinely new and get appended (source='ez1_new').
+
+    The earlier version compared only the RAW TC-ID string, so it missed every
+    IR-number overlap and every NC_ with a differing suffix — it added ~42
+    tracker NCs a second time and inflated the open count. See reconcile.py.
+    """
+    if "ir_number" not in merged.columns:
+        merged["ir_number"] = None
+    if new_df is None or new_df.empty:
+        return merged
+
+    # Map every tracker/merged row's normalised NC_ and IR keys -> its index.
+    nc_to_idx, ir_to_idx = {}, {}
+    if "tc_id" in merged.columns:
+        for idx, raw in merged["tc_id"].items():
+            nn, ni = _norm_nc(raw), _norm_ir(raw)
+            if nn and nn not in nc_to_idx:
+                nc_to_idx[nn] = idx
+            if ni and ni not in ir_to_idx:
+                ir_to_idx[ni] = idx
+
+    add_rows = []
+    n_by_nc = n_by_ir = 0
+    for _, r in new_df.iterrows():
+        nn = _norm_nc(r.get("tc_id"))
+        ni = _norm_ir(r.get("nc_id"))          # new_df.nc_id IS the IR number
+        idx = None
+        if nn is not None and nn in nc_to_idx:
+            idx = nc_to_idx[nn]; n_by_nc += 1
+        elif ni is not None and ni in ir_to_idx:
+            idx = ir_to_idx[ni]; n_by_ir += 1
+        if idx is not None:
+            cur = merged.at[idx, "ir_number"]
+            if pd.isna(cur) or not str(cur).strip():
+                merged.at[idx, "ir_number"] = r.get("nc_id")   # attach IR, no dup
+        else:
+            add_rows.append(r)
+
+    added = pd.DataFrame(add_rows)
+    if not added.empty:
+        added["ir_number"] = added["nc_id"]        # for new rows, IR is the id
+        for c in merged.columns:
+            if c not in added.columns:
+                added[c] = None
+        added = added[merged.columns]
+        merged = pd.concat([merged, added], ignore_index=True)
+
+    print(f"  New-system merge: {n_by_nc + n_by_ir} overlapped the tracker "
+          f"({n_by_nc} by TC ID, {n_by_ir} by IR number — IR attached, not "
+          f"duplicated), {len(add_rows)} added as new NCs")
     return merged
 
 
@@ -885,13 +1239,16 @@ def write_db(df, capa=None):
     cur.execute("DROP TABLE IF EXISTS capa")
     if capa is not None and not capa.empty:
         capa.to_sql("capa", conn, if_exists="replace", index=False)
-        # (nc_id, capa_type) is the natural key — index it as such
-        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_capa_key ON capa(nc_id, capa_type)")
+        # NON-unique: an NC legitimately has several CAPAs of the same type on
+        # the board (numbered 1,2,3…), and we keep every line.
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_capa_key ON capa(nc_id, capa_type)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_capa_nc ON capa(nc_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_capa_type ON capa(capa_type)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_capa_o1 ON capa(origin_area_l1)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_capa_rc1 ON capa(rc_category_l1)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_capa_class ON capa(launcher_class)")
+        if "capa_status" in capa.columns:
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_capa_status ON capa(capa_status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_nc_project ON nc(project)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_nc_class ON nc(launcher_class)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_nc_status ON nc(status)")
@@ -944,7 +1301,13 @@ def main():
         from validate import run_checks
         _t = (find_file("NCR_Cutover_Tracker*.xlsx")
               or find_file("NCR_Cutover_Tracker*.xlsm")
-              or find_file("NCR_Cutover_Tracker*.csv"))
+              or find_file("NCtracker*.xlsx")
+              or find_file("NCtracker*.xlsm")
+              or find_file("*NC_Tracker*.xlsx")
+              or find_file("*NC_Tracker*.xlsm")
+              or find_file("NCR_Cutover_Tracker*.csv")
+              or find_file("NCtracker*.csv")
+              or find_file("*NC_Tracker*.csv"))
         _s = find_file("NC_s_Overview*.xlsx")
         if _t:
             run_checks(_t, _s, clean_owner, TRACKER_SHEET)
@@ -964,6 +1327,10 @@ def main():
 
     print("\n[4/6] Merging (deduplicating overlaps)...")
     merged = merge_data(tracker, sap)
+
+    print("\n[4b/6] Loading new-system (Teamcenter/EZ1) NC export (optional)...")
+    new_sys = load_new_system()
+    merged = merge_new_system(merged, new_sys)
 
     print("\n[5/6] Loading CAPA / RCA tracker (optional)...")
     capa = load_capa()
@@ -1011,6 +1378,44 @@ def main():
     print("Summary:")
     print("=" * 60)
     print(stats.T.to_string(header=False))
+
+    # ---- Date-parsing sanity: EZ1/Blackout by month, so a phantom pre-go-live
+    # month is obvious right in the ingest log (this is the check that catches a
+    # future "EZ1 in March"-style date mix). ----
+    try:
+        dchk = pd.read_sql(
+            "SELECT substr(created_on,1,7) AS month, system, COUNT(*) AS n "
+            "FROM nc WHERE system IN ('EZ1','Blackout') AND created_on IS NOT NULL "
+            "GROUP BY month, system ORDER BY month", conn)
+        _early = dchk[dchk["month"] < EZ1_GO_LIVE.strftime("%Y-%m")]
+        print("\n" + "=" * 60)
+        print(f"EZ1 / Blackout by month (go-live anchor {EZ1_GO_LIVE:%Y-%m}):")
+        print("=" * 60)
+        print(dchk.to_string(index=False))
+        if not _early.empty:
+            print(f"  ⚠ {int(_early['n'].sum())} EZ1/Blackout NC(s) dated BEFORE go-live "
+                  f"({EZ1_GO_LIVE:%Y-%m}) — check these dates in the tracker:")
+            print(_early.to_string(index=False))
+    except Exception as e:
+        print(f"  ! Date sanity check skipped: {e}")
+
+    # ---- Future creation dates: a created_on after today is a data-entry error
+    # in the workbook (Excel already resolved the day/month at entry time, so
+    # ingest cannot and must not silently "fix" it). Surface the exact NCs so
+    # Elisa/Tiziano can correct them in the tracker. ----
+    try:
+        _fut = pd.read_sql(
+            "SELECT nc_id, system, created_on FROM nc "
+            "WHERE created_on > ? ORDER BY created_on",
+            conn, params=[date.today().isoformat()])
+        if not _fut.empty:
+            print("\n" + "=" * 60)
+            print(f"  ⚠ {len(_fut)} NC(s) with a creation date IN THE FUTURE "
+                  f"(fix in the tracker — ingest does not guess):")
+            print("=" * 60)
+            print(_fut.to_string(index=False))
+    except Exception as e:
+        print(f"  ! Future-date check skipped: {e}")
 
     # Launcher class split — the four classes the CAPA tab draws from.
     cls = pd.read_sql("""
@@ -1089,4 +1494,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

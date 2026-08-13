@@ -2,9 +2,15 @@
 dashboard_body.py — the Quality BRM dashboard body (rendered inside the
 "Quality Dashboard" tab by app.py). Page config + auth live in app.py.
 
-Originally app.py
 Interactive charts with tooltips explaining every measurement and data source.
 Compatible with both old (tracker-only) and new (merged) quality.db schemas.
+
+2026-08 changes (Adriele):
+  * Default window = THIS YEAR -> today (auto), with a 'This year' preset.
+  * New section "Where NCs happen" (by project & class): bar, open-only bar,
+    class->project treemap, project x detection-area heatmap.
+  * EVERY '📥 Excel' now downloads the ORIGINAL raw NC rows for that view — not a
+    chart summary — plus a drill so you can pull the raw rows for a sub-slice.
 """
 from datetime import datetime, date
 from io import BytesIO
@@ -20,6 +26,7 @@ import streamlit as st
 # auth is handled by app.py (this body renders inside the Dashboard tab)
 
 DB_FILE = "quality.db"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 st.markdown("""
     <style>
@@ -56,10 +63,10 @@ st.markdown("""
         border-radius: 12px;
         padding: 0.5rem 0.75rem;
     }
-    /* CAPA coverage section box */
-    div[data-testid="stVerticalBlockBorderWrapper"]:has(div.coverage-anchor) {
-        background: #F3F0FA;
-        border: 2px solid #5A63A0 !important;
+    /* Drill / raw-data section box */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(div.drill-anchor) {
+        background: #EEF6EE;
+        border: 2px solid #4CAF50 !important;
         border-radius: 12px;
         padding: 0.5rem 0.75rem;
     }
@@ -76,6 +83,27 @@ st.markdown("""
     .kpi-desc {
         font-size: 0.78rem; color: #7A8894; margin-top: 0.25rem; line-height: 1.35;
     }
+    /* Filter bar (the only expander on the page): dark-blue header, bold, bigger,
+       so everyone reads it as THE filter. */
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] > details > summary,
+    .streamlit-expanderHeader {
+        background: #1E2761 !important;
+        border-radius: 8px !important;
+        padding: 0.7rem 1rem !important;
+    }
+    [data-testid="stExpander"] summary:hover,
+    .streamlit-expanderHeader:hover { background: #2a3170 !important; }
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] summary span,
+    [data-testid="stExpander"] summary div,
+    .streamlit-expanderHeader p {
+        color: #ffffff !important;
+        font-weight: 800 !important;
+        font-size: 1.12rem !important;
+    }
+    [data-testid="stExpander"] summary svg,
+    .streamlit-expanderHeader svg { fill: #ffffff !important; color: #ffffff !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -202,194 +230,64 @@ HAS_CAPA_TYPE = HAS_CAPA and _has_column("capa_type", "capa")
 
 
 # ------------------------------------------------------------------------------
-# SIDEBAR
+# FILTER SETUP (no UI here). The on-page filter itself is rendered lower down,
+# right above "Open NCs by Area", and only governs the sections BELOW it.
+# Sections 1–4 (backlog, burn-down, YTD, monthly) are a fixed overview: they
+# always show THIS YEAR → today and are NOT touched by the filter.
 # ------------------------------------------------------------------------------
-with st.sidebar:
-    st.markdown("### Navigate")
-    st.markdown("""
-        <a href="#backlog-system" class="nav-link">1 &middot; Open backlog &mdash; SAP vs new</a>
-        <a href="#burndown" class="nav-link">2 &middot; Burn-down (SAP ECC)</a>
-        <a href="#ytd" class="nav-link">3 &middot; Year to Date (YTD)</a>
-        <a href="#monthly" class="nav-link">4 &middot; Monthly Performance</a>
-        <a href="#open-by-area" class="nav-link">5 &middot; Open NCs by Area</a>
-        <a href="#root-cause" class="nav-link">6 &middot; Root Cause Analysis</a>
-        <a href="#mgmt-view" class="nav-link">7 &middot; Management View</a>
-        <a href="#owner-summary" class="nav-link">8 &middot; Owner summary</a>
-        <a href="#owner-detail" class="nav-link">9 &middot; Per-owner detail</a>
-    """, unsafe_allow_html=True)
-    st.markdown("---")
+# Earliest NC in the data — used as the lower bound of the date pickers.
+_min_row = _q("SELECT MIN(created_on) AS m FROM nc WHERE created_on IS NOT NULL")
+_earliest = None
+if not _min_row.empty and _min_row.iloc[0]["m"]:
+    try:
+        _earliest = pd.to_datetime(_min_row.iloc[0]["m"]).date()
+    except Exception:
+        _earliest = None
+_pick_min = _earliest or date(2015, 1, 1)
+_pick_max = date(date.today().year + 2, 12, 31)
+_default_from = max(_pick_min, date(date.today().year, 1, 1))
 
-    st.markdown("### 🔍 Filters")
-    month_label = st.text_input("Reporting month", value=datetime.now().strftime("%B %Y"))
+# ---- Defaults for the filter (committed values live in session_state) ----
+_filter_defaults = {
+    "date_from": _default_from,
+    "date_to": date.today(),
+    "since_date": date(2026, 6, 1),
+    "nc_type": "All",
+    "nc_status": "All",
+    "nc_project": [],
+    "nc_owner": [],
+    "nc_source": "All",
+}
+for _k, _v in _filter_defaults.items():
+    st.session_state.setdefault(_k, _v)
 
-    # Earliest NC in the data — used as the lower bound of the date pickers.
-    _min_row = _q("SELECT MIN(created_on) AS m FROM nc WHERE created_on IS NOT NULL")
-    _earliest = None
-    if not _min_row.empty and _min_row.iloc[0]["m"]:
-        try:
-            _earliest = pd.to_datetime(_min_row.iloc[0]["m"]).date()
-        except Exception:
-            _earliest = None
-    _pick_min = _earliest or date(2015, 1, 1)
-    _pick_max = date(date.today().year + 2, 12, 31)
-    # Default view starts in 2023 — older data exists and is still selectable,
-    # but loading a decade of history makes the charts noisy.
-    _default_from = max(_pick_min, date(2023, 1, 1))
+# Keep the filter's To date rolling with the calendar (unchanged behaviour).
+_to_anchor = st.session_state.get("_to_anchor_day")
+if (_to_anchor is not None and _to_anchor != date.today().isoformat()
+        and not st.session_state.get("_to_manual")
+        and st.session_state.get("date_to") != date.today()):
+    st.session_state["date_to"] = date.today()
+    st.session_state.pop("w_date_to", None)
+st.session_state["_to_anchor_day"] = date.today().isoformat()
 
-    # ---- Defaults for the general filters (committed values live in session_state) ----
-    _filter_defaults = {
-        "date_from": _default_from,
-        "date_to": date.today(),
-        "since_date": date(2026, 6, 1),
-        "nc_type": "All",
-        "nc_status": "All",
-        "nc_project": [],
-        "nc_owner": [],
-        "nc_source": "All",
-    }
-    for _k, _v in _filter_defaults.items():
-        st.session_state.setdefault(_k, _v)
+_projects = _q("SELECT DISTINCT COALESCE(project,'(no project)') AS p FROM nc ORDER BY p")["p"].tolist()
+_owners = _q("SELECT DISTINCT COALESCE(owner,'(no owner)') AS o FROM nc ORDER BY o")["o"].tolist()
+_sources = []
+if HAS_SOURCE:
+    _sources = _q("SELECT DISTINCT source FROM nc WHERE source IS NOT NULL ORDER BY source")["source"].tolist()
 
-    _projects = _q("SELECT DISTINCT COALESCE(project,'(no project)') AS p FROM nc ORDER BY p")["p"].tolist()
-    _owners = _q("SELECT DISTINCT COALESCE(owner,'(no owner)') AS o FROM nc ORDER BY o")["o"].tolist()
-    _sources = []
-    if HAS_SOURCE:
-        _sources = _q("SELECT DISTINCT source FROM nc WHERE source IS NOT NULL ORDER BY source")["source"].tolist()
-
-    st.markdown("---")
-    # ---- General period filter: only applies when the button is clicked ----
-    with st.form("general_filters", clear_on_submit=False):
-        st.markdown("**Period filter** (dashboard + trends)")
-        # Explicit bounds (_pick_min/_pick_max set above): without these, Streamlit only
-        # offers ~10 years around the current value, which hid 2025/2026.
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            f_date_from = st.date_input("From", value=st.session_state["date_from"],
-                                        min_value=_pick_min, max_value=_pick_max,
-                                        key="w_date_from")
-        with fc2:
-            f_date_to = st.date_input("To", value=st.session_state["date_to"],
-                                      min_value=_pick_min, max_value=_pick_max,
-                                      key="w_date_to")
-
-        f_since = st.date_input(
-            "Since (burndown anchor)", value=st.session_state["since_date"],
-            min_value=_pick_min, max_value=_pick_max,
-            key="w_since",
-            help="The date the burndown measures FROM. It affects only the burndown KPI numbers "
-                 "(Backlog at freeze, Closed since start, Still open, New since start, New still open). "
-                 "All charts follow the From/To window instead. Must sit inside From/To.")
-
-        f_nc_type = st.selectbox("NC type", ["All", "Production", "Supplier"],
-                                 index=["All", "Production", "Supplier"].index(st.session_state["nc_type"]),
-                                 key="w_nc_type")
-        _status_opts = ["All", "Open", "Closed"] + (["(no status)"] if HAS_STATUS_STATE else [])
-        f_nc_status = st.selectbox(
-            "Status", _status_opts,
-            index=_status_opts.index(st.session_state["nc_status"])
-            if st.session_state["nc_status"] in _status_opts else 0,
-            key="w_nc_status",
-            help="'(no status)' = the Status cell is blank in the source. These NCs are "
-                 "neither open nor closed. They used to be counted as closed and disappeared "
-                 "from every open-NC view, which made owner counts read short.")
-        f_nc_project = st.multiselect("Project", _projects,
-                                      default=[p for p in st.session_state["nc_project"] if p in _projects],
-                                      key="w_nc_project")
-        f_nc_owner = st.multiselect("Owner", _owners,
-                                    default=[o for o in st.session_state["nc_owner"] if o in _owners],
-                                    key="w_nc_owner")
-        if _sources:
-            f_nc_source = st.selectbox("Data source", ["All"] + _sources,
-                                       index=(["All"] + _sources).index(st.session_state["nc_source"])
-                                       if st.session_state["nc_source"] in (["All"] + _sources) else 0,
-                                       key="w_nc_source")
-        else:
-            f_nc_source = "All"
-
-        c_apply, c_reset = st.columns(2)
-        applied = c_apply.form_submit_button("✓ Apply filters", width='stretch', type="primary")
-        reset = c_reset.form_submit_button("Reset", width='stretch')
-
-    if applied:
-        # Read the SUBMITTED widget values from their keys (authoritative on submit)
-        f_date_from = st.session_state["w_date_from"]
-        f_date_to = st.session_state["w_date_to"]
-        f_since = st.session_state["w_since"]
-        f_nc_type = st.session_state["w_nc_type"]
-        f_nc_status = st.session_state["w_nc_status"]
-        f_nc_project = st.session_state["w_nc_project"]
-        f_nc_owner = st.session_state["w_nc_owner"]
-        f_nc_source = st.session_state.get("w_nc_source", "All")
-
-        if f_date_from > f_date_to:
-            st.error(f"⚠️ 'From' ({f_date_from}) is after 'To' ({f_date_to}). "
-                     "Pick a From date on or before the To date — filters not applied.")
-        else:
-            # Keep 'Since' inside the From/To window — pull it along rather than
-            # rejecting the whole apply (Since must satisfy From <= Since <= To).
-            _since_adj = f_since
-            _since_moved = False
-            if _since_adj < f_date_from:
-                _since_adj = f_date_from
-                _since_moved = True
-            elif _since_adj > f_date_to:
-                _since_adj = f_date_to
-                _since_moved = True
-
-            st.session_state["date_from"] = f_date_from
-            st.session_state["date_to"] = f_date_to
-            st.session_state["since_date"] = _since_adj
-            st.session_state["nc_type"] = f_nc_type
-            st.session_state["nc_status"] = f_nc_status
-            st.session_state["nc_project"] = f_nc_project
-            st.session_state["nc_owner"] = f_nc_owner
-            st.session_state["nc_source"] = f_nc_source
-            # Let the Since widget re-initialise from the (possibly adjusted) value
-            if _since_moved:
-                st.session_state.pop("w_since", None)
-                st.session_state["_since_notice"] = (
-                    f"'Since' moved to {_since_adj} to stay inside the From/To window.")
-            else:
-                st.session_state.pop("_since_notice", None)
-            st.rerun()
-
-    if reset:
-        for _k, _v in _filter_defaults.items():
-            st.session_state[_k] = _v
-        # Clear the form widget keys so they re-init from defaults
-        for _wk in ["w_date_from", "w_date_to", "w_since", "w_nc_type",
-                    "w_nc_status", "w_nc_project", "w_nc_owner", "w_nc_source"]:
-            st.session_state.pop(_wk, None)
-        st.rerun()
-
-    # Read committed filter values (used by build_where downstream)
-    if st.session_state.get("_since_notice"):
-        st.info("⚓ " + st.session_state["_since_notice"])
-    date_from = st.session_state["date_from"]
-    date_to = st.session_state["date_to"]
-    # Safety: never let an inverted range reach the queries
-    if date_from > date_to:
-        date_from, date_to = date_to, date_from
-    # 'Since' anchors the burndown; keep it inside the From/To window
-    exercise_start = st.session_state["since_date"]
-    exercise_start = max(date_from, min(exercise_start, date_to))
-    nc_type = st.session_state["nc_type"]
-    nc_status = st.session_state["nc_status"]
-    nc_project = st.session_state["nc_project"]
-    nc_owner = st.session_state["nc_owner"]
-    nc_source = st.session_state["nc_source"]
-
-    # Show which filters are currently active
-    _active = []
-    if (date_from, date_to) != (_filter_defaults["date_from"], _filter_defaults["date_to"]):
-        _active.append(f"{date_from} ? {date_to}")
-    if nc_type != "All": _active.append(nc_type)
-    if nc_status != "All": _active.append(nc_status)
-    if nc_project: _active.append(f"{len(nc_project)} project(s)")
-    if nc_owner: _active.append(f"{len(nc_owner)} owner(s)")
-    if nc_source != "All": _active.append(nc_source)
-    if _active:
-        st.markdown(f'<div class="filter-active">Active: {" · ".join(_active)}</div>', unsafe_allow_html=True)
+# ---- FIXED overview values for sections 1–4 (the filter does not reach them) ----
+date_from = _default_from
+date_to = date.today()
+if date_from > date_to:
+    date_from, date_to = date_to, date_from
+nc_type = "All"
+nc_status = "All"
+nc_project = []
+nc_owner = []
+nc_source = "All"
+exercise_start = st.session_state["since_date"]
+exercise_start = max(date_from, min(exercise_start, date_to))
 
 
 # ------------------------------------------------------------------------------
@@ -424,6 +322,68 @@ def _qf(tmpl, extra=None, date_col="created_on", use_date=True):
     return _q(tmpl.replace("{WHERE}", w), p)
 
 
+def raw_nc(extra=None, use_date=True):
+    """The ORIGINAL NC rows (all columns) for the active filter (+ optional extra).
+    Every '📥 Excel' hands over these raw records — never a chart summary
+    (Adriele: the person wants the data, not the picture's numbers)."""
+    w, p = build_where(extra, use_date=use_date)
+    return _q(f"SELECT * FROM nc {w} ORDER BY created_on DESC", p)
+
+
+_DATE_COLS = {"created_on", "closure_date", "disposition_date",
+              "open_date", "close_date", "due_date"}
+
+
+def _fmt_dates_ddmmyyyy(df):
+    """Show every date column as DD/MM/YYYY (Adriele's standard). Applies to the
+    on-screen table AND the download, so both read the same European format."""
+    d = df.copy()
+    for c in d.columns:
+        if c in _DATE_COLS:
+            d[c] = pd.to_datetime(d[c], errors="coerce").dt.strftime("%d/%m/%Y")
+            d[c] = d[c].where(d[c].notna(), "")
+    return d
+
+
+def raw_block(df, key, fname="nc_rows.xlsx", sheet="NC_rows", include_since=False,
+              dl_label="Download (Excel)", note=None, preview_rows=200):
+    """End-of-chart controls: a '👁 View raw data' toggle that shows the rows
+    right on the dashboard, plus a '📥 Download' button — both from the SAME df,
+    i.e. the raw NC rows for THIS chart's current filter/slice. What you see is
+    exactly what you download."""
+    df = _fmt_dates_ddmmyyyy(df)   # DD/MM/YYYY everywhere in the raw output
+    n = len(df)
+    # No st.columns here on purpose: this block is dropped inside chart columns
+    # too, and columns-in-columns is fragile. Toggle then button, stacked, always
+    # renders — whether the block sits at page width or inside a half-width chart.
+    show = st.toggle(f"👁 View raw data ({n})", key=f"{key}__view",
+                     help=f"Show the {n} raw NC rows behind this chart, on screen.")
+    st.download_button(f"📥 {dl_label} ({n})",
+                       to_excel_bytes(df, sheet, include_since=include_since),
+                       fname, XLSX_MIME, key=f"{key}__dl")
+    if show:
+        if note:
+            st.caption(note)
+        if n:
+            # Show empty cells as blank, not the literal text "None"/"NaN". A
+            # missing value (no flight unit, no owner, …) is blank, not data.
+            _disp = df.head(preview_rows).fillna("")
+            st.dataframe(_disp, width='stretch', hide_index=True,
+                         height=min(400, 80 + 28 * min(n, 11)))
+            if n > preview_rows:
+                st.caption(f"Showing the first {preview_rows} of {n} rows — the download has all {n}.")
+        else:
+            st.info("No rows for this selection.")
+
+
+def _raw_dl(label, extra=None, use_date=True, fname="nc_rows.xlsx", key=None,
+            include_since=False):
+    """View + download the raw NC rows for a view/slice (uses the active filter)."""
+    df = raw_nc(extra, use_date=use_date)
+    raw_block(df, key=key or "raw", fname=fname, include_since=include_since,
+              dl_label=label.replace("Excel — ", "").replace("Excel —", "").strip() or "Download (Excel)")
+
+
 def _headroom(fig, values, horizontal=False, pad=0.18):
     """Leave room for the value labels that sit outside the bars.
 
@@ -456,11 +416,7 @@ def _kpi_card(label, value, desc):
 # ------------------------------------------------------------------------------
 # Shared filter clauses
 # ------------------------------------------------------------------------------
-# Defined here, above the first section that uses them. They used to sit inside
-# the burn-down block; once the backlog section moved above it, every name in
-# here was still undefined by the time the first chart ran.
-
-# ---- Burndown filter: applies Project/Owner/NC-type/Status/Data-source (NOT the From/To period) ----
+# ---- Burndown filter: applies Project/Owner/NC-type/Status/Data-source ----
 def _bd_filter(include_dates=True):
     cl, pr = [], []
     if include_dates and date_from:
@@ -482,11 +438,11 @@ def _bd_filter(include_dates=True):
         cl.append("source = ?"); pr.append(nc_source)
     return cl, pr
 
-# Full filter (with dates) used across the whole dashboard.
+# Clauses for the OVERVIEW sections 1–4 (fixed This-year window; the on-page
+# filter lower down recomputes these for sections 5–10).
 _BF_CL, _BF_PR = _bd_filter(include_dates=True)
 # Non-date filter — for the BACKLOG KPIs, which describe NCs created BEFORE the
-# 'Since' anchor. Applying "created_on >= From" to them is self-contradictory
-# (it asks for NCs both before Since and after From) and always yields 0.
+# 'Since' anchor.
 _NB_CL, _NB_PR = _bd_filter(include_dates=False)
 _filter_sig = f"{date_from}|{date_to}|{nc_type}|{nc_status}|{'-'.join(sorted(nc_project))}|{'-'.join(sorted(nc_owner))}|{nc_source}"
 
@@ -526,9 +482,6 @@ _bl_months = pd.date_range(max(date_from, date(2025, 12, 1)).replace(day=1),
 _bl_rows = []
 for _m in _bl_months:
     _me = _m.strftime("%Y-%m-%d")
-    # GROUP BY is load-bearing: without it SQLite happily returns ONE row —
-    # the grand total, tagged with whichever `system` value it saw first — and
-    # the stacked bar silently collapses into a single SAP series.
     _d = _q("SELECT COALESCE(system,'(unknown)') AS system, COUNT(*) AS n FROM nc "
             "WHERE created_on <= ? AND (is_open=1 OR closure_date > ?)" + _SF
             + " GROUP BY 1",
@@ -566,10 +519,9 @@ else:
         + ("The SAP pile is shrinking, but the new system fills faster than SAP empties, "
            "so the total still climbs." if _sap_d < 0 else
            "Both the old and the new pile are growing."))
-    st.download_button("📥 Excel", to_excel_bytes(df_backlog_sys, "Open_Backlog_by_System"),
-                       "open_backlog_by_system.xlsx",
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       key="dl_backlog_sys")
+    # RAW download: every open NC behind the backlog (ignores From/To, like the chart)
+    _raw_dl("Excel — raw open NCs", extra=[("is_open=1", [])], use_date=False,
+            fname="open_backlog_raw.xlsx", key="dl_backlog_sys")
 
 st.markdown("")
 
@@ -578,29 +530,61 @@ st.markdown("")
 # BURNDOWN TRACKER
 # ------------------------------------------------------------------------------
 st.markdown('<div id="burndown"></div>', unsafe_allow_html=True)
+
+# ---- Independent date control for THIS section only ---------------------------
+# The burndown is its own tool: it needs to be able to look back before January
+# (there is data from earlier), so it gets its own From date. The end is always
+# today. It does NOT use the page filter and does NOT affect any other section.
+_ov_from, _ov_to = date_from, date_to               # remember the page window
+_ov_BF_CL, _ov_BF_PR = _BF_CL, _BF_PR
+_bd_from_default = date(2025, 6, 1)   # default start of the burndown history
+_bd_from_val = st.session_state.get("bd_from", _bd_from_default)
+_bd_from_val = min(max(_bd_from_val, _pick_min), date.today())  # keep in range
+st.markdown('<div class="month-anchor"></div>', unsafe_allow_html=True)
+with st.container(border=True):
+    _bc1, _bc2, _bc3 = st.columns([1.2, 1, 3])
+    bd_from = _bc1.date_input(
+        "From (this section only)", value=_bd_from_val, min_value=_pick_min,
+        max_value=date.today(), key="bd_from", format="DD/MM/YYYY",
+        help="Start date for the burndown only — defaults to 01/06/2025, and "
+             "you can go back further to include older NCs. The end is always today.")
+    _bc2.markdown("<div style='height:1.8rem'></div>", unsafe_allow_html=True)
+    if _bc2.button("Reset", key="bd_reset",
+                   disabled=(bd_from == _bd_from_default),
+                   help="Snap back to 01 January 2025."):
+        st.session_state.pop("bd_from", None)
+        st.rerun()
+    _bc3.markdown(
+        "<div style='height:0.4rem'></div>"
+        f"<span style='font-size:0.85rem;color:#5B6B78'>Burndown window: "
+        f"<b>{bd_from.strftime('%d %b %Y')}</b> → <b>today</b>. Independent of the "
+        "page filter.</span>", unsafe_allow_html=True)
+
+# apply the burndown window locally (rebind the globals its queries read)
+date_from = bd_from
+date_to = date.today()
+_BF_CL, _BF_PR = _bd_filter(include_dates=True)
+
 st.subheader(f"NC Burndown Tracker · since {exercise_start.strftime('%d %B %Y')}")
 st.caption(f"⚓ **Since {exercise_start.strftime('%d %b %Y')}** = the date the burndown measures from. "
            f"It drives **only the KPI numbers below**. The three *backlog* figures (Backlog at freeze, "
            f"Closed since start, Still open) describe NCs created **before** that date, so they are not "
            f"clipped by the From date — but they do follow the Project / Owner / NC-type filters. "
-           f"Every chart follows the **From/To** window (**{date_from}** ? **{date_to}**).")
+           f"Every chart below follows this section's window (**{date_from}** → **today**).")
 
 es = str(exercise_start)
 
 def _bd(where_parts, params, use_dates=True):
-    """Run a burndown count query with the active filter AND-ed in.
-    use_dates=False for backlog metrics that look before the From date."""
+    """Run a burndown count query with the active filter AND-ed in."""
     _cl, _pr = (_BF_CL, _BF_PR) if use_dates else (_NB_CL, _NB_PR)
     parts = list(where_parts) + _cl
     prm = list(params) + _pr
     sql = "SELECT COUNT(*) AS n FROM nc" + (" WHERE " + " AND ".join(parts) if parts else "")
     return _q(sql, prm).iloc[0]["n"]
 
-# Backlog metrics look BEFORE 'Since', so they must not be clipped by the From date.
 backlog_at_start = _bd(["created_on < ?", "(is_open=1 OR closure_date >= ?)"], [es, es], use_dates=False)
 closed_from_backlog = _bd(["created_on < ?", "is_open=0", "closure_date >= ?"], [es, es], use_dates=False)
 still_open_backlog = _bd(["created_on < ?", "is_open=1"], [es], use_dates=False)
-# These live inside the window, so they follow the full filter.
 new_since_start = _bd(["created_on >= ?"], [es])
 new_still_open = _bd(["created_on >= ?", "is_open=1"], [es])
 total_open = _bd(["is_open=1"], [])
@@ -617,17 +601,10 @@ _kpis_row1 = [
     ("Still open (backlog)", int(still_open_backlog), f"Of the original {int(backlog_at_start)}, how many are still open."),
     ("Total open now", int(total_open), "All currently open NCs (old backlog + everything new)."),
 ]
-# The second KPI row (New since start / New still open / Avg new per week) was
-# removed on request. `new_since_start` and `avg_new_wk` are still computed above
-# because the closure-rate calculator below uses avg_new_wk as its inflow default.
 _cols = st.columns(4)
 for _c, (_lab, _val, _desc) in zip(_cols, _kpis_row1):
     _c.markdown(_kpi_card(_lab, _val, _desc), unsafe_allow_html=True)
 
-# --------------------------------------------------------------------------
-# Interactive "how many per week to reach ZERO open" — live deadline slider
-# (this control is intentionally live/separate from the sidebar Apply filter)
-# --------------------------------------------------------------------------
 st.markdown('<div class="reach-zero-anchor"></div>', unsafe_allow_html=True)
 with st.container(border=True):
     st.markdown("##### 🎯 Closure rate to reach target")
@@ -656,13 +633,11 @@ with st.container(border=True):
                  "Change it here if the goal changes.")
 
     weeks_left = max(1, (target_deadline - today).days / 7)
-    # Close the gap down to the target AND absorb ongoing inflow:
-    #   (open - target) / weeks + inflow
     _gap = open_now_input - target_open
     _at_target = _gap <= 0
     required_per_week = (max(0, _gap) / weeks_left) + inflow
     required_per_month = required_per_week * 4.33
-    weekly_target = math.ceil(required_per_week)          # kept for downstream use
+    weekly_target = math.ceil(required_per_week)
     breakeven = math.ceil(inflow)
 
     zc1, zc2, zc3 = st.columns(3)
@@ -675,7 +650,7 @@ with st.container(border=True):
         zc1.metric(f"Close / week → {target_open} by {target_deadline.strftime('%d %b %Y')}",
                    f"{math.ceil(required_per_week)} NCs",
                    help=f"({open_now_input} open - {target_open} target) ÷ {weeks_left:.0f} weeks "
-                        f"+ {inflow:.1f}/wk inflow. With {team_size} people ˜ "
+                        f"+ {inflow:.1f}/wk inflow. With {team_size} people ≈ "
                         f"{max(1, round(required_per_week/team_size,1))} NC/person/week.")
     zc2.metric("Close / month", f"{math.ceil(required_per_month)} NCs",
                help="Weekly required × 4.33 weeks per month.")
@@ -693,9 +668,6 @@ with st.container(border=True):
     st.progress(min(progress, 1.0), text=f"Backlog closure: {int(closed_from_backlog)} / {int(backlog_at_start)} ({progress:.0%})")
     st.caption(f"Progress = closures from original backlog ÷ backlog at freeze. Does not include new NCs opened after {exercise_start.strftime('%d.%m.%Y')}.")
 
-    # --------------------------------------------------------------------------
-    # Build the shared monthly series once (used by all three charts below)
-    # --------------------------------------------------------------------------
     _hist_months = pd.date_range(date_from.replace(day=1), min(date_to, today), freq="ME")
     _flt = (" AND " + " AND ".join(_BF_CL)) if _BF_CL else ""
     _rows = []
@@ -706,7 +678,6 @@ with st.container(border=True):
         _rows.append({"month": _m.strftime("%Y-%m"), "open": int(_n)})
     actual = pd.DataFrame(_rows)
 
-    # opened & closed per month (in / out flow) — filter-aware
     flow = _q(f"""
         WITH o AS (SELECT substr(created_on,1,7) AS month, COUNT(*) AS opened
                    FROM nc WHERE created_on IS NOT NULL{_flt} GROUP BY month),
@@ -722,20 +693,15 @@ with st.container(border=True):
     if actual.empty:
         st.info("No data in the selected From/To range.")
     else:
-        # anchor last actual point to live open-now
         actual.loc[actual.index[-1], "open"] = int(open_now_input)
         last_month = actual["month"].iloc[-1]
         start_open = int(open_now_input)
 
-        # recent actual close rate (last 12 weeks) for the prediction — filter-aware
         _cut = (today - pd.Timedelta(weeks=12)).isoformat()
         _closed_recent = _q("SELECT COUNT(*) n FROM nc WHERE is_open=0 AND closure_date>=?" + _flt,
                             [_cut] + _BF_PR).iloc[0]["n"]
         close_rate_wk = round(_closed_recent / 12, 1)
 
-        # ----------------------------------------------------------------------
-        # CHART 1 — DATA ANALYSIS: Open NCs per month (+ opened vs closed flow)
-        # ----------------------------------------------------------------------
         st.markdown("**Open NCs per month** — what actually happened")
         st.caption(f"📅 Showing **{date_from}** → **{date_to}**")
         fig1 = go.Figure()
@@ -753,68 +719,86 @@ with st.container(border=True):
                    f"Recent pace: ~{inflow:.1f} opened/week vs ~{close_rate_wk:.1f} closed/week — "
                    f"{'closing faster than opening (backlog shrinks)' if close_rate_wk >= inflow else 'opening faster than closing (backlog grows)'}.")
 
-        dl1, dl2, _ = st.columns([1, 1, 4])
-        with dl1:
-            st.download_button("📥 Excel", to_excel_bytes(actual, "Burndown", include_since=True),
-                               "burndown_monthly.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # RAW view + download: the actual NC rows in the burndown window
+        _raw_dl("Excel — raw NCs in window", fname="burndown_raw.xlsx",
+                key="dl_burndown_raw", include_since=True)
+
+# restore the page overview window so the sections below are unaffected
+date_from, date_to = _ov_from, _ov_to
+_BF_CL, _BF_PR = _ov_BF_CL, _ov_BF_PR
 
 st.markdown("")
 
 # ------------------------------------------------------------------------------
-# 3 - YTD 2026
+# 3 - YTD
 # ------------------------------------------------------------------------------
 st.markdown('<div id="ytd"></div>', unsafe_allow_html=True)
 
-# ---- 'As of' date: today by default, and it really does move with the day ----
-# A plain default of date.today() is not enough. Streamlit keeps a widget's value
-# in session_state once it has one, and the dashboard runs for days at a time on
-# the server, so a session opened on Monday would still be measuring to Monday on
-# Friday without anyone noticing. So: remember which day the widget was last
-# initialised on, and when the calendar rolls over, drop the stored value so it
-# re-initialises to the new today — unless the person has deliberately moved it,
-# in which case their choice is left alone.
 _today = date.today()
+_ytd_start_default = date(_today.year, 1, 1)
+
+# Auto-roll the "To" date to today each day, but only while the person has not
+# manually chosen a custom period (start still on 1 Jan AND end still on today).
 _anchor = st.session_state.get("_ytd_anchor_day")
-# Only clear on a genuine day change. Doing it whenever the anchor is missing
-# would also fire on the first run of a session and wipe any value set before
-# the page rendered.
 if _anchor is not None and _anchor != _today.isoformat() \
-        and not st.session_state.get("_ytd_asof_manual"):
+        and not st.session_state.get("_ytd_period_manual"):
     st.session_state.pop("ytd_asof", None)
+    st.session_state.pop("ytd_from_pick", None)
 st.session_state["_ytd_anchor_day"] = _today.isoformat()
 
-_ac1, _ac2, _ac3 = st.columns([1.2, 1, 3])
+_ac1, _ac2, _ac3, _ac4 = st.columns([1.2, 1.2, 1, 2.6])
 with _ac1:
-    ytd_asof = st.date_input(
-        "As of", value=_today, min_value=date(_today.year - 5, 1, 1),
-        max_value=date(_today.year + 1, 12, 31), key="ytd_asof",
-        help="Year to date is measured from 1 January up to this date. It follows the "
-             "calendar automatically — every day it moves to that day. Change it to "
-             "report a month-end or to rerun last week's numbers.")
+    ytd_start = st.date_input(
+        "From", value=_ytd_start_default, min_value=date(_today.year - 5, 1, 1),
+        max_value=date(_today.year + 1, 12, 31), key="ytd_from_pick",
+        format="DD/MM/YYYY",
+        help="Start of the period. Leave it on 1 January for a normal year-to-date "
+             "view, or move it to report a custom range (a quarter, a single month, "
+             "last week…).")
 with _ac2:
+    ytd_asof = st.date_input(
+        "To", value=_today, min_value=date(_today.year - 5, 1, 1),
+        max_value=date(_today.year + 1, 12, 31), key="ytd_asof",
+        format="DD/MM/YYYY",
+        help="End of the period. Defaults to today and follows the calendar "
+             "automatically. Change it to report a month-end or rerun last week's "
+             "numbers.")
+with _ac3:
     st.markdown("<div style='height:1.8rem'></div>", unsafe_allow_html=True)
-    if st.button("Today", key="ytd_today", disabled=(ytd_asof == _today),
-                 help="Snap back to the current date."):
+    _is_default_ytd = (ytd_start == _ytd_start_default and ytd_asof == _today)
+    if st.button("This year", key="ytd_today", disabled=_is_default_ytd,
+                 help="Snap back to 1 January → today."):
         st.session_state.pop("ytd_asof", None)
-        st.session_state.pop("_ytd_asof_manual", None)
+        st.session_state.pop("ytd_from_pick", None)
+        st.session_state.pop("_ytd_period_manual", None)
         st.rerun()
 
-if ytd_asof != _today:
-    st.session_state["_ytd_asof_manual"] = True
+# Guard: never let From be after To (swap so queries stay valid).
+if ytd_start > ytd_asof:
+    ytd_start, ytd_asof = ytd_asof, ytd_start
+
+_is_ytd_view = (ytd_start == date(ytd_asof.year, 1, 1) and ytd_asof == _today)
+if _is_ytd_view:
+    st.session_state.pop("_ytd_period_manual", None)
 else:
-    st.session_state.pop("_ytd_asof_manual", None)
+    st.session_state["_ytd_period_manual"] = True
 
 _ytd_year = ytd_asof.year
-_ytd_from = f"{_ytd_year}-01-01"
+_ytd_from = ytd_start.isoformat()
 _ytd_to = ytd_asof.isoformat()
+_ytd_from_txt = ytd_start.strftime('%d %b %Y')
+_ytd_to_txt = ytd_asof.strftime('%d %b %Y')
 
-st.subheader(f"Year to Date (YTD) {_ytd_year}")
-_asof_txt = ("today" if ytd_asof == _today else f"**{ytd_asof.strftime('%d %b %Y')}**")
-st.caption(f"Everything opened or closed between **1 January {_ytd_year}** and {_asof_txt}. "
-           f"Anchored to the year, so it ignores the From/To dates in the sidebar. It still "
-           f"follows Project / Owner / NC type / Status / Data source."
-           + ("" if ytd_asof == _today else
-              " ⏳ You are looking at a past date — the cards below stop counting there."))
+if _is_ytd_view:
+    st.subheader(f"Year to Date (YTD) {_ytd_year}")
+    st.caption(f"Everything opened or closed between **1 January {_ytd_year}** and **today**. "
+               f"Change the From / To dates above to report any custom period. It still "
+               f"follows Project / Owner / NC type / Status / Data source.")
+else:
+    st.subheader(f"Selected period · {_ytd_from_txt} → {_ytd_to_txt}")
+    st.caption(f"Everything opened or closed between **{_ytd_from_txt}** and **{_ytd_to_txt}**. "
+               f"Press **This year** to snap back to 1 January → today. It still "
+               f"follows Project / Owner / NC type / Status / Data source.")
 
 _YF = (" AND " + " AND ".join(_NB_CL)) if _NB_CL else ""
 _YTD_WIN = " AND created_on BETWEEN ? AND ?"
@@ -832,7 +816,7 @@ ytd_cc = _q("SELECT COUNT(*) n FROM nc WHERE ("
 
 _y1 = [
     (f"NCs opened in {_ytd_year}", int(ytd_opened),
-     f"Created between 01 Jan and {ytd_asof.strftime('%d %b %Y')}."),
+     f"Created between {_ytd_from_txt} and {_ytd_to_txt}."),
     (f"NCs closed in {_ytd_year}", int(ytd_closed),
      "Closed inside that window, including backlog from earlier years."),
     ("Open now", int(ytd_open_now),
@@ -843,6 +827,11 @@ _y1 = [
 ]
 for _c, (_l, _v, _d) in zip(st.columns(4), _y1):
     _c.markdown(_kpi_card(_l, _v, _d), unsafe_allow_html=True)
+
+# RAW view + download: the actual NC rows opened in the YTD window
+_ytd_raw = _q("SELECT * FROM nc WHERE 1=1" + _YTD_WIN + _YF + " ORDER BY created_on DESC",
+              _YP + _NB_PR)
+raw_block(_ytd_raw, key="ytd_raw", fname="ytd_raw_ncs.xlsx", sheet="YTD_raw")
 
 yc1, yc2 = st.columns(2)
 
@@ -865,10 +854,6 @@ with yc1:
         st.caption("In SAP, Z2 = procurement complaint (supplier) and Z3 = production NC "
                    "(internal). NCs from the new system take the NC Type recorded in the "
                    "NC tracker instead.")
-        st.download_button("📥 Excel", to_excel_bytes(df_ytd_si, "YTD_Supplier_Internal"),
-                           "ytd_supplier_internal.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           key="dl_ytd_si")
     else:
         st.info(f"No {_ytd_year} NCs in this selection.")
 
@@ -896,30 +881,20 @@ with yc2:
         st.plotly_chart(fig, width='stretch', config=CHART_CONFIG, key="ytd_mm")
         st.caption("Major NCs need an NRB disposition and carry the higher risk. "
                    "'(not classified)' means the classification cell is empty in the source.")
-        # The mapping evidence goes in the workbook, not on the page: a 'Data
-        # quality' sheet showing each raw SAP defect class against the CAPA
-        # tracker's own Major/Minor field, so the rule can be challenged with
-        # numbers rather than argued from memory.
-        _mm_pkg = {"Major_vs_Minor": df_ytd_mm}
-        if HAS_CAPA and _has_column("defect_class"):
-            _dq = _q("""
-                SELECT COALESCE(n.defect_class,'(blank)') AS "SAP defect class",
-                       COALESCE(c.nc_major_minor,'(not recorded)') AS "CAPA says",
-                       COUNT(*) AS "NCs"
-                FROM nc n JOIN capa c USING(nc_id)
-                WHERE c.capa_type='RCA'
-                GROUP BY 1, 2 ORDER BY 1, 3 DESC""") if _has_column("nc_major_minor", "capa") else pd.DataFrame()
-            if not _dq.empty:
-                _mm_pkg["Data quality"] = _dq
-        st.download_button("📥 Excel", build_full_report_bytes(_mm_pkg, include_since=False),
-                           "ytd_major_minor.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           key="dl_ytd_mm")
     else:
         st.info(f"No {_ytd_year} NCs in this selection.")
 
 st.markdown(f"**Top recurring issues** · :grey[NCs opened in {_ytd_year} to {ytd_asof.strftime('%d %b')}]")
-_issue_col = "defect_code_text" if _has_column("defect_code_text") else "detection_area"
+# Pick the issue field that actually carries data. defect_code_text lived only in
+# the SAP export (now dropped) — if it is empty, use the tracker's Failure field,
+# which is the equivalent "what kind of issue"; detection_area is the last resort.
+def _has_data(col):
+    return _has_column(col) and _q(
+        f"SELECT COUNT(*) AS n FROM nc WHERE {col} IS NOT NULL AND TRIM({col})<>''"
+    ).iloc[0]["n"] > 0
+_issue_col = ("defect_code_text" if _has_data("defect_code_text")
+              else "failure" if _has_data("failure")
+              else "detection_area")
 df_ytd_top = _q(f"""
     SELECT COALESCE({_issue_col},'(not recorded)') AS issue, COUNT(*) AS n
     FROM nc WHERE 1=1{_YTD_WIN}{_YF}
@@ -937,10 +912,6 @@ if not df_ytd_top.empty:
     st.plotly_chart(fig, width='stretch', config=CHART_CONFIG, key="ytd_top")
     st.caption(f"The ten most frequent values of `{_issue_col}` among {_ytd_year} NCs. "
                "A tall bar repeating year on year is the case for a preventive action.")
-    st.download_button("📥 Excel", to_excel_bytes(df_ytd_top, "YTD_Top_Issues"),
-                       "ytd_top_issues.xlsx",
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       key="dl_ytd_top")
 else:
     st.info(f"No {_ytd_year} NCs in this selection.")
 
@@ -994,36 +965,11 @@ with st.container(border=True):
               delta_color="normal" if cm_closed >= cm_opened else "inverse",
               help="Closed minus opened. Positive = backlog shrinking. Negative = backlog growing.")
 
-st.markdown("**Opened vs Closed — monthly trend**")
-st.caption(f"📅 Showing **{date_from}** → **{date_to}**")
-df_trend = _q(f"""
-    WITH o AS (SELECT substr(created_on,1,7) AS month, COUNT(*) AS opened
-               FROM nc WHERE created_on IS NOT NULL{_cm_flt} GROUP BY month),
-         c AS (SELECT substr(closure_date,1,7) AS month, COUNT(*) AS closed
-               FROM nc WHERE closure_date IS NOT NULL{_cm_flt} GROUP BY month)
-    SELECT COALESCE(o.month,c.month) AS month,
-           COALESCE(o.opened,0) AS opened, COALESCE(c.closed,0) AS closed
-    FROM o LEFT JOIN c ON o.month=c.month
-    WHERE COALESCE(o.month,c.month) IS NOT NULL
-    ORDER BY month
-""", _cm_pr + _cm_pr)
-if not df_trend.empty:
-    fig_tr = go.Figure()
-    fig_tr.add_trace(go.Scatter(x=df_trend["month"], y=df_trend["opened"], name="Opened",
-                                mode="lines", line=dict(color="#F26E21", width=2),
-                                hovertemplate="<b>%{x}</b><br>Opened: %{y}<extra></extra>"))
-    fig_tr.add_trace(go.Scatter(x=df_trend["month"], y=df_trend["closed"], name="Closed",
-                                mode="lines", line=dict(color="#4CAF50", width=2),
-                                hovertemplate="<b>%{x}</b><br>Closed: %{y}<extra></extra>"))
-    fig_tr.update_layout(height=280, margin=dict(l=0, r=0, t=MODEBAR_T, b=0),
-                         legend=dict(orientation="h", y=-0.15), xaxis_title="", yaxis_title="NCs")
-    st.plotly_chart(fig_tr, width='stretch', config=CHART_CONFIG, key="monthly_trend")
-    st.caption("Opened (orange) and closed (green) NCs per month. Where orange sits above "
-               "green, more opened than closed that month and the backlog grew.")
-    st.download_button("📥 Excel", to_excel_bytes(df_trend, "Opened_vs_Closed_Trend"),
-                       "opened_vs_closed_trend.xlsx",
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       key="dl_permonth")
+    # RAW view + download: NC rows opened in the chosen month
+    _cm_raw = _q("SELECT * FROM nc WHERE substr(created_on,1,7)=?" + _cm_flt
+                 + " ORDER BY created_on DESC", [cm] + _cm_pr)
+    raw_block(_cm_raw, key="month_raw", fname=f"ncs_{cm}.xlsx", sheet="Month_raw",
+              dl_label=f"Download {cm_label}")
 
 st.markdown("")
 
@@ -1032,10 +978,151 @@ st.markdown("")
 # 5 - OPEN NCs BY AREA
 # ------------------------------------------------------------------------------
 st.markdown('<div id="open-by-area"></div>', unsafe_allow_html=True)
+
+# ============================================================================
+# ON-PAGE FILTER — sits here, above "Open NCs by Area", and governs ONLY the
+# graphs BELOW it (sections 5–10). Sections 1–4 above are untouched.
+# Compact & collapsible: one line by default, the header shows the active
+# window/filters, click to open the controls.
+# ============================================================================
+_sf_from = st.session_state["date_from"]
+_sf_to = st.session_state["date_to"]
+_sum_bits = [f"{_sf_from.strftime('%d %b %Y')} → {_sf_to.strftime('%d %b %Y')}"]
+if st.session_state["nc_type"] != "All": _sum_bits.append(st.session_state["nc_type"])
+if st.session_state["nc_status"] != "All": _sum_bits.append(st.session_state["nc_status"])
+if st.session_state["nc_project"]: _sum_bits.append(f"{len(st.session_state['nc_project'])} project(s)")
+if st.session_state["nc_owner"]: _sum_bits.append(f"{len(st.session_state['nc_owner'])} owner(s)")
+if st.session_state["nc_source"] != "All": _sum_bits.append(st.session_state["nc_source"])
+_flabel = "🔍  Filter (this section and everything below)  ·  " + "   ·   ".join(_sum_bits)
+
+with st.expander(_flabel, expanded=False):
+    st.caption("Quick range")
+    _pcol1, _pcol2, _pcol3 = st.columns(3)
+    if _pcol1.button("This year", width='stretch', key="preset_year",
+                     help="1 Jan of the current year → today."):
+        st.session_state["date_from"] = max(_pick_min, date(date.today().year, 1, 1))
+        st.session_state["date_to"] = date.today()
+        for _wk in ("w_date_from", "w_date_to"):
+            st.session_state.pop(_wk, None)
+        st.session_state.pop("_to_manual", None)
+        st.rerun()
+    if _pcol2.button("Last 12 mo", width='stretch', key="preset_12m",
+                     help="Rolling 12 months ending today."):
+        st.session_state["date_from"] = max(_pick_min,
+                                            (pd.Timestamp(date.today()) - pd.DateOffset(months=12)).date())
+        st.session_state["date_to"] = date.today()
+        for _wk in ("w_date_from", "w_date_to"):
+            st.session_state.pop(_wk, None)
+        st.session_state.pop("_to_manual", None)
+        st.rerun()
+    if _pcol3.button("All", width='stretch', key="preset_all",
+                     help="Everything from the earliest NC to today."):
+        st.session_state["date_from"] = _pick_min
+        st.session_state["date_to"] = date.today()
+        for _wk in ("w_date_from", "w_date_to"):
+            st.session_state.pop(_wk, None)
+        st.session_state.pop("_to_manual", None)
+        st.rerun()
+
+    with st.form("general_filters", clear_on_submit=False):
+        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+        with r1c1:
+            f_date_from = st.date_input("From", value=st.session_state["date_from"],
+                                        min_value=_pick_min, max_value=_pick_max,
+                                        key="w_date_from", format="DD/MM/YYYY")
+        with r1c2:
+            f_date_to = st.date_input("To", value=st.session_state["date_to"],
+                                      min_value=_pick_min, max_value=_pick_max,
+                                      key="w_date_to", format="DD/MM/YYYY")
+        with r1c3:
+            f_nc_type = st.selectbox("NC type", ["All", "Production", "Supplier"],
+                                     index=["All", "Production", "Supplier"].index(st.session_state["nc_type"]),
+                                     key="w_nc_type")
+        with r1c4:
+            _status_opts = ["All", "Open", "Closed"] + (["(no status)"] if HAS_STATUS_STATE else [])
+            f_nc_status = st.selectbox(
+                "Status", _status_opts,
+                index=_status_opts.index(st.session_state["nc_status"])
+                if st.session_state["nc_status"] in _status_opts else 0,
+                key="w_nc_status",
+                help="'(no status)' = the Status cell is blank in the source. These NCs are "
+                     "neither open nor closed.")
+
+        r2c1, r2c2, r2c3 = st.columns(3)
+        with r2c1:
+            f_nc_project = st.multiselect("Project", _projects,
+                                          default=[p for p in st.session_state["nc_project"] if p in _projects],
+                                          key="w_nc_project")
+        with r2c2:
+            f_nc_owner = st.multiselect("Owner", _owners,
+                                        default=[o for o in st.session_state["nc_owner"] if o in _owners],
+                                        key="w_nc_owner")
+        with r2c3:
+            if _sources:
+                f_nc_source = st.selectbox("Data source", ["All"] + _sources,
+                                           index=(["All"] + _sources).index(st.session_state["nc_source"])
+                                           if st.session_state["nc_source"] in (["All"] + _sources) else 0,
+                                           key="w_nc_source")
+            else:
+                f_nc_source = "All"
+
+        c_apply, c_reset, _cgap = st.columns([1, 1, 4])
+        applied = c_apply.form_submit_button("✓ Apply filters", width='stretch', type="primary")
+        reset = c_reset.form_submit_button("Reset", width='stretch')
+
+    if applied:
+        f_date_from = st.session_state["w_date_from"]
+        f_date_to = st.session_state["w_date_to"]
+        f_nc_type = st.session_state["w_nc_type"]
+        f_nc_status = st.session_state["w_nc_status"]
+        f_nc_project = st.session_state["w_nc_project"]
+        f_nc_owner = st.session_state["w_nc_owner"]
+        f_nc_source = st.session_state.get("w_nc_source", "All")
+        if f_date_from > f_date_to:
+            st.error(f"⚠️ 'From' ({f_date_from}) is after 'To' ({f_date_to}). "
+                     "Pick a From date on or before the To date — filters not applied.")
+        else:
+            st.session_state["date_from"] = f_date_from
+            st.session_state["date_to"] = f_date_to
+            st.session_state["_to_manual"] = (f_date_to != date.today())
+            st.session_state["nc_type"] = f_nc_type
+            st.session_state["nc_status"] = f_nc_status
+            st.session_state["nc_project"] = f_nc_project
+            st.session_state["nc_owner"] = f_nc_owner
+            st.session_state["nc_source"] = f_nc_source
+            st.rerun()
+
+    if reset:
+        for _k, _v in _filter_defaults.items():
+            st.session_state[_k] = _v
+        for _wk in ["w_date_from", "w_date_to", "w_nc_type", "w_nc_status",
+                    "w_nc_project", "w_nc_owner", "w_nc_source"]:
+            st.session_state.pop(_wk, None)
+        st.session_state.pop("_to_manual", None)
+        st.rerun()
+
+# Re-point the globals to the FILTER's committed values so every section from
+# here down (5–10) runs on them. build_where / _qf / raw_nc read these at call
+# time, so recomputing the shared clause lists switches the lower sections onto
+# the filter's window in one place. (_ND_* stays date-free for the two
+# management trend numbers, which must span their own fixed period.)
+date_from = st.session_state["date_from"]
+date_to = st.session_state["date_to"]
+if date_from > date_to:
+    date_from, date_to = date_to, date_from
+nc_type = st.session_state["nc_type"]
+nc_status = st.session_state["nc_status"]
+nc_project = st.session_state["nc_project"]
+nc_owner = st.session_state["nc_owner"]
+nc_source = st.session_state["nc_source"]
+_BF_CL, _BF_PR = _bd_filter(include_dates=True)
+_NB_CL, _NB_PR = _bd_filter(include_dates=True)
+_ND_CL, _ND_PR = _bd_filter(include_dates=False)
+
 st.subheader("Open NCs by Area")
 st.caption("Open NCs only, grouped by the detection area code recorded in the NC tracker "
            "(B: Bonding, I: Integration, CC: Customer Complaint, and so on). Closed NCs "
-           "are excluded — this is current workload, not history.")
+           "are excluded, and only NCs created inside the date window above are counted.")
 
 df_area = _q("""
     SELECT COALESCE(detection_area,'BLANK - to clean') AS area, COUNT(*) AS open_ncs
@@ -1056,10 +1143,9 @@ if not df_area.empty:
     _blank = int(df_area.loc[df_area["area"].str.startswith("BLANK"), "open_ncs"].sum())
     st.caption(f"Red = no detection area recorded ({_blank} open NCs). Detection area is "
                "captured in the NC tracker only, so an SAP-only NC has no area by design.")
-    st.download_button("📥 Excel", to_excel_bytes(df_area, "Open_by_Area"),
-                       "open_ncs_by_area.xlsx",
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       key="dl_open_area")
+    # RAW download: the actual open NC rows (created inside the date window)
+    _raw_dl("Excel — raw open NCs", extra=[("is_open=1", [])], use_date=True,
+            fname="open_ncs_by_area_raw.xlsx", key="dl_open_area")
 else:
     st.info("No open NCs in this selection.")
 
@@ -1067,7 +1153,149 @@ st.markdown("")
 
 
 # ------------------------------------------------------------------------------
-# 6 - ROOT CAUSE ANALYSIS (headline only; the full analysis lives on the CAPA tab)
+# 6 - WHERE NCs HAPPEN — by project & class
+# ------------------------------------------------------------------------------
+st.markdown('<div id="by-project"></div>', unsafe_allow_html=True)
+st.subheader("Where NCs happen — by project & class")
+st.caption("Follows the date filter above (plus type, status…). Total = all NCs created in "
+           "the window; Open = still unresolved. Shows which programmes carry the most NCs "
+           "and where the live workload sits now. Every download below is the RAW NC rows.")
+
+# Project-breakdown charts use ONLY NCs with a real project (Adriele): a NO
+# PROJECT / EZ1 NC is never counted under a real programme. Open-now metrics
+# above still count everything; this filter is only for the by-project views.
+_PROJ_ONLY = [("COALESCE(project,'NO PROJECT') <> 'NO PROJECT'", [])]
+
+df_proj = _qf("""SELECT COALESCE(project,'(no project)') AS project,
+                        COUNT(*) AS total,
+                        SUM(CASE WHEN is_open=1 THEN 1 ELSE 0 END) AS open
+                 FROM nc {WHERE} GROUP BY project ORDER BY total DESC""",
+              extra=_PROJ_ONLY)
+if df_proj.empty:
+    st.info("No NCs in this selection.")
+else:
+    pc1, pc2 = st.columns(2)
+    with pc1:
+        st.markdown("**All NCs by project**")
+        figpt = go.Figure(go.Bar(
+            y=df_proj["project"], x=df_proj["total"], orientation="h",
+            marker_color="#1E2761", text=df_proj["total"],
+            hovertemplate="<b>%{y}</b><br>Total NCs: %{x}<extra></extra>"))
+        figpt.update_layout(height=max(300, 32*len(df_proj)),
+                            margin=dict(l=0, r=0, t=MODEBAR_T, b=0),
+                            yaxis=dict(categoryorder="total ascending"),
+                            xaxis_title="NCs (total)", yaxis_title="")
+        figpt.update_traces(textposition="outside")
+        _headroom(figpt, df_proj["total"], horizontal=True)
+        st.plotly_chart(figpt, width='stretch', config=CHART_CONFIG, key="by_project_total")
+        # raw data right under THIS chart
+        raw_block(raw_nc(_PROJ_ONLY), key="proj_total_raw", fname="all_ncs_by_project.xlsx",
+                  dl_label="All NCs by project",
+                  note="Every NC in the current filter (real projects only).")
+    with pc2:
+        st.markdown("**Open NCs by project** — current workload")
+        dpo = df_proj[df_proj["open"] > 0].sort_values("open")
+        if dpo.empty:
+            st.info("No open NCs in this selection.")
+        else:
+            figpo = go.Figure(go.Bar(
+                y=dpo["project"], x=dpo["open"], orientation="h",
+                marker_color="#F26E21", text=dpo["open"],
+                hovertemplate="<b>%{y}</b><br>Open NCs: %{x}<extra></extra>"))
+            figpo.update_layout(height=max(300, 32*len(dpo)),
+                                margin=dict(l=0, r=0, t=MODEBAR_T, b=0),
+                                yaxis=dict(categoryorder="total ascending"),
+                                xaxis_title="Open NCs", yaxis_title="")
+            figpo.update_traces(textposition="outside")
+            _headroom(figpo, dpo["open"], horizontal=True)
+            st.plotly_chart(figpo, width='stretch', config=CHART_CONFIG, key="by_project_open")
+        # raw data right under THIS chart
+        raw_block(raw_nc(_PROJ_ONLY + [("is_open=1", [])]), key="proj_open_raw",
+                  fname="open_ncs_by_project.xlsx", dl_label="Open NCs by project",
+                  note="Open NCs only (real projects), in the current filter.")
+
+st.markdown("**Class → project** — biggest to smallest")
+df_tm = _qf("""SELECT COALESCE(launcher_class,'(no class)') AS cls,
+                      COALESCE(project,'(no project)') AS project, COUNT(*) AS n
+               FROM nc {WHERE} GROUP BY cls, project""", extra=_PROJ_ONLY)
+if not df_tm.empty:
+    figtm = px.treemap(df_tm, path=[px.Constant("All NCs"), "cls", "project"], values="n",
+                       color="cls",
+                       color_discrete_map={"LLV": "#1E2761", "MLV": "#F26E21",
+                                           "SLV": "#4CAF50", "SAS": "#1C7293",
+                                           "(no class)": "#B0B7C3"})
+    figtm.update_traces(root_color="#EEF1F7",
+                        texttemplate="%{label}<br><b>%{value}</b> NCs",
+                        textfont_size=14,
+                        hovertemplate="<b>%{label}</b><br>NCs: %{value}<extra></extra>")
+    figtm.update_layout(height=430, margin=dict(l=0, r=0, t=MODEBAR_T, b=0))
+    _tm_ev = st.plotly_chart(figtm, width='stretch', config=CHART_CONFIG,
+                             key="by_project_treemap", on_select="rerun")
+    st.caption("Top blocks are launcher classes (LLV includes Vulcan; SAS stands alone) — "
+               "click a class or project; the raw data below follows your click.")
+
+    # Which node was clicked? Treemap point ids look like 'All NCs/LLV/Ariane'.
+    # depth 1 = a class, depth 2 = a project. Use it to scope the raw rows so
+    # 'View raw data' shows exactly what the selected block represents.
+    _sel_cls = _sel_proj = None
+    try:
+        _pts = _tm_ev["selection"]["points"]
+    except Exception:
+        _pts = []
+    if _pts:
+        _parts = [p for p in str(_pts[-1].get("id", "")).split("/")
+                  if p and p != "All NCs"]
+        if len(_parts) == 1:
+            _sel_cls = _parts[0]
+        elif len(_parts) >= 2:
+            _sel_cls, _sel_proj = _parts[0], _parts[1]
+
+    _tm_extra, _tm_note = [], ("Every NC in the current filter "
+                               "(each row carries its class & project).")
+    if _sel_proj:
+        _tm_extra = [("COALESCE(project,'(no project)') = ?", [_sel_proj])]
+        _tm_note = f"Filtered to your click: project **{_sel_proj}**."
+    elif _sel_cls:
+        _tm_extra = [("COALESCE(launcher_class,'(no class)') = ?", [_sel_cls])]
+        _tm_note = f"Filtered to your click: class **{_sel_cls}**."
+    raw_block(raw_nc(_PROJ_ONLY + _tm_extra), key="treemap_raw",
+              fname="class_project_raw.xlsx",
+              dl_label="Class → project rows", note=_tm_note)
+
+st.markdown("**Where + what** — NCs by project × detection area")
+df_hm = _qf("""SELECT COALESCE(project,'(no project)') AS project,
+                      COALESCE(detection_area,'(none)') AS area, COUNT(*) AS n
+               FROM nc {WHERE} GROUP BY project, area""", extra=_PROJ_ONLY)
+if not df_hm.empty:
+    _topP = df_hm.groupby("project")["n"].sum().sort_values(ascending=False).head(10).index.tolist()
+    _topA = df_hm.groupby("area")["n"].sum().sort_values(ascending=False).head(12).index.tolist()
+    _h = df_hm[df_hm["project"].isin(_topP) & df_hm["area"].isin(_topA)]
+    piv = _h.pivot_table(index="area", columns="project", values="n", aggfunc="sum", fill_value=0)
+    if not piv.empty:
+        fighm = go.Figure(go.Heatmap(
+            z=piv.values, x=list(piv.columns), y=list(piv.index), colorscale="Oranges",
+            hovertemplate="Project %{x}<br>Area %{y}<br>NCs: %{z}<extra></extra>"))
+        fighm.update_layout(height=max(320, 26*len(piv.index)),
+                            margin=dict(l=0, r=0, t=MODEBAR_T, b=0),
+                            xaxis_title="", yaxis_title="")
+        st.plotly_chart(fighm, width='stretch', config=CHART_CONFIG, key="by_project_heatmap")
+        st.caption("Darker = more NCs. Top 10 projects × top 12 detection areas — the hotspots "
+                   "to attack first (a dark cell = that problem in that programme).")
+        # raw scoped to exactly what the heatmap draws (top-10 projects × top-12 areas)
+        _hm_extra = []
+        if _topP:
+            _hm_extra.append((f"COALESCE(project,'(no project)') IN ({','.join(['?']*len(_topP))})", _topP))
+        if _topA:
+            _hm_extra.append((f"COALESCE(detection_area,'(none)') IN ({','.join(['?']*len(_topA))})", _topA))
+        raw_block(raw_nc(_PROJ_ONLY + _hm_extra), key="heatmap_raw", fname="project_area_raw.xlsx",
+                  dl_label="Project × area rows",
+                  note="The NCs shown in the heatmap (top-10 projects × top-12 detection areas).")
+
+st.markdown("")
+
+
+# ------------------------------------------------------------------------------
+# 7 - ROOT CAUSE ANALYSIS (headline only; full analysis on the CAPA tab)
 # ------------------------------------------------------------------------------
 st.markdown('<div id="root-cause"></div>', unsafe_allow_html=True)
 st.subheader("Root Cause Analysis")
@@ -1116,6 +1344,13 @@ if HAS_CAPA:
         else:
             st.info("No RC category recorded for this selection.")
 
+    # RAW view + download: the RCA rows behind these charts (raw CAPA joined to its NC)
+    _rc_raw = _q(f"""SELECT c.*, n.project, n.system, n.owner, n.created_on AS nc_created_on
+                     FROM capa c JOIN nc n USING(nc_id)
+                     WHERE 1=1{_rca_only}{_rc_flt}""", _NB_PR)
+    raw_block(_rc_raw, key="rc_raw", fname="root_cause_raw.xlsx", sheet="RCA_raw",
+              dl_label="Download RCA rows")
+
     st.caption("Where the problem started and what kind of cause it was, taken from the RCA "
                "rows of the CAPA tracker. The full analysis — drill-downs by launcher class, "
                "CAPA coverage and the L2 breakdowns — is on the **CAPA** tab.")
@@ -1126,29 +1361,35 @@ st.markdown("")
 
 
 # ------------------------------------------------------------------------------
-# 7 - MANAGEMENT VIEW
+# 8 - MANAGEMENT VIEW
 # ------------------------------------------------------------------------------
 st.markdown('<div id="mgmt-view"></div>', unsafe_allow_html=True)
 st.subheader("Management View")
 st.caption("The five management questions, answered from the data above. Every answer is "
-           "computed — nothing here is typed by hand.")
+           "computed — nothing here is typed by hand. The two trend questions (backlog "
+           "reducing? / closures vs openings?) use the full history so a narrow date "
+           "window can't distort them; the rest follow the date filter.")
 
+# _MF  = full filter INCLUDING the inline date window (for "open now" snapshots).
+# _MF_ND = same filter but WITHOUT the date window — used by the two trend
+#          questions (6-month backlog change, opened-vs-closed this year) so a
+#          narrow window can't distort a measurement that is about a fixed span.
 _MF = (" AND " + " AND ".join(_NB_CL)) if _NB_CL else ""
+_MF_ND = (" AND " + " AND ".join(_ND_CL)) if _ND_CL else ""
 
-# Is the backlog reducing? Compare open-at-month-end now vs six months ago.
 _now_m = date.today().strftime("%Y-%m-%d")
 _six_ago = (pd.Timestamp(date.today()) - pd.DateOffset(months=6)).strftime("%Y-%m-%d")
 _open_now = _q("SELECT COUNT(*) n FROM nc WHERE created_on <= ? AND "
-               "(is_open=1 OR closure_date > ?)" + _MF, [_now_m, _now_m] + _NB_PR).iloc[0]["n"]
+               "(is_open=1 OR closure_date > ?)" + _MF_ND, [_now_m, _now_m] + _ND_PR).iloc[0]["n"]
 _open_then = _q("SELECT COUNT(*) n FROM nc WHERE created_on <= ? AND "
-                "(is_open=1 OR closure_date > ?)" + _MF, [_six_ago, _six_ago] + _NB_PR).iloc[0]["n"]
+                "(is_open=1 OR closure_date > ?)" + _MF_ND, [_six_ago, _six_ago] + _ND_PR).iloc[0]["n"]
 _delta = int(_open_now) - int(_open_then)
 
 _yr = date.today().strftime("%Y")
-_op_yr = _q("SELECT COUNT(*) n FROM nc WHERE substr(created_on,1,4)=?" + _MF,
-            [_yr] + _NB_PR).iloc[0]["n"]
-_cl_yr = _q("SELECT COUNT(*) n FROM nc WHERE substr(closure_date,1,4)=?" + _MF,
-            [_yr] + _NB_PR).iloc[0]["n"]
+_op_yr = _q("SELECT COUNT(*) n FROM nc WHERE substr(created_on,1,4)=?" + _MF_ND,
+            [_yr] + _ND_PR).iloc[0]["n"]
+_cl_yr = _q("SELECT COUNT(*) n FROM nc WHERE substr(closure_date,1,4)=?" + _MF_ND,
+            [_yr] + _ND_PR).iloc[0]["n"]
 
 _top_area = _q("SELECT COALESCE(detection_area,'(not recorded)') a, COUNT(*) n FROM nc "
                "WHERE is_open=1" + _MF + " GROUP BY a ORDER BY n DESC LIMIT 1", _NB_PR)
@@ -1187,25 +1428,23 @@ st.dataframe(df_mgmt, width='stretch', hide_index=True,
              column_config={"Question": st.column_config.TextColumn(width="medium"),
                             "Answer": st.column_config.TextColumn(width="small"),
                             "Evidence": st.column_config.TextColumn(width="large")})
-st.download_button("📥 Excel", to_excel_bytes(df_mgmt, "Management_View"),
-                   "management_view.xlsx",
-                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                   key="dl_mgmt")
+# RAW download: the open NCs the management view is talking about (in the window)
+_raw_dl("Excel — raw open NCs", extra=[("is_open=1", [])], use_date=True,
+        fname="management_view_raw_open.xlsx", key="dl_mgmt")
 
 st.caption(f"Data source: `quality.db` · Last modified: "
            f"{datetime.fromtimestamp(Path(DB_FILE).stat().st_mtime).strftime('%d.%m.%Y %H:%M')}")
 
 
 # ------------------------------------------------------------------------------
-# 8 - OWNER SUMMARY (NC tracker only)
+# 9 - OWNER SUMMARY (NC tracker only)
 # ------------------------------------------------------------------------------
 st.markdown('<div id="owner-summary"></div>', unsafe_allow_html=True)
 st.subheader("Owner summary")
 st.caption("**NC tracker rows only** — the cutover population, not the full SAP history. "
            "SAP-only NCs carry no owner (the export has no owner field), so including them "
            "would put thousands of NCs against '(no owner)' and drown the real workload. "
-           "Ignores the From/To dates on purpose: 'what do I have' should not depend on a "
-           "date window.")
+           "Follows the date filter above (NCs created inside the window).")
 
 _OWN_FLT = (" AND " + " AND ".join(_NB_CL)) if _NB_CL else ""
 
@@ -1268,20 +1507,18 @@ else:
         st.caption("Open NCs per owner, stacked by system. A tall orange or green block means "
                    "that person's workload has already moved to the new system.")
 
-    st.download_button("📥 Excel", to_excel_bytes(df_owner_sum, "Owner_Summary"),
-                       "owner_summary.xlsx",
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       key="dl_owner_sum")
+    # RAW view + download: the actual tracker NC rows behind the owner summary
+    _own_raw = _q("SELECT * FROM nc WHERE source IN ('tracker','both')" + _OWN_FLT
+                  + " ORDER BY owner, created_on DESC", _NB_PR)
+    raw_block(_own_raw, key="owner_sum_raw", fname="owner_summary_raw.xlsx", sheet="Owner_raw",
+              dl_label="Download tracker NCs")
 
 st.markdown("")
 
 
 # ------------------------------------------------------------------------------
-# 9 - PER-OWNER DETAIL
+# 10 - PER-OWNER DETAIL
 # ------------------------------------------------------------------------------
-# One picker rather than a block per person: ten stacked blocks make the page so
-# long that nobody scrolls to find their own, and every block would re-run the
-# same queries.
 st.markdown('<div id="owner-detail"></div>', unsafe_allow_html=True)
 st.subheader("Per-owner detail")
 st.caption("Pick a name to see only their NCs, what is missing on each, and a workbook you "
@@ -1310,7 +1547,9 @@ else:
                    COALESCE(n.detection_area,'—')  AS "Detection",
                    COALESCE(n.nrb_disposition,'—') AS "NRB disposition",
                    n.created_on AS "Created", n.days_open AS "Days open"
-            FROM nc n WHERE n.owner = ? ORDER BY n.created_on DESC""", [_pick_owner])
+            FROM nc n WHERE n.owner = ? AND n.created_on >= ? AND n.created_on <= ?
+            ORDER BY n.created_on DESC""",
+                     [_pick_owner, str(date_from), str(date_to) + " 23:59:59"])
 
         _n_all = len(df_mine)
         _n_op = int((df_mine["Status"] == "Open").sum())
@@ -1320,7 +1559,7 @@ else:
         _sys_txt = " · ".join(f"{_SYS_LABEL.get(k, k)} {v}" for k, v in _by_sys.items()) or "none open"
 
         for _c, (_l, _v, _d) in zip(st.columns(4), [
-            ("Total NCs", _n_all, f"Every NC assigned to {_pick_owner} — all dates, no filter."),
+            ("Total NCs", _n_all, f"NCs assigned to {_pick_owner}, created inside the date window above."),
             ("Open", _n_op, _sys_txt),
             ("Closed", _n_cl, "Status says Closed."),
             ("No status", _n_ns, "Status cell blank — neither open nor closed."),
@@ -1358,10 +1597,6 @@ else:
         _gaps = _gaps[_gaps["Missing"] > 0]
         if not _gaps.empty:
             st.markdown("**What is missing on these NCs**")
-            # Written as sentences rather than a table. The table repeated the
-            # same denominator on every row, which read like data instead of the
-            # label it was — the 'Of' column was asked about twice. Every number
-            # below is computed, so it follows the data.
             for _r in _gaps.itertuples(index=False):
                 st.markdown(
                     f"- **{_r.Field}** — missing on **{int(_r.Missing)}** of "
@@ -1369,15 +1604,17 @@ else:
         else:
             st.success(f"Nothing missing — all {_n_all} NCs have every field filled in.")
 
-        _pkg = {"My_NCs": df_mine}
+        # RAW download: this owner's full NC rows (all columns), not the trimmed view
+        _mine_raw = _q("SELECT * FROM nc WHERE owner = ? ORDER BY created_on DESC",
+                       [_pick_owner])
+        _pkg = {"My_NCs_raw": _mine_raw, "My_NCs_view": df_mine}
         if not _gaps.empty:
             _pkg["Missing_Fields"] = _gaps
         st.download_button(
-            f"📥 Download {_pick_owner}'s report (.xlsx)",
+            f"📥 Download {_pick_owner}'s report — raw NC rows (.xlsx)",
             build_full_report_bytes(_pkg, include_since=False),
             f"NC_report_{_pick_owner.replace(' ', '_').replace('/', '-')}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_mine", type="primary")
-        st.caption("One workbook, one person: their NCs and their gaps. Safe to send.")
+            XLSX_MIME, key="dl_mine", type="primary")
+        st.caption("One workbook, one person: their raw NC rows + the tidy view + their gaps. Safe to send.")
 
 st.markdown("")

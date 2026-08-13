@@ -1,11 +1,12 @@
 """
 app.py — Quality BRM Dashboard (entry point).
 
-Two top tabs:
+Three top tabs:
 
-    [ Quality Dashboard ]  [ CAPA ]
+    [ Quality Dashboard ]  [ Customer Complaints ]  [ CAPA ]
 
   * Quality Dashboard — rendered from `dashboard_body.py`.
+  * Customer Complaints — rendered by `customer_complaints.render()`.
   * CAPA — rendered by `capa_view.render()`.
 
 IMPORTANT — why the body is exec'd rather than pasted here.
@@ -31,6 +32,7 @@ from pathlib import Path
 import streamlit as st
 
 import capa_view
+import customer_complaints
 
 # The password gate is disabled. To switch it back on, uncomment both lines.
 # from auth import check_password
@@ -45,7 +47,8 @@ st.set_page_config(
 # if not check_password():
 #     st.stop()
 
-tab_dash, tab_capa = st.tabs(["Quality Dashboard", "CAPA"])
+tab_dash, tab_cc, tab_capa = st.tabs(
+    ["Quality Dashboard", "Customer Complaints", "CAPA"])
 
 # Make the top tab labels large, bold and high-contrast so they are always visible.
 # Streamlit 1.60 renders each tab as div[data-testid="stTab"][role="tab"]
@@ -82,6 +85,11 @@ st.markdown("""
     .stTabs [data-testid="stTab"][aria-selected="true"] p {
         color: #FFFFFF !important;
     }
+    /* The Customer Complaints tab is the high-severity one — flag it in red
+       when it is the active tab so it always reads as the "danger" page. */
+    .stTabs [data-testid="stTab"]:nth-of-type(2)[aria-selected="true"] {
+        background: #E53E3E;
+    }
     .stTabs .react-aria-SelectionIndicator {
         background: #F26E21 !important;
     }
@@ -95,6 +103,9 @@ with tab_dash:
         st.error(f"`{_BODY.name}` not found next to app.py — the dashboard cannot render.")
     else:
         exec(compile(_BODY.read_text(encoding="utf-8"), str(_BODY), "exec"), globals())
+
+with tab_cc:
+    customer_complaints.render()
 
 with tab_capa:
     capa_view.render()

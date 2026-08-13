@@ -33,4 +33,25 @@ dist/
 Thumbs.db
 desktop.ini
 
-labelscanner/data/
+labelscanner/data/source/
+
+!labelscanner/data/
+!labelscanner/data/master.json
+
+# --- v6.0 hardening: block data and junk by shape, not by name ---
+data/
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.db
+*.jsonl
+*.log
+*.bak
+*.bak_*
+*.pyc
+__pycache__/
+.venv/
+venv/
+!labelscanner/data/
+!labelscanner/data/master.json
