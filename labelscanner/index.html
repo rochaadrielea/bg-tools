@@ -144,7 +144,7 @@
     <div class="camtools">
       <div class="chip on" id="autoChip">Auto-add</div>
       <div class="chip" id="manualChip">Add manually</div>
-      <div class="chip" id="ocrChip">Read label</div>
+      <div class="chip" id="scanChip">Scan label</div>
       <div class="chip" id="refreshChip">Refresh camera</div>
       <div class="chip" id="clearChip">Clear label</div>
       <div class="chip" id="torchChip" style="display:none;">Light</div>
@@ -230,7 +230,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v6.1';
+const VERSION = 'v6.2';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -260,8 +260,6 @@ const OCR_PASSES = 3;
 const OCR_MAX_PX = 900;
 const ENHANCE_EVERY = 3;
 const MAT_FIX_DIST = 1;
-// ANCHOR_MS  how long a decoded barcode's position keeps steering the text read.
-const ANCHOR_MS = 4000;
 
 const COLS = ["Mat","Definition","Rev","SerNr","Char","L-Char","Auftr","Menge","Einheit","Verfallsdatum","CH-Nr"];
 const AUDIT_COLS = ["Source","Proof","Check"];
@@ -279,7 +277,7 @@ const statusEl=document.getElementById('status'), statusTxt=document.getElementB
 const reticle=document.getElementById('reticle'), banner=document.getElementById('banner');
 const idlePanel=document.getElementById('idle'), authBtn=document.getElementById('authBtn'), idleTxt=document.getElementById('idleTxt');
 const fileBtn=document.getElementById('fileBtn'), focusBtn=document.getElementById('focusBtn'), fileInput=document.getElementById('fileInput');
-const ocrChip=document.getElementById('ocrChip'), torchChip=document.getElementById('torchChip');
+const scanChip=document.getElementById('scanChip'), torchChip=document.getElementById('torchChip');
 const refreshChip=document.getElementById('refreshChip'), clearChip=document.getElementById('clearChip');
 const rawLine=document.getElementById('rawLine');
 const autoChip=document.getElementById('autoChip'), manualChip=document.getElementById('manualChip');
@@ -527,49 +525,10 @@ function drawCrop(scale, grey){
   return cropCv;
 }
 
-// ---------------------------------------------------------------------------
-//  THE CANVAS HANDED TO TESSERACT
-//  Two fixes, both about speed, and the second one is Adriele's idea.
-//
-//  1. NEVER UPSCALE. v6.0 drew the crop at 1.6x, so every pass processed ~2.5x
-//     the pixels for nothing. The long edge is now capped at OCR_MAX_PX and
-//     large frames are scaled DOWN.
-//  2. AIM AT THE BARCODE. Once a code has been decoded we know where it is, and
-//     the printed fields sit directly above it. Reading that band instead of the
-//     whole box is a fraction of the pixels and cannot pick up a neighbouring
-//     label's text.
-// ---------------------------------------------------------------------------
-const ocrCv = document.createElement('canvas');
-const ocrCtx = ocrCv.getContext('2d');
-
-function drawForOcr(){
-  const r = reticleRect();
-  if(!r || r.w < 8 || r.h < 8) return null;
-
-  let sx=r.x, sy=r.y, sw=r.w, sh=r.h, anchored=false;
-  if(lastBarcodeBox && (Date.now()-lastBarcodeSeen) < ANCHOR_MS){
-    // barcode box is in crop pixels -> back to video pixels
-    const b = lastBarcodeBox;
-    const bx = r.x + b.x, by = r.y + b.y;
-    const padX = Math.max(b.width*0.25, 20);
-    const up = b.height*7;                    // the text block above the code
-    sx = Math.max(r.x, bx - padX);
-    sw = Math.min(r.x + r.w, bx + b.width + padX) - sx;
-    sy = Math.max(r.y, by - up);
-    sh = (by + b.height*1.2) - sy;
-    if(sw > 20 && sh > 20) anchored = true; else { sx=r.x; sy=r.y; sw=r.w; sh=r.h; }
-  }
-
-  const long = Math.max(sw, sh);
-  const s = Math.min(1, OCR_MAX_PX / long);   // only ever shrink
-  const w = Math.max(40, Math.round(sw*s)), hh = Math.max(40, Math.round(sh*s));
-  if(ocrCv.width!==w || ocrCv.height!==hh){ ocrCv.width=w; ocrCv.height=hh; }
-  ocrCtx.filter = 'grayscale(1) contrast(1.35)';
-  ocrCtx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, hh);
-  ocrCv._anchored = anchored;
-  return ocrCv;
-}
-
+// NOTE: v6.1 had a drawForOcr() that read text from the live video crop. v6.2
+// reads text from a still photo instead (see scanLabel), so it is gone. The
+// barcode-anchored crop idea survives inside the still path, where the label is
+// sharp enough for it to pay off.
 function boxesCohere(a,b){
   if(!a||!b) return null;                 // unknown, not false
   const ca={x:a.x+a.width/2, y:a.y+a.height/2};
@@ -612,8 +571,6 @@ let gateActive=true;
 let rawUnplaced='';          // last code that matched no rule
 let lastRaw='';              // last code seen at all, with its format
 let enhanceTick=0;
-let lastBarcodeBox=null;   // where the code was, in crop pixels - anchors the text read
-let lastBarcodeSeen=0;
 
 const hints = new Map();
 hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
@@ -777,7 +734,6 @@ async function nativeLoop(){
         }
         if(codes && codes.length){
           frameTick++;
-          if(codes[0].boundingBox){ lastBarcodeBox = codes[0].boundingBox; lastBarcodeSeen = Date.now(); }
           lastRaw = (codes[0].rawValue||'').trim()
                   + (codes[0].format ? '  ['+codes[0].format+']' : '');
           onCodes(codes.map(function(c){
@@ -832,7 +788,7 @@ function startZxing(){
     if(result && result.getText){ frameTick++; onCodes([{value:result.getText().trim(), box:null}], frameTick); }
   }).catch(function(err){
     console.warn('zxing stream decode failed', err);
-    setStatus('Barcode reader failed \u2014 use Read text now or Add manually','bad');
+    setStatus('Barcode reader failed \u2014 use Scan label or Add manually','bad');
   });
 }
 
@@ -845,7 +801,6 @@ async function zxingCropLoop(){
         if(res && res.getText){
           frameTick++;
           const bx = pointsToBox(res.getResultPoints && res.getResultPoints());
-          if(bx){ lastBarcodeBox = bx; lastBarcodeSeen = Date.now(); }
           lastRaw = res.getText().trim()
                   + (res.getBarcodeFormat ? '  ['+res.getBarcodeFormat()+']' : '');
           onCodes([{value:res.getText().trim(), box:bx}], frameTick);
@@ -982,7 +937,7 @@ function showRaw(){
 function onCodes(codes, tick){
   // A barcode while text is being read means the label moved. The running OCR
   // is abandoned and its findings dropped: a new label always wins.
-  if(ocrActive){ ocrRun++; ocrActive=false; ocrChip.classList.remove('act'); }
+  if(ocrActive){ ocrRun++; ocrActive=false; scanChip.classList.remove('act'); }
   rawUnplaced = '';
   const changed = applyBarcodes(codes, tick);
   showRaw();
@@ -1017,9 +972,12 @@ function evaluate(){
     if(got.length){
       setStatus(got.map(function(k){ return k+' '+heldVal(k); }).join('  ')
                 + ' \u2014 need ' + miss.join(', '), 'busy');
-      // A held Material with no Charge: on EQ and MSL labels the Charge is
-      // printed text, so read the text without being asked.
-      if(heldField('Mat') && !heldField('Char') && autoMode && !ocrActive) ocrBurst(false);
+      // v6.2: NO AUTOMATIC TEXT READ.
+      // v6.1 fired a three-pass OCR burst here every time a Material was held
+      // without a Charge, and re-fired it on the next barcode - seconds of work,
+      // repeatedly, on a blurred video frame. That is the "tries a lot" grind.
+      // Text is now read ONLY when the operator presses Scan label, and from a
+      // sharp still instead of the stream.
     }
     return;
   }
@@ -1127,7 +1085,7 @@ function beep(){ try{
 // ============================================================================
 //  OCR  (on demand only, and it stops as soon as it has what it needs)
 // ============================================================================
-ocrChip.addEventListener('click', function(){ ocrBurst(true); });
+scanChip.addEventListener('click', scanLabel);
 
 async function ensureWorker(silent){
   if(!worker){
@@ -1163,28 +1121,210 @@ function vote(field, value){
   }
 }
 
-async function ocrBurst(manual){
-  if(!vid.videoWidth){ setStatus('Turn the camera on first','busy'); return; }
+// ============================================================================
+//  SCAN LABEL  -  one sharp still, read like a document scanner
+//
+//  Why a still and not the video stream:
+//   - takePhoto() runs a real autofocus/exposure cycle and returns the full
+//     sensor image. The video stream is a small, continuously-moving frame, and
+//     a Code128 at ~260 blurred pixels cannot be decoded at all - which is why
+//     the live loop can fail on a label that a photo reads instantly.
+//   - it happens ONCE, on demand, instead of grinding in a loop.
+//
+//  Three capture paths because browser support is uneven: ImageCapture on
+//  Chrome/Android, grabFrame where takePhoto is missing, and a plain canvas draw
+//  on iOS Safari, which has neither.
+// ============================================================================
+const stillCv = document.createElement('canvas');
+const stillCtx = stillCv.getContext('2d', {willReadFrequently:true});
+
+async function captureStill(){
+  // 1. full-resolution photo
+  if(window.ImageCapture && track){
+    try{
+      const ic = new ImageCapture(track);
+      const blob = await ic.takePhoto();
+      const bmp = await createImageBitmap(blob);
+      stillCv.width = bmp.width; stillCv.height = bmp.height;
+      stillCtx.filter = 'none';
+      stillCtx.drawImage(bmp, 0, 0);
+      if(bmp.close) bmp.close();
+      return {w:bmp.width, h:bmp.height, how:'photo'};
+    }catch(_){}
+    // 2. a frame straight off the track
+    try{
+      const ic = new ImageCapture(track);
+      const bmp = await ic.grabFrame();
+      stillCv.width = bmp.width; stillCv.height = bmp.height;
+      stillCtx.filter = 'none';
+      stillCtx.drawImage(bmp, 0, 0);
+      if(bmp.close) bmp.close();
+      return {w:bmp.width, h:bmp.height, how:'frame'};
+    }catch(_){}
+  }
+  // 3. whatever the video element is showing (iOS)
+  if(!vid.videoWidth) return null;
+  stillCv.width = vid.videoWidth; stillCv.height = vid.videoHeight;
+  stillCtx.filter = 'none';
+  stillCtx.drawImage(vid, 0, 0);
+  return {w:vid.videoWidth, h:vid.videoHeight, how:'video'};
+}
+
+// The aiming box, in the still's own pixels. reticleRect() is in video pixels and
+// a photo is usually larger, so it is scaled proportionally rather than reused.
+function cropStill(still){
+  const r = reticleRect();
+  const out = document.createElement('canvas');
+  const ctx = out.getContext('2d', {willReadFrequently:true});
+  if(!r || !vid.videoWidth){
+    out.width = still.w; out.height = still.h;
+    ctx.drawImage(stillCv, 0, 0);
+    return out;
+  }
+  const kx = still.w / vid.videoWidth, ky = still.h / vid.videoHeight;
+  const sx = Math.max(0, r.x*kx), sy = Math.max(0, r.y*ky);
+  const sw = Math.min(still.w-sx, r.w*kx), sh = Math.min(still.h-sy, r.h*ky);
+  out.width = Math.round(sw); out.height = Math.round(sh);
+  ctx.drawImage(stillCv, sx, sy, sw, sh, 0, 0, out.width, out.height);
+  return out;
+}
+
+function scaleCanvas(src, factor, grey){
+  const c = document.createElement('canvas');
+  c.width = Math.round(src.width*factor); c.height = Math.round(src.height*factor);
+  const ctx = c.getContext('2d', {willReadFrequently:true});
+  ctx.filter = grey ? 'grayscale(1) contrast(1.4)' : 'none';
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  return c;
+}
+
+// Otsu: picks the threshold from the image's own histogram instead of a fixed
+// 128, which is what makes it survive uneven lighting and the glare off a bag.
+function binarise(src){
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d', {willReadFrequently:true});
+  ctx.drawImage(src, 0, 0);
+  let img;
+  try{ img = ctx.getImageData(0,0,c.width,c.height); }catch(_){ return c; }
+  const d = img.data, hist = new Array(256).fill(0), n = c.width*c.height;
+  for(let i=0;i<d.length;i+=4){
+    const g = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114)|0;
+    d[i]=d[i+1]=d[i+2]=g; hist[g]++;
+  }
+  let sum=0; for(let t=0;t<256;t++) sum += t*hist[t];
+  let wB=0, sumB=0, best=0, thr=128;
+  for(let t=0;t<256;t++){
+    wB += hist[t]; if(!wB) continue;
+    const wF = n - wB; if(!wF) break;
+    sumB += t*hist[t];
+    const mB = sumB/wB, mF = (sum-sumB)/wF;
+    const v = wB*wF*(mB-mF)*(mB-mF);
+    if(v > best){ best = v; thr = t; }
+  }
+  for(let i=0;i<d.length;i+=4){
+    const v = d[i] < thr ? 0 : 255;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(img,0,0);
+  return c;
+}
+
+// Decode ladder: cheapest first, stop at the first read. Same escalation as the
+// "Dynamsoft for free" work - restoration, not a better decoder - except here it
+// runs on ONE sharp image, so it is affordable.
+async function decodeLadder(base){
+  const variants = [['as taken', base]];
+  // each restoration step is optional: if one cannot be built, the ladder simply
+  // has one rung fewer instead of failing
+  try{ variants.push(['upscaled', scaleCanvas(base, 2, true)]); }catch(_){}
+  try{ variants.push(['contrast', scaleCanvas(base, 3, true)]); }catch(_){}
+  try{ variants.push(['black & white', binarise(scaleCanvas(base, 2, true))]); }catch(_){}
+  let reader = null;
+  try{ reader = new ZXing.BrowserMultiFormatReader(hints, 200); }catch(_){}
+
+  for(let v=0; v<variants.length; v++){
+    for(const deg of [0,90,180,270]){
+      // A failure building one variant must cost that variant only. Outside a
+      // try, a single throw here aborted the whole ladder AND skipped the text
+      // read that follows it - one canvas problem would look like "the scan
+      // does not work".
+      let cv;
+      try{ cv = rotateCanvas(variants[v][1], deg); }catch(_){ continue; }
+      if(!cv) continue;
+      if(nativeDetector){
+        try{
+          const codes = await nativeDetector.detect(cv);
+          if(codes && codes.length){
+            return {codes:codes.map(function(c){
+              return {value:(c.rawValue||'').trim(), box:c.boundingBox||null,
+                      format:c.format||''};
+            }), how:variants[v][0]+(deg?' rotated '+deg:'')};
+          }
+        }catch(_){}
+      }
+      if(reader && typeof reader.decodeFromCanvas === 'function'){
+        try{
+          const res = reader.decodeFromCanvas(cv);
+          if(res && res.getText) return {codes:[{value:res.getText().trim(),
+            box:pointsToBox(res.getResultPoints && res.getResultPoints()),
+            format:(res.getBarcodeFormat ? String(res.getBarcodeFormat()) : '')}],
+            how:variants[v][0]+(deg?' rotated '+deg:'')};
+        }catch(_){}
+      }
+    }
+  }
+  return null;
+}
+
+async function scanLabel(){
   if(ocrActive) return;
+  if(!vid.videoWidth){ setStatus('Turn the camera on first','busy'); return; }
   const token = ++ocrRun;
-  ocrActive = true;                       // suspends the staleness clock
-  ocrChip.classList.add('act');
+  ocrActive = true;                        // holds the clock: one deliberate label
+  scanChip.classList.add('act');
+  clearTimeout(graceTimer);
   try{
+    setStatus('Taking a photo \u2014 hold still\u2026','busy');
+    const still = await captureStill();
+    if(!still){ setStatus('Could not take a photo','bad'); return; }
+    const crop = cropStill(still);
+    const tick = ++frameTick;              // one still = one label
+
+    setStatus('Reading the barcode\u2026','busy');
+    const got = await decodeLadder(crop);
+    rawUnplaced = '';
+    if(got){
+      lastRaw = got.codes.map(function(c){
+        return c.value + (c.format ? '  ['+c.format+']' : ''); }).join('  |  ')
+        + '  (' + got.how + ')';
+      applyBarcodes(got.codes, tick);
+    } else {
+      lastRaw = 'no barcode found in the photo';
+    }
+    showRaw();
+    if(ocrRun !== token) return;
+
+    setStatus('Reading the text\u2026','busy');
     await ensureWorker(false);
-    setStatus('Reading text \u2014 hold steady\u2026','busy');
+    const long = Math.max(crop.width, crop.height);
+    const forOcr = long > OCR_MAX_PX ? scaleCanvas(crop, OCR_MAX_PX/long, true)
+                                     : scaleCanvas(crop, 1, true);
     for(let i=0;i<OCR_PASSES;i++){
-      if(ocrRun !== token) break;                       // cancelled by a barcode
-      const out = await worker.recognize(drawForOcr() || vid);
-      if(ocrRun !== token) break;
+      if(ocrRun !== token) return;
+      const out = await worker.recognize(forOcr);
+      if(ocrRun !== token) return;
       const p = parseOcr((out && out.data && out.data.text) || '');
       for(const k in p) vote(k, p[k]);
-      // stop early: nothing more to gain once both mandatory values are held
       if(MANDATORY.every(function(k){ return session.fields[k]; })) break;
-      await new Promise(function(r){ setTimeout(r,120); });
     }
-  }catch(e){ console.warn(e); }
-  if(ocrRun === token){ ocrActive=false; ocrChip.classList.remove('act'); }
-  if(manual) openReview(proveSameLabel()); else evaluate();
+  }catch(e){
+    console.warn(e);
+    setStatus('Scan failed \u2014 add manually','bad');
+  }finally{
+    if(ocrRun === token){ ocrActive=false; scanChip.classList.remove('act'); }
+  }
+  openReview(proveSameLabel());
 }
 
 function digitFix(v){ return v.replace(/O/g,'0').replace(/B/g,'8').replace(/S/g,'5').replace(/[Il]/g,'1'); }
