@@ -5,7 +5,8 @@ make_master.py - build master.json for the WAE label scanner.
 Reads every Teamcenter BOM export in data/source/ and writes data/master.json,
 the list the scanner checks a scanned material number against.
 
-ONE LIST. MBOM and EBOM are merged into a single set of material numbers,
+ONE LIST. MBOM and EBOM exports, plus data/manual_materials.json, are merged
+into a single set of material numbers,
 because the scanner asks one question and only one:
 
     is this material in the master list?  yes -> ML   no -> RV
@@ -69,6 +70,7 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCE_DIR = os.path.join(HERE, "data", "source")
 OUT_PATH = os.path.join(HERE, "data", "master.json")
+MANUAL_PATH = os.path.join(HERE, "data", "manual_materials.json")
 
 # Columns we read. Everything else in the 74-column export is ignored.
 COL_ID = "ID"
@@ -194,6 +196,37 @@ def root_ids(df):
     return out
 
 
+def load_manual():
+    """
+    Materials that exist on a label but in none of the BOM exports.
+
+    master.json is GENERATED - every run drops and rebuilds it - so a number
+    typed straight into it disappears on the next run. This file is the only
+    place a hand-added material survives, and it is never overwritten.
+
+    Shape (either form works):
+        {"materials": ["A2001542-VGC009", "E2001543-VGC009"]}
+        {"materials": [{"material": "A2001542-VGC009", "note": "Vega-C FMC 09"}]}
+    """
+    if not os.path.exists(MANUAL_PATH):
+        return []
+    try:
+        with open(MANUAL_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"  ! could not read manual_materials.json ({e}) - IGNORED")
+        return []
+    out = []
+    for m in data.get("materials", []):
+        if isinstance(m, str):
+            mid, note = norm_id(m), ""
+        else:
+            mid, note = norm_id(m.get("material")), clean_text(m.get("note"))
+        if mid:
+            out.append((mid, note))
+    return out
+
+
 def kind_of(base):
     """
     Label only. MBOM/EBOM in the filename is recorded when present because it
@@ -285,6 +318,22 @@ def main():
         print(f"    root assembly: {', '.join(sorted(rt)) if rt else 'no level-0 row found'}")
         used.append(base)
 
+    manual = load_manual()
+    if manual:
+        added = 0
+        for mid, note in manual:
+            if mid not in mats:
+                added += 1
+            e = mats.setdefault(mid, {
+                "material": mid, "name": "", "description": "",
+                "revision": "", "uom": "", "traceable": None,
+                "serialized": None, "levels": set(), "sources": set(),
+            })
+            e["sources"].add("manual")
+            if note and not e["description"]:
+                e["description"] = note
+        print(f"  manual_materials.json: {len(manual)} listed, {added} new to the list")
+
     if not mats:
         print("\n! No materials loaded. master.json NOT written.")
         print("  Every file was skipped: none of them looks like a BOM export")
@@ -293,6 +342,7 @@ def main():
         sys.exit(1)
 
     # counts per BOM kind, kept for reconciling two exports of the same assembly
+    only_man = sorted(k for k, e in mats.items() if e["sources"] == {"manual"})
     only_m = sorted(k for k, e in mats.items() if e["sources"] == {"MBOM"})
     only_e = sorted(k for k, e in mats.items() if e["sources"] == {"EBOM"})
     both = sorted(k for k, e in mats.items() if len(e["sources"]) > 1)
@@ -333,6 +383,8 @@ def main():
         print(f"    in MBOM only    : {len(only_m)}")
         print(f"    in EBOM only    : {len(only_e)}")
         print(f"    in both         : {len(both)}")
+    if only_man:
+        print(f"    hand-added only : {len(only_man)}")
     print(f"  files merged      : {len(used)}")
     print(f"  assemblies        : {', '.join(sorted(roots)) if roots else 'unknown'}")
     if skipped:
