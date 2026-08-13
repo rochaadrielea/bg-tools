@@ -518,15 +518,21 @@ function masterFix(raw){
   if(!MASTER) return {tier:'review', value:m, original:'', near:''};
   if(matIndex.has(m)) return {tier:'confirmed', value:m, original:'', near:''};
 
-  const at1 = [];
+  const at1 = [], at2 = [];
   let near = '', nearD = 99;
   for(let i=0;i<matList.length;i++){
     const d = editDist(m, matList[i], 2);
     if(d <= MAT_FIX_DIST) at1.push(matList[i]);
+    else if(d === 2) at2.push(matList[i]);
     if(d < nearD){ nearD = d; near = matList[i]; }
-    if(at1.length > 1) break;             // ambiguous already, stop looking
   }
-  if(at1.length === 1) return {tier:'corrected', value:at1[0], original:m, near:''};
+  // A single-character repair is only safe when NOTHING ELSE IS CLOSE.
+  // Caught on the real label: the line pass read 3001166, which is one character
+  // from 3001196 and two from 3001195 - the true part. The old rule saw one
+  // candidate at distance 1, corrected to 3001196 and tagged it ML. Confidently
+  // wrong, which is the worst thing this tool can produce. A rival within two
+  // characters now blocks the repair and both are offered to the operator.
+  if(at1.length === 1 && at2.length === 0) return {tier:'corrected', value:at1[0], original:m, near:''};
   return {tier:'review', value:m, original:'', near:(nearD<=2 ? near : '')};
 }
 
@@ -1472,6 +1478,81 @@ async function decodeLadder(base){
   return null;
 }
 
+// ============================================================================
+//  THE MATERIAL LINE, READ ON ITS OWN
+//
+//  Measured on the real label, reading the whole crop at once returns
+//  "Maine s00186" - unusable. Cropping to the material line, magnifying hard and
+//  telling Tesseract it is ONE LINE of digits returns "3001166" on the same
+//  pixels: from garbage to two characters out. On a sharper still it should land
+//  exactly, and the master decides either way.
+//
+//  Where the line is: the barcode sits at the BOTTOM of these labels, so its box
+//  gives us the label's footprint - Adriele's "once it finds the barcode, focus
+//  there". With no barcode we fall back to the top of the aiming box.
+//
+//  The digit whitelist is what removes O/S/B confusion at the source instead of
+//  repairing it afterwards. It would corrupt a material that genuinely contains
+//  letters, so an alphanumeric pass runs too, and NOTHING is accepted unless the
+//  master recognises it.
+// ============================================================================
+const MAT_WHITELISTS = ['0123456789', '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-'];
+
+function materialBand(crop, box){
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  let sx, sy, sw, sh;
+  if(box && box.height > 4){
+    // label footprint from the barcode: about six line-heights above it
+    const bandTop = Math.max(0, box.y - box.height*6.5);
+    sx = Math.max(0, box.x - box.width*0.30);
+    sw = Math.min(crop.width - sx, box.width*1.60);
+    sy = bandTop;
+    sh = Math.min(crop.height - sy, (box.y - bandTop) * 0.30);   // the top line
+  } else {
+    sx = 0; sw = crop.width;
+    sy = 0; sh = Math.round(crop.height*0.28);
+  }
+  if(sw < 20 || sh < 8) return null;
+  // magnify hard: this is one short line, so the cost is small and the gain large
+  const f = Math.max(2, Math.min(8, 2400/sw));
+  c.width = Math.round(sw*f); c.height = Math.round(sh*f);
+  ctx.filter = 'grayscale(1) contrast(1.45)';
+  ctx.drawImage(crop, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return c;
+}
+
+async function readMaterialLine(crop, box, token){
+  const band = materialBand(crop, box);
+  if(!band) return null;
+  const found = [];
+  try{
+    for(let w=0; w<MAT_WHITELISTS.length; w++){
+      for(const psm of ['7','6']){
+        if(ocrRun !== token) return null;
+        try{ await worker.setParameters({tessedit_pageseg_mode:psm,
+                                         tessedit_char_whitelist:MAT_WHITELISTS[w]}); }catch(_){}
+        const out = await worker.recognize(band);
+        const txt = ((out && out.data && out.data.text) || '').trim();
+        if(!txt) continue;
+        found.push(txt);
+        const toks = txt.toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+        for(let i=0;i<toks.length;i++){
+          const res = resolveMat(toks[i]);
+          if(res.tier === 'confirmed' || res.tier === 'corrected'){
+            return {value:res.value, original:res.original, texts:found};
+          }
+        }
+      }
+    }
+  }finally{
+    // ALWAYS clear the whitelist: leaving it set turns every later read into
+    // digits only, which would quietly break descriptions on the next label.
+    try{ await worker.setParameters({tessedit_char_whitelist:''}); }catch(_){}
+  }
+  return {value:'', original:'', texts:found};
+}
+
 async function scanLabel(){
   if(ocrActive || scanBusy) return;
   if(!vid.videoWidth){ setStatus('Turn the camera on first','busy'); return; }
@@ -1538,6 +1619,22 @@ async function scanLabel(){
       }
     }
     resolveVotes();
+
+    // Material still missing? Read its line on its own, magnified, one line at a
+    // time, digits first.
+    if(!heldField('Mat')){
+      setStatus('Reading the material number\u2026','busy');
+      const ml = await readMaterialLine(crop, lastBarcodeBox, token);
+      if(ocrRun !== token) return;
+      if(ml){
+        if(ml.value){
+          put('Mat', ml.value, 'ocr', null, 0);
+          if(ml.original) session.matOriginal = ml.original;
+        }
+        if(ml.texts && ml.texts.length) texts.push('[material line] ' + ml.texts.join(' / '));
+      }
+    }
+
     lastOcrText = texts.join('\n---\n');
     // Nothing found by field label or by exact token? Then offer the closest
     // master numbers as one-tap suggestions - never applied on their own.
@@ -1832,9 +1929,9 @@ function openReview(proof){
     let cls = f.src==='bc' ? 'src-bc' : (f.src==='ocr' ? 'src-ocr' : '');
     if(MANDATORY.indexOf(col) >= 0) cls += ' req';
     if(bad && MANDATORY.indexOf(col) >= 0) cls += ' flagged';
+    if(f.age > 0) cls += ' aged';
     const row = document.createElement('div');
     row.className = 'field '+cls;
-    if(f.age > 0) cls += ' aged';
     row.innerHTML = '<label>'+col+(f.age>0?' <i>'+f.age+'s</i>':'')+'</label>'
       + '<input data-col="'+col+'" value="'
       + (f.value||'').replace(/"/g,'&quot;') + '" spellcheck="false">';
@@ -1843,7 +1940,6 @@ function openReview(proof){
   review.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
-// tapping a suggestion fills the Material field; it is never filled for you
 // Tapping a suggestion records the operator's CHOICE in the session, not just in
 // the input box: openReview rebuilds the card from the session, so a value only
 // written to `current` would be wiped the moment the card redraws. Recorded as
@@ -1864,14 +1960,6 @@ fieldsEl.addEventListener('input', function(e){
 
 addBtn.addEventListener('click', function(){
   if(!current) return;
-  if(charSuggestions.length && !String(current.Char.value||'').trim()){
-    msgs.push('The Charge was read more than one way and NOTHING was chosen for you. '
-      + 'Read it off the label and tap it:<br>'
-      + charSuggestions.map(function(s){
-          return '<button class="sugg" data-char="'+s.value+'">'+s.value
-               + '<span style="color:var(--ink-dim)"> \u00d7'+s.n+'</span></button>';
-        }).join(' '));
-  }
   const missing = MANDATORY.filter(function(k){ return !String(current[k].value||'').trim(); });
   if(missing.length){
     rnote.className='rnote show bad';
