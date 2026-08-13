@@ -397,6 +397,68 @@ function editDist(a, b, cap){
   return prev[b.length];
 }
 
+// OCR confusion pairs are DETERMINISTIC, not guesses: a printed 0 comes back as
+// O, a 1 as l or I, a 5 as S, an 8 as B. Substituting them and keeping the result
+// ONLY when it lands exactly on a master number is the same controlled-vocabulary
+// principle as the distance-1 repair - it is verified, not invented. If the
+// substituted form is not in the master, it is thrown away and the raw read kept,
+// so a material with genuine letters (C3529120-C, N3060311X) cannot be mangled.
+const CONFUSE = [[/O/g,'0'],[/[IL]/g,'1'],[/S/g,'5'],[/B/g,'8'],[/Z/g,'2'],[/G/g,'6']];
+
+function confusionVariants(s){
+  const out = [s];
+  // all-digits reading: the most common case by far
+  let all = s;
+  CONFUSE.forEach(function(c){ all = all.replace(c[0], c[1]); });
+  if(all !== s) out.push(all);
+  // one substitution at a time, for part numbers that legitimately mix both
+  CONFUSE.forEach(function(c){
+    const v = s.replace(c[0], c[1]);
+    if(v !== s && out.indexOf(v) < 0) out.push(v);
+  });
+  return out;
+}
+
+// A material token as it comes off the page: spaces and stray dots inside the
+// number are OCR artefacts ("300 1195", "3001.195"), a trailing dash is not.
+function cleanMatToken(raw){
+  return String(raw||'').toUpperCase().replace(/[\s.]/g,'').replace(/[^A-Z0-9-]/g,'');
+}
+
+// -> {tier, value, original} - the material actually filed
+function resolveMat(raw){
+  const t = cleanMatToken(raw);
+  if(!t) return {tier:'review', value:'', original:''};
+  if(!MASTER) return {tier:'review', value:t, original:''};
+  if(matIndex.has(t)) return {tier:'confirmed', value:t, original:''};
+
+  const vs = confusionVariants(t);
+  for(let i=1;i<vs.length;i++){
+    if(matIndex.has(vs[i])) return {tier:'corrected', value:vs[i], original:t};
+  }
+  const fx = masterFix(t);                     // then the single-character repair
+  if(fx.tier === 'corrected') return fx;
+  return {tier:'review', value:t, original:''};
+}
+
+// LAST RESORT, AND THE MOST RELIABLE ONE: forget the field labels entirely and
+// look for a master number anywhere in the text. The label may print "Mat.No",
+// "Mat.", or the OCR may mangle the words around the number - but the number
+// itself belongs to a list of 399. EXACT hits only here (after confusion
+// substitution): accepting a near-miss without a field label to anchor it is how
+// a batch number would get filed as a material.
+function matFromTokens(text, exclude){
+  if(!MASTER) return '';
+  const toks = String(text||'').toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+  for(let i=0;i<toks.length;i++){
+    const t = cleanMatToken(toks[i]);
+    if(!t || t === exclude) continue;
+    const vs = confusionVariants(t);
+    for(let v=0;v<vs.length;v++) if(matIndex.has(vs[v])) return vs[v];
+  }
+  return '';
+}
+
 // -> {tier, value, original, near}
 function masterFix(raw){
   const m = normId(raw);
@@ -573,6 +635,7 @@ let nativeDetector=null, autoMode=true, lastBeep=0, worker=null;
 let ocrActive=false, ocrRun=0;
 let gateActive=true;
 let scanBusy=false;          // a still scan is running: the live loop stands down
+let lastOcrText='';          // what the text reader actually returned, for the card
 let rawUnplaced='';          // last code that matched no rule
 let lastRaw='';              // last code seen at all, with its format
 let enhanceTick=0;
@@ -1107,6 +1170,17 @@ async function ensureWorker(silent){
   }
   return worker;
 }
+
+// Tesseract's page segmentation decides how it carves the image into lines, and
+// it is often the difference between reading a line and skipping it entirely.
+// Three passes, three modes, instead of the same mode three times:
+//   6  one uniform block   - the normal case
+//   4  columns of text     - catches "Mat.No   3001195" as label + value
+//   11 sparse text         - finds text the other two miss on a creased bag
+const PSM_PASSES = ['6','4','11'];
+async function setPsm(mode){
+  try{ await worker.setParameters({tessedit_pageseg_mode:mode}); }catch(_){}
+}
 function warmWorker(){ ensureWorker(true).catch(function(){}); }
 
 // A mandatory value only lands once two passes agree, so one blurry misread
@@ -1122,8 +1196,9 @@ function vote(field, value){
   // instead of them cancelling each other out.
   let v = value, orig = '';
   if(field === 'Mat'){
-    const fix = masterFix(value);
-    if(fix.tier === 'corrected'){ v = fix.value; orig = fix.original; }
+    const fix = resolveMat(value);
+    if(fix.value) v = fix.value;
+    if(fix.tier === 'corrected') orig = fix.original;
   }
 
   session.votes[field] = session.votes[field] || {};
@@ -1325,10 +1400,14 @@ async function scanLabel(){
                                      : scaleCanvas(crop, 1, true);
     for(let i=0;i<OCR_PASSES;i++){
       if(ocrRun !== token) return;
+      await setPsm(PSM_PASSES[i % PSM_PASSES.length]);
       const out = await worker.recognize(forOcr);
       if(ocrRun !== token) return;
-      const p = parseOcr((out && out.data && out.data.text) || '');
-      for(const k in p) vote(k, p[k]);
+      const txt = (out && out.data && out.data.text) || '';
+      lastOcrText = txt;                     // kept so the card can show it
+      const p = parseOcr(txt);
+      if(p._matOriginal) session.matOriginal = p._matOriginal;
+      for(const k in p){ if(k.charAt(0) !== '_') vote(k, p[k]); }
       if(MANDATORY.every(function(k){ return session.fields[k]; })) break;
     }
   }catch(e){
@@ -1377,13 +1456,32 @@ function parseOcr(text){
   let r;
 
   // ---- material -----------------------------------------------------------
-  if(r=g(/Mat\.?\s*No\.?\s*[:.]?\s*([A-Z]{0,2}\d{4,}[A-Z0-9-]{0,6})/i)) out.Mat=r.toUpperCase();
-  else if(r=g(/Mat\.?\s*[:.]?\s*([A-Z]{0,2}\d{4,}[A-Z0-9-]{0,6})/i)) out.Mat=r.toUpperCase();
+  // CAPTURE LOOSELY, JUDGE STRICTLY. v6.2 demanded 4+ consecutive DIGITS here, so
+  // one O read for a 0 - the single most common OCR error on these labels - made
+  // the pattern fail outright and the master repair never even ran. Tested: 5 of
+  // 9 realistic corruptions were missed. Now any alphanumeric token is taken and
+  // resolveMat() decides what it is, against the 399 numbers in the master.
+  // The label word itself is also allowed to be mangled: No / Ne / N0 / Nr.
+  const MAT_LABELS = [
+    /Mat[.,]?\s*(?:No|Ne|N0|Nr|N°)[.,:]?\s*([A-Z0-9][A-Z0-9.\- ]{4,16})/i,
+    /Mat[.,]?\s*[:.]?\s*([A-Z0-9][A-Z0-9.\- ]{4,16})/i
+  ];
+  for(let i=0;i<MAT_LABELS.length && !out.Mat;i++){
+    const m = j.match(MAT_LABELS[i]);
+    if(m){
+      const res = resolveMat(m[1]);
+      if(res.value){ out.Mat = res.value; if(res.original) out._matOriginal = res.original; }
+    }
+  }
 
   // ---- charge / batch -----------------------------------------------------
   // MSL prints "Batch 582507"; WAE prints "Char". L-Char is checked separately
   // and must not be allowed to satisfy the Char pattern.
-  if(r=g(/(?:^|\n)\s*Batch\s*[:.]?\s*([0-9OBSIl]{4,8})\b/i)) out.Char=digitFix(r);
+  // "Batch" itself gets mangled - Batoh, Batch., Baich, 8atch. Anchor on "Ba"
+  // plus one t-like character and allow the rest of the word to be anything
+  // short, then digitFix the number. Same principle as the material: capture
+  // loosely, and let the value itself be judged afterwards.
+  if(r=g(/(?:^|\n)\s*[B8]\s*a\s*[t1lI][A-Za-z0-9]{0,3}\s*[.:]?\s*([0-9OBSIlZG]{4,8})\b/i)) out.Char=digitFix(r);
   else if(r=g(/(?:^|\n)\s*[CG]?ha[rl]?\.?\s*[:.]?\s*([0-9OBSIl]{5,7})\b/)) out.Char=digitFix(r);
   if(r=g(/L-?[CG]?ha[rl]?\.?\s*[:.]?\s*([0-9OBSIl]{4,})/)) out['L-Char']=digitFix(r);
 
@@ -1401,11 +1499,13 @@ function parseOcr(text){
 
   // ---- order number -------------------------------------------------------
   // MSL "Prod no 2003721" is the production order -> Auftr, same as WAE.
-  if(r=g(/Prod\.?\s*no\.?\s*[:.]?\s*(\d{4,})/i)) out.Auftr=r;
-  else if(r=g(/Menge:?\s*\n?\s*(\d{3,})/)) out.Auftr=r;
+  // an order number is digits only, so a misread letter can be substituted back
+  // without ambiguity
+  if(r=g(/Prod\.?\s*n[o0][.:]?\s*([0-9OBSIlZG]{4,})/i)) out.Auftr=digitFix(r);
+  else if(r=g(/Menge:?\s*\n?\s*([0-9OBSIlZG]{3,})/)) out.Auftr=digitFix(r);
 
   // ---- quantity + unit ----------------------------------------------------
-  const qm = j.match(/Qty\.?\s*[:.]?\s*(\d+(?:[.,]\d+)?)\s*(PC|PCS|ST|KG|M)\b/i);
+  const qm = j.match(/Q[t1lI]y\.?\s*[:.]?\s*(\d+(?:[.,]\d+)?)\s*(PC|PCS|ST|KG|M)\b/i);
   if(qm){ out.Menge = qm[1].replace(',','.'); out.Einheit = qm[2].toUpperCase(); }
   else {
     if(r=g(/(\d+\.\d{3})\b/)) out.Menge=r;
@@ -1426,6 +1526,13 @@ function parseOcr(text){
   // ---- CH / EQ number ------------------------------------------------------
   if(r=g(/(CH-?\d{5,})/)) out['CH-Nr'] = r.replace(/^CH-?/,'CH-');
   if(r=g(/(EQ-?\d{5,})/)) out['CH-Nr'] = out['CH-Nr'] || r;
+
+  // Still no material? Look for one of the 399 anywhere in the text, ignoring
+  // the field labels completely.
+  if(!out.Mat){
+    const t = matFromTokens(j, out.Char ? normId(out.Char) : '');
+    if(t){ out.Mat = t; out._matByToken = true; }
+  }
 
   return out;
 }
@@ -1546,6 +1653,16 @@ function openReview(proof){
     if(fx.tier==='review')
       msgs.push('<b>'+current.Mat.value+'</b> is not in the master list (tag <b>RV</b>).'
         + (fx.near ? ' Nearest is <b>'+fx.near+'</b> - check the label, this is a hint only.' : ''));
+  }
+  // If a mandatory field is missing after a scan, SHOW THE RAW TEXT. Without it
+  // "it is not reading Mat.No" is unfixable from a distance - with it, the exact
+  // corruption is visible and the pattern can be repaired.
+  const missing = MANDATORY.filter(function(k){ return !String(current[k].value||'').trim(); });
+  if(missing.length && lastOcrText){
+    msgs.push('The text reader saw this &mdash; read it out if the number is wrong:<br>'
+      + '<span style="color:var(--ink-dim)">'
+      + lastOcrText.replace(/</g,'&lt;').replace(/\n/g,' \u00b7 ').slice(0,300)
+      + '</span>');
   }
   const stale = COLS.filter(function(c){ return current[c].age > 0; });
   if(stale.length)
