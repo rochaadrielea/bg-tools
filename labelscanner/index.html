@@ -264,7 +264,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v6.7';
+const VERSION = 'v6.8';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -1092,6 +1092,35 @@ function showRaw(){
     + (placed ? '' : ' &mdash; no rule matched this, so it was NOT filed. Tell Adriele this line.');
 }
 
+// new-label detection v6.8
+// Decide what mandatory-field value an incoming barcode would carry, using the
+// same rules as applyBarcodes but WITHOUT writing anything. If it carries a
+// material or a batch that DIFFERS from the one currently held, the label has
+// changed - so clear the old session first. This kills the "kept the memory of
+// the last label" bug across every format, and covers the single-lone-barcode
+// case with no timer: a new barcode simply resets.
+function barcodeMandatory(s){
+  s = String(s||'').trim();
+  if(/^CH-?\d+$/i.test(s))  return {field:'Char', value:s.replace(/^CH-?/i,'')};
+  if(/^EQ-?\d+$/i.test(s))  return null;                       // EQ is not mandatory
+  if(/^\d{10}$/.test(s))    return null;                       // L-Char
+  if(/^[A-Z]{1,2}\d{4,}[A-Z0-9-]{0,6}$/i.test(s)) return {field:'Mat', value:s.toUpperCase()};
+  if(/^\d{6,7}$/.test(s)){
+    if(MASTER && matIndex.has(normId(s))) return {field:'Mat', value:s.toUpperCase()};
+    if(MASTER) return {field:'Char', value:s};
+  }
+  return null;
+}
+function isNewLabel(codes){
+  for(const c of (codes||[])){
+    const m = barcodeMandatory(c && c.value);
+    if(!m) continue;
+    const held = heldVal(m.field);
+    if(held && normId(held) !== normId(m.value)) return true;   // different mandatory value
+  }
+  return false;
+}
+
 function onCodes(codes, tick){
   // THE BUG THIS GUARD FIXES: during a still scan the label is sitting in front
   // of the camera, so the live loop decodes it, and the "a new label always
@@ -1103,6 +1132,16 @@ function onCodes(codes, tick){
   // A barcode while text is being read means the label moved. The running OCR
   // is abandoned and its findings dropped: a new label always wins.
   if(ocrActive){ ocrRun++; ocrActive=false; scanChip.classList.remove('act'); }
+
+  // v6.8: a barcode carrying a DIFFERENT material or batch than the one held
+  // means a new label is in view - clear the old one before reading this.
+  if(isNewLabel(codes)){
+    try{ stopMaterialVoting(); }catch(_){}
+    try{ stopChargeVoting(); }catch(_){}
+    hideConfirm();
+    resetSession('New label');
+  }
+
   rawUnplaced = '';
   const changed = applyBarcodes(codes, tick);
   showRaw();
@@ -2375,13 +2414,13 @@ async function chargeTick(){
       // run the remaining tries.
       if(bestN >= CHG_LOCK_VOTES){
         stopChargeVoting();
-        openConfirm(heldVal('Mat'), best, checkTag(heldVal('Mat')));
+        confirmWithMaterial(best);
         return;
       }
 
       if(chgTries >= CHG_MAX_TRIES){
         stopChargeVoting();
-        if(best){ openConfirm(heldVal('Mat'), best, checkTag(heldVal('Mat'))); }
+        if(best){ confirmWithMaterial(best); }
         else { setStatus('Charge not read \u2014 add by hand','bad'); openReview(proveSameLabel()); }
         return;
       }
@@ -2400,6 +2439,23 @@ function startChargeVoting(){
 function stopChargeVoting(){
   chgVoteRunning = false;
   clearTimeout(chgVoteTimer);
+}
+
+// confirmWithMaterial v6.8
+// The charge is ready. Before showing the strip, ALWAYS make sure the material
+// is read too - the strip must give back BOTH. If material is missing, fire the
+// still (rotates + reads the Mat / Mat. / at line) once, then open the strip
+// with whatever it found; material blank is allowed but we try hard first.
+async function confirmWithMaterial(charge){
+  if(!heldField('Mat') && !scanBusy && !ocrActive){
+    setStatus('Reading the material too\u2026','busy');
+    await scanLabel();                 // fills Mat if it can (master or RV)
+    // scanLabel may itself open a card/strip; if it already added or opened,
+    // don't double up
+    if(confirmBar.classList.contains('show') || review.classList.contains('show')) return;
+  }
+  const mat = heldVal('Mat');
+  openConfirm(mat, charge, mat ? checkTag(mat) : 'RV');
 }
 
 // ---- the amber confirm strip ------------------------------------------------
