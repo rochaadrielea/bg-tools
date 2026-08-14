@@ -127,6 +127,26 @@
   td.flag{color:var(--warn);}
   .empty{color:var(--ink-dim);font-family:var(--mono);font-size:12px;text-align:center;padding:22px;}
 
+  /* v6.5: compact amber CONFIRM strip. Not the full review card - just the two
+     mandatory values and one button, in a distinct amber so it reads as
+     "look and confirm", different from the green success splash and the red
+     review card. Fires when the Charge was read but has no master to vouch for
+     it, so a human confirms it by eye. */
+  .confirmbar{position:fixed;left:0;right:0;bottom:0;z-index:30;
+    background:#3A2A12;border-top:2px solid var(--warn);
+    padding:14px 16px calc(14px + env(safe-area-inset-bottom));
+    display:none;max-width:640px;margin:0 auto;}
+  .confirmbar.show{display:block;}
+  .confirmbar .cvals{font-family:var(--mono);font-size:16px;color:#FFE9C4;
+    text-align:center;margin:0 0 12px;line-height:1.5;}
+  .confirmbar .cvals b{color:#fff;}
+  .confirmbar .cvals .tag{font-size:12px;color:var(--warn);}
+  .confirmbar .crow{display:grid;grid-template-columns:1fr 2fr;gap:10px;}
+  .confirmbar button{font-family:var(--sans);font-size:16px;font-weight:700;
+    border-radius:11px;padding:15px;cursor:pointer;border:1px solid var(--line);}
+  .confirmbar .cdismiss{background:transparent;color:var(--ink-dim);}
+  .confirmbar .cok{background:var(--warn);color:#241703;border-color:var(--warn);}
+
   .exportbar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 22%);display:flex;gap:10px;max-width:640px;margin:0 auto;}
   .exportbar button{flex:1;}
 </style>
@@ -197,6 +217,14 @@
   </div>
 </div>
 
+<div class="confirmbar" id="confirmBar">
+  <div class="cvals" id="confirmVals"></div>
+  <div class="crow">
+    <button class="cdismiss" id="confirmDismiss">Not this</button>
+    <button class="cok" id="confirmOk">Confirm &amp; add</button>
+  </div>
+</div>
+
 <div class="exportbar">
   <button id="clearBtn" class="ghost">Clear all</button>
   <button id="exportBtn" class="primary">Export .xlsx</button>
@@ -236,7 +264,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v6.4';
+const VERSION = 'v6.5';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -1164,9 +1192,14 @@ function sourceLine(get){
 // written like anything else. A wrong duplicate is now removed with the red
 // cross in the table instead of being prevented.
 function writeRow(row){
-  rows.push(row); saveRows(); renderTable();
+  rows.push(row); saveRows(); renderTable();   // table refreshes instantly
   attemptStart = Date.now();
   hintEl.classList.remove('show');
+  // v6.5: stop every reading loop the moment a row lands, so the finished label
+  // is not read again. resetSession() clears the fields; these stop the timers.
+  try{ stopMaterialVoting(); }catch(_){}
+  try{ stopChargeVoting(); }catch(_){}
+  hideConfirm();
 }
 
 function commit(proof, tag){
@@ -1192,7 +1225,7 @@ function commit(proof, tag){
   resetSession();
   splashOk(row.Mat + '  /  Charge ' + row.Char, tag);
   beep(); setTimeout(beep,140);
-  setTimeout(function(){ hideSplash(); setStatus('Row added \u2014 next label','live'); }, 900);
+  setTimeout(function(){ hideSplash(); restartAfterRow(); }, 900);
 }
 
 function splashOk(txt, tag){
@@ -2186,6 +2219,184 @@ setInterval(function(){
   if(matVoteRunning) return;
   if(review.classList.contains('show')) return;
   if(heldField('Char') && !heldField('Mat')) startMaterialVoting();
+}, 600);
+
+
+
+// ============================================================================
+//  CHARGE BAND VOTING  -  v6.5
+//  ---------------------------------------------------------------------------
+//  WHEN IT RUNS: only when an EQ- barcode has been seen (the WAE / equipment
+//  label) AND the Charge is still empty. The EQ code is the signal that this is
+//  the label whose Charge lives in text, lower-left ("Char. 300603"). On the MSL
+//  label there is no EQ code, so this never fires there - material voting does.
+//
+//  WHY IT NEVER AUTO-ADDS: the Charge has NO master to check it, so a wrong read
+//  is undetectable. After up to CHG_MAX_TRIES stills, the most-seen value is put
+//  in the AMBER CONFIRM STRIP and a human confirms it by eye. One tap adds the
+//  row. The camera is paused while the strip is up so the next label underneath
+//  is not read.
+// ============================================================================
+const CHG_POLL_MS  = 450;
+const CHG_MAX_TRIES = 10;
+
+let chgVoteRunning = false;
+let chgVotes = {};
+let chgTries = 0;
+let chgVoteTimer = null;
+
+const cbCv = document.createElement('canvas');
+const cbCtx = cbCv.getContext('2d', {willReadFrequently:true});
+
+// The charge sits in the LOWER-LEFT of the label ("Char. 300603"). The aim box
+// holds the whole label, so the charge band is roughly the lower third, left
+// two-thirds. Read plain PSM 6 (no whitelist), magnified 3x. parseOcr's Char
+// pattern then pulls the number out of "Char. 300603".
+function grabChargeBand(){
+  const r = reticleRect();
+  if(!r || !vid.videoWidth) return null;
+  const sx = r.x;
+  const sy = r.y + r.h * 0.55;          // lower part of the label
+  const sw = r.w * 0.66;                // left two-thirds
+  const sh = r.h * 0.30;
+  const f = 3;
+  const w = Math.round(sw*f), h = Math.round(sh*f);
+  if(w < 30 || h < 12) return null;
+  if(cbCv.width!==w || cbCv.height!==h){ cbCv.width=w; cbCv.height=h; }
+  cbCtx.filter = 'grayscale(1) contrast(1.35)';
+  cbCtx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, h);
+  return cbCv;
+}
+
+// Does the session hold an EQ code? That is the trigger for charge voting.
+function hasEqCode(){
+  const f = heldField('CH-Nr');
+  return !!(f && /^EQ-?\d+/i.test(String(f.value)));
+}
+
+async function chargeTick(){
+  if(!chgVoteRunning) return;
+  if(!scanning){ stopChargeVoting(); return; }
+  if(heldField('Char')){ stopChargeVoting(); return; }      // already have it
+  if(confirmBar.classList.contains('show')){ chgVoteTimer=setTimeout(chargeTick,CHG_POLL_MS); return; }
+  const busy = scanBusy || ocrActive || review.classList.contains('show');
+  if(busy){ chgVoteTimer=setTimeout(chargeTick,CHG_POLL_MS); return; }
+
+  try{
+    const band = grabChargeBand();
+    if(band){
+      await ensureWorker(true);
+      try{ await worker.setParameters({tessedit_pageseg_mode:'6', tessedit_char_whitelist:''}); }catch(_){}
+      const out = await worker.recognize(band);
+      const raw = ((out && out.data && out.data.text) || '').trim();
+      // reuse the label parser so "Char. 300603" -> Char, digit-fixed
+      const p = parseOcr(raw);
+      let val = p.Char ? digitFix(String(p.Char)) : '';
+      // ignore if it collides with the material/order/lchar already held
+      if(val && val !== normId(heldVal('Mat')) && val !== normId(heldVal('L-Char'))){
+        chgVotes[val] = (chgVotes[val]||0) + 1;
+      }
+      chgTries++;
+
+      // best so far
+      let best='', bestN=0;
+      for(const k in chgVotes){ if(chgVotes[k]>bestN){ bestN=chgVotes[k]; best=k; } }
+      setStatus('Reading charge\u2026 ' + (best ? best+'  (\u00d7'+bestN+')' : 'try '+chgTries+'/'+CHG_MAX_TRIES), 'busy');
+
+      if(chgTries >= CHG_MAX_TRIES){
+        stopChargeVoting();
+        if(best){ openConfirm(heldVal('Mat'), best, checkTag(heldVal('Mat'))); }
+        else { setStatus('Charge not read \u2014 add by hand','bad'); openReview(proveSameLabel()); }
+        return;
+      }
+    }
+  }catch(e){ console.warn('chargeTick', e); }
+  chgVoteTimer = setTimeout(chargeTick, CHG_POLL_MS);
+}
+
+function startChargeVoting(){
+  if(chgVoteRunning) return;
+  chgVoteRunning = true;
+  chgVotes = {}; chgTries = 0;
+  clearTimeout(chgVoteTimer);
+  chgVoteTimer = setTimeout(chargeTick, CHG_POLL_MS);
+}
+function stopChargeVoting(){
+  chgVoteRunning = false;
+  clearTimeout(chgVoteTimer);
+}
+
+// ---- the amber confirm strip ------------------------------------------------
+const confirmBar = document.getElementById('confirmBar');
+const confirmVals = document.getElementById('confirmVals');
+const confirmOk = document.getElementById('confirmOk');
+const confirmDismiss = document.getElementById('confirmDismiss');
+let confirmPending = null;   // {mat, char, tag}
+
+// Show the strip. Camera pauses (scanBusy) so nothing underneath is read while
+// the person looks and confirms.
+function openConfirm(mat, char, tag){
+  confirmPending = {mat:mat, char:char, tag:tag};
+  confirmVals.innerHTML = '<b>'+String(mat).replace(/</g,'&lt;')+'</b>'
+    + '  /  Charge <b>'+String(char).replace(/</g,'&lt;')+'</b>'
+    + '  <span class="tag">['+tag+']</span>';
+  confirmBar.classList.add('show');
+  scanBusy = true;                       // freeze the reading loops
+  setStatus('Confirm the charge','busy');
+}
+function hideConfirm(){
+  confirmBar.classList.remove('show');
+  confirmPending = null;
+}
+
+confirmOk.addEventListener('click', function(){
+  if(!confirmPending) return;
+  // write the charge into the session, then commit like any confirmed row
+  put('Char', confirmPending.char, 'ocr', null, 0);
+  const row = {};
+  COLS.forEach(function(c){ const f=heldField(c); row[c] = f ? f.value : ''; });
+  row.Source = sourceLine(function(c){ const f=heldField(c); return f ? f.src : ''; })
+             + (session.matOriginal ? '  (Mat read as '+session.matOriginal+', corrected against master)' : '');
+  row.Proof  = 'charge confirmed by user';
+  row.Check  = confirmPending.tag;
+  scanBusy = false;
+  hideConfirm();
+  if(!row.Mat || !row.Char){ resetSession('Missing a value \u2014 scan again'); return; }
+  writeRow(row);
+  resetSession();
+  splashOk(row.Mat + '  /  Charge ' + row.Char, row.Check);
+  beep(); setTimeout(beep,140);
+  setTimeout(function(){ hideSplash(); restartAfterRow(); }, 900);
+});
+
+confirmDismiss.addEventListener('click', function(){
+  scanBusy = false;
+  hideConfirm();
+  resetSession('Cleared \u2014 point at the label again');
+  restartAfterRow();
+});
+
+// ---- restart the camera / reading state after a row is added ----------------
+// The tool used to keep grinding on the just-finished label. This gives it a
+// clean slate: stop the loops, clear the session, refocus the camera so the
+// next label is read fresh.
+function restartAfterRow(){
+  try{ stopMaterialVoting(); }catch(_){}
+  try{ stopChargeVoting(); }catch(_){}
+  resetSession();
+  if(track){ try{ track.applyConstraints({advanced:[{focusMode:'continuous'}]}); }catch(_){} }
+  setStatus('Point at ONE label','live');
+}
+
+// ---- re-arm the two voting loops from one pulse -----------------------------
+// Material voting: batch in, material not.  (unchanged trigger)
+// Charge voting:   EQ code in, charge not.
+setInterval(function(){
+  if(!scanning) return;
+  if(review.classList.contains('show')) return;
+  if(confirmBar.classList.contains('show')) return;
+  if(!matVoteRunning && heldField('Char') && !heldField('Mat')) startMaterialVoting();
+  if(!chgVoteRunning && hasEqCode() && !heldField('Char')) startChargeVoting();
 }, 600);
 
 
