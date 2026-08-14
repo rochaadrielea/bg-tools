@@ -264,7 +264,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v6.6';
+const VERSION = 'v6.7';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -1657,7 +1657,7 @@ async function scanLabel(){
     // time, digits first.
     if(!heldField('Mat')){
       setStatus('Reading the material number\u2026','busy');
-      const ml = await readMaterialLine(crop, lastBarcodeBox, token);
+      const ml = await readMaterialLine(crop, null, token);
       if(ocrRun !== token) return;
       if(ml){
         if(ml.value){
@@ -1665,6 +1665,22 @@ async function scanLabel(){
           if(ml.original) session.matOriginal = ml.original;
         }
         if(ml.texts && ml.texts.length) texts.push('[material line] ' + ml.texts.join(' / '));
+      }
+    }
+
+    // RV material from the still (v6.7): the line reader only returns master-valid
+    // values. A P-part is not in the master, so pull it from the parsed label text
+    // instead - parseOcr already captured "Mat. P2006000-001" as an RV value.
+    if(!heldField('Mat')){
+      for(let ti=0; ti<texts.length && !heldField('Mat'); ti++){
+        const pr = parseOcr(texts[ti]);
+        if(pr.Mat){
+          const rr = resolveMat(pr.Mat);
+          if(rr.value && /^[A-Z]{1,2}[0-9]/.test(rr.value) && rr.value.length>=6){
+            put('Mat', rr.value, 'ocr', null, 0);
+            if(rr.original) session.matOriginal = rr.original;
+          }
+        }
       }
     }
 
@@ -1686,10 +1702,17 @@ async function scanLabel(){
   }finally{
     scanBusy = false;
     if(ocrRun === token){ ocrActive=false; scanChip.classList.remove('act'); }
-    // IN THE FINALLY, NOT AFTER IT. Every `return` inside the try above exited
-    // the function and skipped this, so a scan that gave up early left the
-    // operator with nothing on screen and nothing in the table. Whatever the
-    // scan managed to read, the card now always opens so it can be completed
+    // v6.7: if the scan got BOTH mandatory values, decide how to finish:
+    //  - material master-valid + proof ok -> let evaluate() auto-add
+    //  - material RV (not in master) -> amber confirm strip, one tap
+    //  - otherwise -> the full card
+    if(heldField('Mat') && heldField('Char')){
+      const tag = checkTag(heldVal('Mat'));
+      if(tag === 'RV'){ openConfirm(heldVal('Mat'), heldVal('Char'), 'RV'); return; }
+      const proof = proveSameLabel();
+      if(proof.ok && autoMode && MASTER){ evaluate(); return; }
+    }
+    // Whatever the scan managed to read, the card opens so it can be completed
     // by hand - the whole point of pressing the button.
     openReview(proveSameLabel());
   }
@@ -1733,8 +1756,11 @@ function parseOcr(text){
   // resolveMat() decides what it is, against the 399 numbers in the master.
   // The label word itself is also allowed to be mangled: No / Ne / N0 / Nr.
   const MAT_LABELS = [
-    /Mat[.,]?\s*(?:No|Ne|N0|Nr|N°)[.,:]?\s*([A-Z0-9][A-Z0-9.\- ]{4,16})/i,
-    /Mat[.,]?\s*[:.]?\s*([A-Z0-9][A-Z0-9.\- ]{4,16})/i
+    // v6.7: the leading M is often misread on a tilted label (V/N/H for M), so
+    // anchor on "at" plus an optional first letter, then No/Nr/etc. Capture
+    // loosely; resolveMat judges the value against the master afterwards.
+    /\b[MVNH]?at[.,]?\s*(?:No|Ne|N0|Nr|N°)[.,:]?\s*([A-Z0-9][A-Z0-9.\- ]{4,16})/i,
+    /\b[MVNH]?at[.,]?\s*[:.]?\s*([A-Z0-9][A-Z0-9.\- ]{4,16})/i
   ];
   for(let i=0;i<MAT_LABELS.length && !out.Mat;i++){
     const m = j.match(MAT_LABELS[i]);
@@ -2097,6 +2123,8 @@ clearBtn.addEventListener('click', function(){
 const MAT_POLL_MS   = 450;   // gap between material stills
 const MAT_LOCK_VOTES = 2;    // agreeing master-valid reads needed to file
 const MAT_MAX_TRIES  = 10;   // stills with no winner -> open the card
+const MAT_STILL_AFTER = 4;   // quick band failed this many times -> fire the still Scan (v6.7)
+let matStillFired = false;   // one auto-still per session
 
 let matVoteRunning = false;
 let matVotes = {};           // master-valid value -> count
@@ -2205,6 +2233,18 @@ async function materialTick(){
         }
       }
 
+      // AUTO-STILL (v6.7): the quick horizontal band is defeated by a tilted
+      // label. After a few misses, fire the real Scan-label still ONCE - it
+      // rotates 0/90/180/270 and reads the material line properly, which is how
+      // "take the picture like we normally do" is meant to happen automatically.
+      if(!matStillFired && matTries >= MAT_STILL_AFTER && !scanBusy && !ocrActive){
+        matStillFired = true;
+        stopMaterialVoting();
+        setStatus('Taking a photo to read the material\u2026','busy');
+        scanLabel();          // handles RV -> confirm strip, master -> auto, else card
+        return;
+      }
+
       // GIVE UP -> card with the closest master numbers as buttons
       if(matTries >= MAT_MAX_TRIES){
         stopMaterialVoting();
@@ -2227,7 +2267,7 @@ async function materialTick(){
 function startMaterialVoting(){
   if(matVoteRunning) return;
   matVoteRunning = true;
-  matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = [];
+  matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matStillFired = false;
   clearTimeout(matVoteTimer);
   matVoteTimer = setTimeout(materialTick, MAT_POLL_MS);
 }
