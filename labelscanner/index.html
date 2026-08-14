@@ -2239,6 +2239,7 @@ setInterval(function(){
 // ============================================================================
 const CHG_POLL_MS  = 450;
 const CHG_MAX_TRIES = 10;
+const CHG_LOCK_VOTES = 2;   // two identical charge reads -> show confirm strip now
 
 let chgVoteRunning = false;
 let chgVotes = {};
@@ -2302,6 +2303,14 @@ async function chargeTick(){
       let best='', bestN=0;
       for(const k in chgVotes){ if(chgVotes[k]>bestN){ bestN=chgVotes[k]; best=k; } }
       setStatus('Reading charge\u2026 ' + (best ? best+'  (\u00d7'+bestN+')' : 'try '+chgTries+'/'+CHG_MAX_TRIES), 'busy');
+
+      // EARLY LOCK: two stills agree on the same charge -> confirm now, do not
+      // run the remaining tries.
+      if(bestN >= CHG_LOCK_VOTES){
+        stopChargeVoting();
+        openConfirm(heldVal('Mat'), best, checkTag(heldVal('Mat')));
+        return;
+      }
 
       if(chgTries >= CHG_MAX_TRIES){
         stopChargeVoting();
