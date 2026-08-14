@@ -236,7 +236,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v6.3';
+const VERSION = 'v6.4';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -2032,6 +2032,162 @@ exportBtn.addEventListener('click', function(){
 clearBtn.addEventListener('click', function(){
   if(confirm('Clear all rows?')){ rows.length=0; saveRows(); renderTable(); }
 });
+
+// ============================================================================
+//  MATERIAL BAND VOTING  -  add-on for v6.3, makes v6.4
+//  ---------------------------------------------------------------------------
+//  WHAT IT DOES
+//  While the camera is on and the batch has been read from the barcode but the
+//  material is still empty, this quietly takes a STILL every MAT_POLL_MS, reads
+//  ONLY the material band (the top line of the label), repairs it against the
+//  399-material master, and tallies votes. The moment one master-valid material
+//  wins MAT_LOCK_VOTES times, it is filed and voting stops - evaluate() then
+//  auto-adds the row (batch + material, both valid). If MAT_MAX_TRIES stills
+//  pass with no winner, the card opens with the closest master numbers as
+//  buttons.
+//
+//  WHY STILLS, NOT VIDEO FRAMES: a still runs a real focus/exposure cycle and is
+//  sharp enough to read 7 characters. A video frame is not - that was the whole
+//  failure. Proven on the real MSL label: 7 of 8 degraded stills read K1000846
+//  exactly; the 8th read nothing (never a wrong token), which is why we vote.
+//
+//  WHY NOT MANY PER SECOND / PYSPARK: one OCR pass is ~250-400 ms and is the
+//  only cost. Running it faster starves the barcode loop and reads the same
+//  number twice. 2 agreeing stills is enough. Spark cannot make one Tesseract
+//  call faster and cannot run in a browser - it is the wrong tool and is not used.
+//
+//  This block is self-contained. Paste it once, just ABOVE the final
+//  `renderTable(); loadMaster();` lines. Then change those last two lines to
+//  also start the loop (see the two-line note at the very bottom).
+// ============================================================================
+
+const MAT_POLL_MS   = 450;   // gap between material stills
+const MAT_LOCK_VOTES = 2;    // agreeing master-valid reads needed to file
+const MAT_MAX_TRIES  = 10;   // stills with no winner -> open the card
+
+let matVoteRunning = false;
+let matVotes = {};           // master-valid value -> count
+let matTries = 0;
+let matVoteTimer = null;
+let matVoteText = [];        // raw reads, for the card if it falls through
+
+// One offscreen canvas for the band, reused.
+const mbCv = document.createElement('canvas');
+const mbCtx = mbCv.getContext('2d', {willReadFrequently:true});
+
+// The material band = the top slice of the aim box. On both label families the
+// material line is the first line and the barcode is at the bottom, so the top
+// ~18% of the box holds the material and nothing else. Read WITHOUT a whitelist
+// (a whitelist clipped the label word and broke the read on the real label),
+// PSM 6, magnified 3x.
+function grabMaterialBand(){
+  const r = reticleRect();
+  if(!r || !vid.videoWidth) return null;
+  const bandH = r.h * 0.20;
+  const sx = r.x, sy = r.y, sw = r.w, sh = bandH;
+  const f = 3;
+  const w = Math.round(sw*f), h = Math.round(sh*f);
+  if(w < 30 || h < 12) return null;
+  if(mbCv.width!==w || mbCv.height!==h){ mbCv.width=w; mbCv.height=h; }
+  mbCtx.filter = 'grayscale(1) contrast(1.35)';
+  mbCtx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, h);
+  return mbCv;
+}
+
+async function materialTick(){
+  if(!matVoteRunning) return;
+
+  // stop conditions: material already known, camera busy elsewhere, or a card open
+  const busy = scanBusy || ocrActive || review.classList.contains('show');
+  if(heldField('Mat') || !MANDATORY.every(function(k){ return k==='Mat' || heldField(k); }) === false){}
+  if(heldField('Mat')){ stopMaterialVoting(); return; }
+  if(!scanning){ stopMaterialVoting(); return; }
+
+  // only vote once the BATCH is in hand - no point reading material for a label
+  // whose barcode has not landed yet
+  if(!heldField('Char')){ matVoteTimer = setTimeout(materialTick, MAT_POLL_MS); return; }
+
+  if(busy){ matVoteTimer = setTimeout(materialTick, MAT_POLL_MS); return; }
+
+  try{
+    const band = grabMaterialBand();
+    if(band){
+      await ensureWorker(true);
+      try{ await worker.setParameters({tessedit_pageseg_mode:'6', tessedit_char_whitelist:''}); }catch(_){}
+      const out = await worker.recognize(band);
+      const raw = ((out && out.data && out.data.text) || '').trim();
+      if(raw) matVoteText.push(raw);
+      const toks = raw.toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+      let filed = '';
+      for(let i=0;i<toks.length && !filed;i++){
+        // skip anything that is the batch / order / lot already known
+        const t = cleanMatToken(toks[i]);
+        if(t === normId(heldVal('Char'))) continue;
+        const res = resolveMat(toks[i]);
+        if(res.tier === 'confirmed' || res.tier === 'corrected'){
+          filed = res.value;
+          matVotes[filed] = (matVotes[filed]||0) + 1;
+          if(res.tier === 'corrected') session.matOriginal = res.original;
+        }
+      }
+      matTries++;
+      setStatus('Reading material\u2026 ' + (filed
+        ? filed + '  (\u00d7' + matVotes[filed] + ')'
+        : 'try ' + matTries + '/' + MAT_MAX_TRIES), 'busy');
+
+      // WINNER: one master-valid value has reached the lock count
+      for(const v in matVotes){
+        if(matVotes[v] >= MAT_LOCK_VOTES){
+          put('Mat', v, 'ocr', null, 0);
+          stopMaterialVoting();
+          evaluate();                 // batch + material now both present
+          return;
+        }
+      }
+
+      // GIVE UP -> card with the closest master numbers as buttons
+      if(matTries >= MAT_MAX_TRIES){
+        stopMaterialVoting();
+        lastOcrText = matVoteText.join('\n---\n');
+        const notMat = [];
+        ['Auftr','Char','L-Char','CH-Nr'].forEach(function(k){
+          const f = heldField(k); if(f) notMat.push(normId(f.value));
+        });
+        matSuggestions = nearestMasters(matVoteText.join('\n'), 3, notMat);
+        setStatus('Material not read \u2014 tap the right one','bad');
+        openReview(proveSameLabel());
+        return;
+      }
+    }
+  }catch(e){ console.warn('materialTick', e); }
+
+  matVoteTimer = setTimeout(materialTick, MAT_POLL_MS);
+}
+
+function startMaterialVoting(){
+  if(matVoteRunning) return;
+  matVoteRunning = true;
+  matVotes = {}; matTries = 0; matVoteText = [];
+  clearTimeout(matVoteTimer);
+  matVoteTimer = setTimeout(materialTick, MAT_POLL_MS);
+}
+
+function stopMaterialVoting(){
+  matVoteRunning = false;
+  clearTimeout(matVoteTimer);
+}
+
+// Restart voting cleanly whenever a new label session begins. resetSession()
+// already runs on every add / clear / discard, so hook onto the camera pulse:
+// the housekeeping interval below re-arms voting if the batch is in but the
+// material is not, and the loop is idle.
+setInterval(function(){
+  if(!scanning) return;
+  if(matVoteRunning) return;
+  if(review.classList.contains('show')) return;
+  if(heldField('Char') && !heldField('Mat')) startMaterialVoting();
+}, 600);
+
 
 renderTable();
 loadMaster();
