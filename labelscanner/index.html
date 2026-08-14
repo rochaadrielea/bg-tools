@@ -264,7 +264,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v6.5';
+const VERSION = 'v6.6';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -2100,6 +2100,7 @@ const MAT_MAX_TRIES  = 10;   // stills with no winner -> open the card
 
 let matVoteRunning = false;
 let matVotes = {};           // master-valid value -> count
+let matRvVotes = {};         // cleanly-read but NOT-in-master value -> count (v6.6)
 let matTries = 0;
 let matVoteTimer = null;
 let matVoteText = [];        // raw reads, for the card if it falls through
@@ -2161,6 +2162,18 @@ async function materialTick(){
           filed = res.value;
           matVotes[filed] = (matVotes[filed]||0) + 1;
           if(res.tier === 'corrected') session.matOriginal = res.original;
+        } else if(res.tier === 'review' && res.value){
+          // RV material path v6.6: read cleanly but not in the master. A P-part
+          // (safety sheet, bushing) is still a real material. Tally it
+          // separately; two agreeing reads -> amber confirm strip, tagged RV.
+          // Must look like a real material (a letter then digits), not a stray
+          // word, and must not be the batch/order already held.
+          const rv = res.value;
+          if(/^[A-Z]{1,2}[0-9]/.test(rv) && rv.length>=6
+             && rv !== normId(heldVal('Char')) && rv !== normId(heldVal('Auftr'))
+             && rv !== normId(heldVal('L-Char'))){
+            matRvVotes[rv] = (matRvVotes[rv]||0) + 1;
+          }
         }
       }
       matTries++;
@@ -2174,6 +2187,20 @@ async function materialTick(){
           put('Mat', v, 'ocr', null, 0);
           stopMaterialVoting();
           evaluate();                 // batch + material now both present
+          return;
+        }
+      }
+
+      // RV WINNER (v6.6): a not-in-master material read the same twice. File it,
+      // tag RV, and hand it to the amber confirm strip for one human tap - a
+      // material with no master to vouch for it is confirmed by eye, exactly
+      // like the charge. Needs the Charge in hand (the barcode gives it on the
+      // MSL label) so the strip can show both.
+      for(const v in matRvVotes){
+        if(matRvVotes[v] >= MAT_LOCK_VOTES && heldField('Char')){
+          put('Mat', v, 'ocr', null, 0);
+          stopMaterialVoting();
+          openConfirm(v, heldVal('Char'), 'RV');
           return;
         }
       }
@@ -2200,7 +2227,7 @@ async function materialTick(){
 function startMaterialVoting(){
   if(matVoteRunning) return;
   matVoteRunning = true;
-  matVotes = {}; matTries = 0; matVoteText = [];
+  matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = [];
   clearTimeout(matVoteTimer);
   matVoteTimer = setTimeout(materialTick, MAT_POLL_MS);
 }
