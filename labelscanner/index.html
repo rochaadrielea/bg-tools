@@ -282,7 +282,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v7.0';
+const VERSION = 'v7.2';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -545,7 +545,7 @@ function fixRevChar(raw){
 // ============================================================================
 let session = newSession();
 let attemptStart = Date.now();
-function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:''}; }
+function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}}; }
 
 function resetSession(reason){
   matSuggestions = [];
@@ -807,17 +807,28 @@ async function nativeLoop(){
       let cv = scanBusy ? null : drawCrop(1,false);
       if(cv){
         let codes = await nativeDetector.detect(cv);
+        let boxScale = 1;
         fails = 0;
         if((!codes || !codes.length) && (++enhanceTick % ENHANCE_EVERY === 0)){
           const en = drawCrop(2,true);
-          if(en) codes = await nativeDetector.detect(en);
+          // The enhanced crop is drawn at 2x, so every box the detector returns
+          // is in 2x pixels. LATENT BUG FOUND v7.2: those boxes were handed on
+          // unscaled, so boxesCohere() compared a 2x box against a 1x one and
+          // the new revision band would have been aimed at twice its distance.
+          // Bring them back to crop pixels before anything uses them.
+          if(en){ codes = await nativeDetector.detect(en); boxScale = 2; }
         }
         if(codes && codes.length){
           frameTick++;
           lastRaw = (codes[0].rawValue||'').trim()
                   + (codes[0].format ? '  ['+codes[0].format+']' : '');
           onCodes(codes.map(function(c){
-            return {value:(c.rawValue||'').trim(), box:c.boundingBox||null};
+            let b = c.boundingBox || null;
+            if(b && boxScale !== 1){
+              b = {x:b.x/boxScale, y:b.y/boxScale,
+                   width:b.width/boxScale, height:b.height/boxScale};
+            }
+            return {value:(c.rawValue||'').trim(), box:b};
           }), frameTick);
         }
       }
@@ -924,13 +935,50 @@ clearChip.addEventListener('click', function(){
 });
 
 // ============================================================================
+//  WHICH LABEL FAMILY AM I LOOKING AT?  -  decided from the barcodes alone
+//  ---------------------------------------------------------------------------
+//  A CH- or EQ- barcode exists ONLY on the WAE / ZPP family. That single fact
+//  removes the ambiguity that used to need the master list, and it is available
+//  before any text has been read.
+//
+//  The signal is looked for in the CURRENT code set AND in the session, because
+//  the native detector often returns one code per frame - the CH- code may have
+//  landed a frame before the material code, or a frame after it.
+// ============================================================================
+function waeSignal(codes){
+  // SIGNAL 1 - TWO BARCODES. Adriele's rule, and the plain physical fact:
+  // the WAE / ZPP label prints two codes (material on the left, CH- or EQ- on
+  // the right). The MSL label prints one. Counting them identifies the family
+  // before a single character has been read, and it keeps working when the
+  // CH-/EQ- code is the one that will not decode.
+  // Codes accumulate across frames in the session, because the native detector
+  // usually returns one code per frame.
+  let seen = Object.keys(session.codes || {}).length;
+  for(const c of (codes||[])){
+    const v = String((c && c.value) || '').trim();
+    if(v && !(session.codes && session.codes[v])) seen++;
+  }
+  if(seen >= 2) return true;
+
+  // SIGNAL 2 - a CH- or EQ- code exists ONLY on this family, so one is enough.
+  const f = heldField('CH-Nr');
+  if(f && /^(CH|EQ)-?\d/i.test(String(f.value))) return true;
+  for(const c of (codes||[])){
+    if(/^(CH|EQ)-?\d+$/i.test(String((c && c.value) || '').trim())) return true;
+  }
+  return false;
+}
+
+// ============================================================================
 //  BARCODE RULES
 //  Order matters and is deliberate: most specific first.
 // ============================================================================
 function applyBarcodes(codes, tick){
   let changed = false;
+  const wae = waeSignal(codes);
   for(const c of codes){
     const s = (c.value||'').trim(); if(!s) continue;
+    session.codes[s] = 1;                 // for the two-barcode family test
     const box = c.box;
 
     // CH-884843 -> CH-Nr, and the digits ARE the Charge
@@ -956,15 +1004,34 @@ function applyBarcodes(codes, tick){
       continue;
     }
 
-    // A BARE 6-7 DIGIT NUMBER IS AMBIGUOUS. On a WAE label it is the material;
-    // on the MSL label it is the BATCH. Digit count cannot separate them.
-    // THE MASTER CAN: in the master -> material; not in it -> charge.
+    // A BARE 6-7 DIGIT NUMBER IS AMBIGUOUS BY ITSELF. On a WAE label it is the
+    // material; on the MSL label it is the BATCH. Digit count cannot separate
+    // them - but THE LABEL CAN, and it tells us before any text is read:
+    //
+    //   a CH- or EQ- barcode in view  ->  this is a WAE label  ->  MATERIAL
+    //   no such barcode               ->  MSL family           ->  ask the master
+    //
+    // v7.0 BUG THIS FIXES: the old rule asked the master FIRST. A material that
+    // is not in the master (a loose item from another assembly - which is most
+    // of them) therefore fell through to "it must be the batch", and the
+    // MATERIAL BARCODE WAS FILED AS THE CHARGE. Material then looked missing,
+    // so the tool started taking still photographs of a number it had already
+    // read perfectly. On the CH- labels it was worse: the charge was already
+    // held from the CH- code, so the material arrived as a SECOND, different
+    // charge and raised a two-labels-in-view conflict on a single clean label.
+    //
+    // The master no longer decides the FIELD, only whether the value is ML or
+    // RV - which is all it was ever qualified to judge.
     if(/^\d{6,7}$/.test(s)){
-      if(MASTER && matIndex.has(normId(s))){
+      if(wae){
+        changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
+      } else if(MASTER && matIndex.has(normId(s))){
         changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
       } else if(MASTER){
         changed = put('Char', s,'bc',box,tick) || changed;
       } else {
+        // no master and no family signal: refuse to guess, show it, let the
+        // operator place it by hand
         rawUnplaced = s;
         changed = false;
       }
@@ -987,21 +1054,26 @@ function showRaw(){
 
 // new-label detection: decide what mandatory value an incoming barcode would
 // carry, WITHOUT writing anything. Different value -> the label changed.
-function barcodeMandatory(s){
+// It MUST use the same family rule as applyBarcodes, or the two disagree about
+// which field a bare-digit code belongs to and the session gets cleared (or
+// kept) for the wrong reason.
+function barcodeMandatory(s, wae){
   s = String(s||'').trim();
   if(/^CH-?\d+$/i.test(s))  return {field:'Char', value:s.replace(/^CH-?/i,'')};
   if(/^EQ-?\d+$/i.test(s))  return null;
   if(/^\d{10}$/.test(s))    return null;
   if(/^[A-Z]{1,2}\d{4,}[A-Z0-9-]{0,6}$/i.test(s)) return {field:'Mat', value:s.toUpperCase()};
   if(/^\d{6,7}$/.test(s)){
+    if(wae) return {field:'Mat', value:s.toUpperCase()};
     if(MASTER && matIndex.has(normId(s))) return {field:'Mat', value:s.toUpperCase()};
     if(MASTER) return {field:'Char', value:s};
   }
   return null;
 }
 function isNewLabel(codes){
+  const wae = waeSignal(codes);
   for(const c of (codes||[])){
-    const m = barcodeMandatory(c && c.value);
+    const m = barcodeMandatory(c && c.value, wae);
     if(!m) continue;
     const held = heldVal(m.field);
     if(held && normId(held) !== normId(m.value)) return true;
@@ -1014,8 +1086,9 @@ function isNewLabel(codes){
 // on the label already in the table. Cleared as soon as a different one shows.
 function isJustConfirmed(codes){
   if(!lastConfirmed) return false;
+  const wae = waeSignal(codes);
   for(const c of (codes||[])){
-    const m = barcodeMandatory(c && c.value);
+    const m = barcodeMandatory(c && c.value, wae);
     if(!m) continue;
     if(normId(m.value) === normId(lastConfirmed[m.field])) return true;
   }
@@ -1091,7 +1164,7 @@ function evaluate(){
   // call evaluate() again when they finish or give up.
   if(isWae() && !heldField('Rev') && revTries < REV_MAX_TRIES && scanning){
     startRevVoting();
-    setStatus('Reading the revision\u2026','busy');
+    setStatus('Reading the revision\u2026 (' + revTries + '/' + REV_MAX_TRIES + ')','busy');
     return;
   }
 
@@ -1275,6 +1348,43 @@ async function setPsm(mode){
   try{ await worker.setParameters({tessedit_pageseg_mode:mode}); }catch(_){}
 }
 function warmWorker(){ ensureWorker(true).catch(function(){}); }
+
+// ============================================================================
+//  ONE BAND READ AT A TIME  -  v7.2, and this is why the Revision never read
+//  ---------------------------------------------------------------------------
+//  There are three voting loops and ONE Tesseract worker. Each loop used to do
+//  setParameters() then recognize() on its own. Those are separate awaits, so
+//  two loops in flight interleave:
+//
+//      setParameters(PSM 7 + letter whitelist)   <- revision
+//      setParameters(PSM 6 + no whitelist)       <- material
+//      recognize(revision band)                  <- runs with the WRONG settings
+//
+//  The revision band was being read as a paragraph with no whitelist. It could
+//  not have worked. The loops themselves are fine and stay exactly as they are
+//  - what they needed was a queue, so a band's settings are guaranteed to be
+//  the ones in force when its own recognize runs.
+//
+//  Every read also CLEARS the whitelist afterwards, so a leftover digits-only
+//  setting can never silently break the next label's description.
+// ============================================================================
+let bandQueue = Promise.resolve();
+
+function bandRead(psm, whitelist, canvas){
+  const job = bandQueue.then(async function(){
+    await ensureWorker(true);
+    try{ await worker.setParameters({tessedit_pageseg_mode: psm,
+                                     tessedit_char_whitelist: whitelist || ''}); }catch(_){}
+    try{
+      const out = await worker.recognize(canvas);
+      return ((out && out.data && out.data.text) || '').trim();
+    } finally {
+      try{ await worker.setParameters({tessedit_char_whitelist:''}); }catch(_){}
+    }
+  });
+  bandQueue = job.then(function(){}, function(){});   // the queue never breaks
+  return job;
+}
 
 function vote(field, value){
   if(!value) return;
@@ -2226,7 +2336,7 @@ clearBtn.addEventListener('click', function(){
 // ============================================================================
 const MAT_POLL_MS    = 450;
 const MAT_LOCK_VOTES = 2;
-const MAT_DEEP_AFTER = 3;    // quick band misses -> escalate to the deep scan
+const MAT_DEEP_AFTER = 6;    // quick band misses -> escalate to the deep scan
 const MAT_MAX_TRIES  = 10;   // absolute ceiling before the card opens
 
 let matVoteRunning = false;
@@ -2270,10 +2380,7 @@ async function materialTick(){
   try{
     const band = grabMaterialBand();
     if(band){
-      await ensureWorker(true);
-      try{ await worker.setParameters({tessedit_pageseg_mode:'6', tessedit_char_whitelist:''}); }catch(_){}
-      const out = await worker.recognize(band);
-      const raw = ((out && out.data && out.data.text) || '').trim();
+      const raw = await bandRead('6','',band);
       if(raw) matVoteText.push(raw);
       const toks = raw.toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
       let filed = '';
@@ -2320,6 +2427,12 @@ async function materialTick(){
       }
 
       // ESCALATE. This is the "try harder" step: full still, four rotations.
+      // v7.2: it must NOT fire while the revision is still being read - the
+      // still freezes every loop, and Adriele saw the camera reach for a photo
+      // the moment the charge landed, killing the revision read before it had
+      // taken a single look. The material barcode is also still being tried by
+      // the live loop, so patience here costs nothing.
+      if(revVoteRunning){ matVoteTimer = setTimeout(materialTick, MAT_POLL_MS); return; }
       if(!matDeepFired && matTries >= MAT_DEEP_AFTER){
         matDeepFired = true;
         stopMaterialVoting();
@@ -2385,7 +2498,7 @@ function stopMaterialVoting(){
 //  strip with the Revision shown blank, which is the operator's cue to look.
 // ============================================================================
 const REV_POLL_MS   = 450;
-const REV_MAX_TRIES = 5;
+const REV_MAX_TRIES = 8;
 const REV_LOCK_VOTES = 2;
 
 let revVoteRunning = false;
@@ -2396,15 +2509,52 @@ let revVoteTimer = null;
 const rbCv = document.createElement('canvas');
 const rbCtx = rbCv.getContext('2d', {willReadFrequently:true});
 
+// WHERE THE REVISION IS, MEASURED OFF THE REAL LABELS
+// ---------------------------------------------------------------------------
+// v7.1 cut a slice out of the AIM BOX. That only works if the label fills the
+// box - hold the phone further back and the slice lands on the table. The
+// revision is not at a fixed place in the frame, it is at a fixed place ON THE
+// LABEL: below and to the right of the CH- / EQ- barcode.
+//
+// So the band is anchored to that barcode's own box, which the decoder already
+// gives us and the session already stores. Because every offset is expressed in
+// barcode-widths and barcode-heights, the band tracks the label at ANY distance
+// and any zoom - it scales with the thing it is measured from.
+//
+// Measured on both uploaded labels (3001280 Rev B, 3003689 Rev A):
+//   across  0.8 to 2.9 barcode-widths right of the barcode's left edge
+//   down    1.1 to 4.0 barcode-heights below the barcode's top edge
+// Those ranges cover "Rev." and its letter on both, with the wider label
+// (the doubler) and the narrower one (the spacer) both comfortably inside.
+//
+// With no barcode box - the compatibility reader gives no positions on some
+// phones - it falls back to the old reticle slice, which is better than nothing.
 function grabRevBand(){
   const r = reticleRect();
   if(!r || !vid.videoWidth) return null;
-  const sx = r.x + r.w * 0.62;        // right-hand third, with a little overlap
-  const sy = r.y + r.h * 0.25;
-  const sw = r.w * 0.38;
-  const sh = r.h * 0.25;
-  const f = 4;                        // one short line: magnify hard, costs little
-  const w = Math.round(sw*f), h = Math.round(sh*f);
+
+  let sx, sy, sw, sh;
+  const f = heldField('CH-Nr');
+  const b = f && f.box;
+  if(b && b.width > 8 && b.height > 4){
+    // box coords are crop pixels; the crop starts at the reticle origin
+    const bx = r.x + b.x, by = r.y + b.y;
+    const x1 = bx + b.width * 0.80, x2 = bx + b.width * 2.90;
+    const y1 = by + b.height * 1.10, y2 = by + b.height * 4.00;
+    sx = Math.max(r.x, x1);
+    sy = Math.max(r.y, y1);
+    sw = Math.min(r.x + r.w, x2) - sx;
+    sh = Math.min(r.y + r.h, y2) - sy;
+  } else {
+    sx = r.x + r.w * 0.62;
+    sy = r.y + r.h * 0.25;
+    sw = r.w * 0.38;
+    sh = r.h * 0.25;
+  }
+  if(sw < 12 || sh < 6) return null;
+
+  const f2 = 4;                       // one short line: magnify hard, costs little
+  const w = Math.round(sw*f2), h = Math.round(sh*f2);
   if(w < 30 || h < 12) return null;
   if(rbCv.width!==w || rbCv.height!==h){ rbCv.width=w; rbCv.height=h; }
   rbCtx.filter = 'grayscale(1) contrast(1.5)';
@@ -2425,15 +2575,12 @@ async function revTick(){
   try{
     const band = grabRevBand();
     if(band){
-      await ensureWorker(true);
       // PSM 7 = one line. The whitelist keeps letters and the digits that
       // repair into letters, and drops the punctuation that turns "Rev. B"
-      // into a two-token mess.
-      try{ await worker.setParameters({tessedit_pageseg_mode:'7',
-        tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.'}); }catch(_){}
-      const out = await worker.recognize(band);
-      try{ await worker.setParameters({tessedit_char_whitelist:''}); }catch(_){}
-      const raw = ((out && out.data && out.data.text) || '').trim();
+      // into a two-token mess. bandRead guarantees these settings are the ones
+      // in force when THIS recognize runs.
+      const raw = await bandRead('7',
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.', band);
 
       let rv = '';
       const p = parseOcr(raw);
@@ -2544,10 +2691,7 @@ async function chargeTick(){
   try{
     const band = grabChargeBand();
     if(band){
-      await ensureWorker(true);
-      try{ await worker.setParameters({tessedit_pageseg_mode:'6', tessedit_char_whitelist:''}); }catch(_){}
-      const out = await worker.recognize(band);
-      const raw = ((out && out.data && out.data.text) || '').trim();
+      const raw = await bandRead('6','',band);
       const p = parseOcr(raw);
 
       // the serial rides along on the same band, voted like any optional field
@@ -2620,8 +2764,14 @@ setInterval(function(){
   if(confirmBar.classList.contains('show')) return;
   if(!matVoteRunning && heldField('Char') && !heldField('Mat')) startMaterialVoting();
   if(!chgVoteRunning && hasEqCode() && !heldField('Char')) startChargeVoting();
+  // v7.2: the revision used to wait for Mat AND Char. On the EQ label the
+  // Charge comes from TEXT, which takes seconds - so the revision was locked
+  // out for the whole time the label was in front of the camera, and by the
+  // time it was allowed to start the label had usually gone. It now starts as
+  // soon as the label is identified as WAE and anything at all has been read
+  // off it, and runs alongside the charge instead of behind it.
   if(!revVoteRunning && !heldField('Rev') && revTries < REV_MAX_TRIES
-     && isWae() && heldField('Mat') && heldField('Char')) startRevVoting();
+     && isWae() && (heldField('Mat') || heldField('Char'))) startRevVoting();
 }, 600);
 
 renderTable();
