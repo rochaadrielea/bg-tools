@@ -297,7 +297,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v8.0';
+const VERSION = 'v8.1';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -1857,16 +1857,28 @@ function bandRead(psm, whitelist, canvas){
 //  falls back to the shared queue above. Slower, still correct.
 // ============================================================================
 // The revision is a CAPITAL. Always. Rev. A / B / C / D ...
-// v7.4: the whitelist used to include lowercase AND digits, which let Tesseract
-// return 'b' for B and '8' for B and made every read compete with itself -
-// Adriele: "revision is reading super bad". Restricting it to capitals means
-// the engine CANNOT return a lowercase letter or a digit; it must choose one of
-// 26 capitals. Same controlled-vocabulary principle that makes the material
-// number trustworthy, applied to the smallest vocabulary on the label.
-// The dot stays so the word "Rev." survives as an anchor.
-// REV_FIX is still the safety net for the whole-crop path, where no whitelist
-// is applied and an 8 or a 4 can still come back.
-const REV_WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ.';
+// v7.4 restricted the whitelist to capitals - the engine cannot return a
+// lowercase letter or a digit, it must choose a capital. Same controlled-
+// vocabulary principle that makes the material number trustworthy, applied to
+// the smallest vocabulary on the label.
+//
+// v8.1 SHRINKS THE VOCABULARY FURTHER. Adriele: "the revision is confusing a
+// lot, A=I and B=R". I is exactly the shape a poorly-resolved A collapses to,
+// and revision letters do not use it: engineering drawing practice skips
+// I, O and Q precisely because they are unreadable against 1, 0 and O. Taking
+// them out of the whitelist means the engine CANNOT answer I - so the most
+// common way an A goes wrong is closed off at the source rather than repaired
+// afterwards. 23 letters instead of 26, and three fewer wrong answers to pick.
+//
+// If a revision letter I, O or Q ever does turn up on a real label, put them
+// back in REV_LETTERS and the rest of the tool needs no change.
+const REV_LETTERS   = 'ABCDEFGHJKLMNPRSTUVWXYZ';   // no I, no O, no Q
+const REV_WHITELIST = REV_LETTERS + '.';
+
+// How hard the revision band is magnified. It is one short line, so the cost is
+// small and the gain is large: B and R differ only in the bottom-right corner,
+// and that corner needs pixels to exist at all.
+const REV_ZOOM = 6;
 
 const BAND_CFG = {
   // Capitals, digits, dash, dot. Lowercase is what turned "Mat.No 3001195"
@@ -3182,29 +3194,45 @@ function grabRevBand(){
   const f = heldField('CH-Nr');
   const b = f && f.box;
   if(b && b.width > 8 && b.height > 4){
-    // box coords are crop pixels; the crop starts at the reticle origin
+    // v8.1: TIGHTER. The old band ran 1.1 to 4.0 barcode-heights down, which
+    // swallowed "Verfallsdatum:" and whatever sat under it - three lines for
+    // Tesseract to lay out when only one of them matters. Measured on both real
+    // labels the revision line sits between 1.6 and 2.4 barcode-heights down,
+    // so the band is now 1.50 to 2.60: the line itself, with a margin, and
+    // little else. Less to read, read much bigger.
     const bx = r.x + b.x, by = r.y + b.y;
-    const x1 = bx + b.width * 0.80, x2 = bx + b.width * 2.90;
-    const y1 = by + b.height * 1.10, y2 = by + b.height * 4.00;
+    const x1 = bx + b.width * 0.85, x2 = bx + b.width * 3.10;
+    const y1 = by + b.height * 1.50, y2 = by + b.height * 2.60;
     sx = Math.max(r.x, x1);
     sy = Math.max(r.y, y1);
     sw = Math.min(r.x + r.w, x2) - sx;
     sh = Math.min(r.y + r.h, y2) - sy;
   } else {
-    sx = r.x + r.w * 0.62;
-    sy = r.y + r.h * 0.25;
-    sw = r.w * 0.38;
-    sh = r.h * 0.25;
+    sx = r.x + r.w * 0.58;
+    sy = r.y + r.h * 0.26;
+    sw = r.w * 0.42;
+    sh = r.h * 0.20;
   }
   if(sw < 12 || sh < 6) return null;
 
-  const f2 = 4;                       // one short line: magnify hard, costs little
-  const w = Math.round(sw*f2), h = Math.round(sh*f2);
+  const w = Math.round(sw*REV_ZOOM), h = Math.round(sh*REV_ZOOM);
   if(w < 30 || h < 12) return null;
   if(rbCv.width!==w || rbCv.height!==h){ rbCv.width=w; rbCv.height=h; }
-  rbCtx.filter = 'grayscale(1) contrast(1.5)';
+  rbCtx.filter = 'grayscale(1) contrast(1.6)';
   rbCtx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, h);
   return rbCv;
+}
+
+// Pull the revision letter out of whatever the band came back with.
+function extractRev(raw){
+  const p = parseOcr(raw);
+  if(p.Rev) return p.Rev;
+  // With capitals forced, "Rev." arrives as "REV." - strip the word, and a lone
+  // capital left standing in the band is the revision.
+  const m = String(raw||'').toUpperCase().replace(/[^A-Z ]/g,' ')
+              .replace(/\bREV\b|\bVERFALLSDATUM\b|\bPES\b|\bWAE\b/g,' ')
+              .match(/(?:^|\s)([A-Z])(?:\s|$)/);
+  return m ? fixRevChar(m[1]) : '';
 }
 
 async function revTick(){
@@ -3227,23 +3255,37 @@ async function revTick(){
       // small block and the pattern picks the revision out of whatever lines
       // come back.
       if(!bandChanged('rev', band)){ revVoteTimer = setTimeout(revTick, REV_POLL_MS); return; }
-      const raw = await readBand('rev', band);
+
+      // ====================================================================
+      //  TWO PREPROCESSINGS MUST AGREE BEFORE A VOTE IS CAST  -  v8.1
+      //  ------------------------------------------------------------------
+      //  This is the real fix for A-read-as-I and B-read-as-R. Those are not
+      //  random errors: they happen when the glyph is genuinely ambiguous in
+      //  that frame, and they are exactly the reads that FLIP when the image
+      //  is processed differently. B and R differ only in the bottom-right
+      //  corner - contrast-stretching and hard black-and-white resolve that
+      //  corner differently whenever it is marginal.
+      //
+      //  So the same picture is read twice, contrast and Otsu black-and-white.
+      //  Agree -> the glyph is unambiguous in this frame -> one vote.
+      //  Differ -> the frame cannot settle it -> NO VOTE, and the look is
+      //  spent instead. A disagreement is information: it says "do not trust
+      //  this frame", and acting on it is much stronger than repairing the
+      //  answer afterwards.
+      // ====================================================================
+      let bw = null;
+      try{ bw = binarise(band); }catch(_){}
+      const rawA = await readBand('rev', band);
+      const rawB = bw ? await readBand('rev', bw) : '';
       revLooks++;
 
+      const a = extractRev(rawA);
+      const bChar = bw ? extractRev(rawB) : a;
       let rv = '';
-      const p = parseOcr(raw);
-      if(p.Rev) rv = p.Rev;
-      if(!rv){
-        // With capitals forced, "Rev." reads as "REV." - strip the word, then a
-        // lone capital left in the band is the revision. Words are ignored: a
-        // single letter standing on its own is the only thing accepted.
-        const m = raw.toUpperCase().replace(/[^A-Z ]/g,' ')
-                     .replace(/\bREV\b|\bVERFALLSDATUM\b|\bPES\b|\bWAE\b/g,' ')
-                     .match(/(?:^|\s)([A-Z])(?:\s|$)/);
-        if(m) rv = fixRevChar(m[1]);
-      }
+      if(a && bChar && a === bChar) rv = a;          // both agree: one vote
+      else if(a && !bw) rv = a;                       // no second view available
 
-      // A read that recognised nothing is silence, not a vote.
+      // A read that recognised nothing, or two views that disagree, is silence.
       if(rv){
         revVotes[rv] = (revVotes[rv]||0) + 1;
         revTries++;
