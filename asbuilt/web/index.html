@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>As-Built Tracker</title>
+<link rel="icon" href="data:,">
+<style>
+/* two themes, switched on <body>. Fonts are all already on the machine —
+   nothing is downloaded, so this works offline and behind the proxy. */
+:root{
+  --ok:#3E7D57;     /* matched still reads calmest, but no longer washed out */
+  --miss:#B33A2B;
+  --short:#9A5F14;
+  --rev:#8A7118;
+  --extra:#3E4F86;
+  --ok-bd:#BCD9C7; --ok-bg:#F1F8F3;
+}
+body.dark{
+  /* CARBON — pure black + white accent */
+  --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --bg:#000000;
+  --panel:#111111;
+  --ink:#E8E8EA;
+  --muted:#B8B8BE;
+  --dim:#7A7A82;
+  --line:#2A2A2A; --line2:#1E1E1E;
+  --accent:#FFFFFF; --accent2:#F5F5F5;
+  --head:#151515; --headtx:#B8B8BE;
+  --band:#111111;
+  --radius:10px; --chipr:20px;
+  --track:#2A2A2A; --fill:linear-gradient(90deg,#FFFFFF,#4ADE80);
+  --warn:#F59E0B; --good:#4ADE80;
+  --sideA-bg:#1F1810; --sideA-hd:#2E2418; --sideA-tx:#F5B04A;
+  --sideB-bg:#101E15; --sideB-hd:#17301F; --sideB-tx:#6EE0A0;
+}
+body.dark .card>h3 .sub{color:rgba(255,255,255,.62);font-weight:400}
+body.dark .newunit{background:#111;border-bottom-color:#2A2A2A}
+body.dark .newunit .msg{color:#F5B04A} body.dark .newunit .msg b{color:#FFD68A}
+body.dark .newunit input{background:#000;color:var(--ink);border-color:#2A2A2A}
+body.dark .newunit button{background:#fff;color:#000}
+body.dark .statusline{background:#111;border:1px solid #2A2A2A;
+  border-left:3px solid var(--warn);color:var(--ink)}
+/* verdicts brighten on dark so they still catch the eye */
+body.dark .vd.v-ok   {color:#5AC48A}
+body.dark .vd.v-miss {color:#F87171}
+body.dark .vd.v-short{color:#F5B04A}
+body.dark .vd.v-rev,body.dark .vd.v-batch{color:#E6D14F}
+body.dark .vd.v-extra{color:#93A8FF}
+/* the "no data" hatch on empty stations needs to sit on dark */
+body.dark .chainstep.empty{background:repeating-linear-gradient(45deg,transparent,transparent 6px,#22314A 6px,#22314A 12px)}
+body.dark .chainstep.flag{background:#3A1A1A;border-top-color:#F87171}
+body.dark .chainstep.flag .st-b{color:#F87171}
+body.dark .newunit{background:#3B2A17;border-color:#4A3620}
+body.dark .newunit .msg{color:#F5B04A}
+body.dark .newunit .msg b{color:#FFD68A}
+body.dark input,body.dark select{background:#22314A;color:var(--ink);border-color:var(--line)}
+body.dark .idchip{background:var(--band);color:var(--muted);border-color:var(--line)}
+body.dark .idchip b{color:var(--ink)}
+body.light{
+  /* CORPORATE BLUE — Beyond Gravity register */
+  --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --bg:#F4F8FC; --panel:#fff;
+  --ink:#1B2733;         /* main text */
+  --muted:#3E5065;       /* labels, help text */
+  --dim:#8A9BAB;         /* very-secondary only */
+  --line:#C9D8E6; --line2:#E1EAF2;
+  --accent:#2E75B6; --accent2:#1F4E79;
+  --head:#1F4E79; --headtx:#FFFFFF;         /* navy header on cards */
+  --band:#EAF3FB;
+  --radius:10px; --chipr:20px;
+  --track:#DDEAF5; --fill:linear-gradient(90deg,#2E75B6,#3FB56B);
+  --warn:#B54708; --good:#1E7E45;
+  --sideA-bg:#FFF6EC; --sideA-hd:#FCEBD9; --sideA-tx:#7A4A0F;
+  --sideB-bg:#F0F8F3; --sideB-hd:#DFEFE6; --sideB-tx:#255F38;
+}
+/* the "No unit yet" banner in this palette — peach on cream */
+body.light .newunit{background:#FDEDE0;border-bottom-color:#F3C7A0}
+body.light .newunit .msg{color:#8A3E0B} body.light .newunit .msg b{color:#5C2A08}
+body.light .newunit input{background:#fff;color:var(--ink);border-color:#C9D8E6}
+/* the "Nothing uploaded" status strip — quiet blue with an amber left rail */
+body.light .statusline{background:#EAF3FB;border:1px solid #C9D8E6;
+  border-left:3px solid var(--warn);color:var(--ink)}
+/* helper text inside the navy card header — light so it reads on navy */
+body.light .card>h3{color:#FFFFFF!important}
+body.light .card>h3 .sub{color:rgba(255,255,255,.85)!important;font-weight:400}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font);color:var(--ink);background:var(--bg);font-size:13.5px;
+  letter-spacing:-.005em}
+h1,h2,h3,h4{margin:0;font-weight:650}
+button,select,input{font-family:inherit;font-size:14px}
+
+.top{background:var(--panel);color:var(--ink);padding:16px 20px 12px;
+  border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.top h1{font-size:19px}
+.top .sub{font-size:12.5px;color:var(--muted)}
+.top .sp{flex:1}
+.themebtn{border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  border-radius:var(--chipr);padding:4px 11px;font-size:12px;cursor:pointer;font-family:var(--font)}
+.themebtn.on{border-color:var(--accent);color:var(--accent)}
+.chipbar{display:flex;gap:8px;flex-wrap:wrap;padding:11px 20px;background:var(--panel);
+  border-bottom:1px solid var(--line)}
+.idchip{border:1px solid var(--line);border-radius:var(--chipr);padding:4px 11px;
+  font-size:11.5px;background:var(--band);color:var(--muted)}
+.idchip b{margin-left:6px;color:var(--ink);font-weight:650}
+.wrap{padding:16px 18px 70px;max-width:1720px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  margin-bottom:16px;overflow:hidden}
+.card>h3{background:var(--head);color:var(--ink);font-size:13px;padding:10px 14px;
+  border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
+.card>h3 .sub{font-weight:400;color:var(--muted);font-size:12px}
+.card .body{padding:14px}
+.btn{background:var(--accent);color:#fff;border:0;padding:7px 13px;border-radius:var(--chipr);
+  cursor:pointer;font-weight:600;font-family:var(--font)}
+.btn.ghost{background:var(--panel);color:var(--muted);border:1px solid var(--line)}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
+.btn.sm{padding:3px 9px;font-size:12px}
+
+/* ---------- chain of custody ---------- */
+.chain{overflow-x:auto;overflow-y:visible;padding:6px 4px 8px;min-height:200px}
+.stations{display:flex;min-width:1180px;position:relative;width:100%}
+.st{flex:1;text-align:center;position:relative;padding:0 2px}
+.st .box{width:46px;height:46px;margin:0 auto;border:1.5px solid var(--line);
+  border-radius:var(--radius);display:flex;align-items:center;justify-content:center;
+  background:var(--panel);font-size:18px;color:var(--dim);cursor:pointer}
+.st.has .box{border-color:var(--accent);color:var(--accent)}
+.st.frontier .box{box-shadow:0 0 0 4px var(--band);border-color:var(--warn);color:var(--warn)}
+.st .nm{font-size:11.5px;font-weight:650;margin-top:7px;color:var(--dim)}
+.st.has .nm{color:var(--ink)}
+.st .src{font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);margin-top:2px}
+.st.has .src{color:var(--muted)}
+.st .up{margin-top:5px}
+.st .up button{border:1px solid var(--line);background:var(--panel);color:var(--dim);
+  border-radius:var(--chipr);padding:2px 9px;font-size:10.5px;cursor:pointer;font-family:var(--font)}
+.st.has .up button{border-color:var(--ok-bd);color:var(--ok);background:var(--ok-bg)}
+
+.track{position:relative;height:58px;min-width:1180px;margin-top:14px;overflow:visible}
+.track .rail{position:absolute;left:0;right:0;top:15px;height:4px;background:var(--track);border-radius:2px}
+.track .done{position:absolute;left:0;top:15px;height:4px;border-radius:2px;background:var(--fill)}
+.gap{position:absolute;top:0;transform:translateX(-50%);text-align:center;cursor:pointer}
+.gap .bub{width:28px;height:28px;border-radius:var(--chipr);display:flex;align-items:center;
+  justify-content:center;font-size:11.5px;font-weight:600;border:2px solid var(--bg);
+  background:var(--dim);color:#fff}
+.gap.ok .bub{background:var(--good)}
+.gap.warn .bub{background:var(--warn)}
+.gap.bad .bub{background:var(--miss)}
+.gap.off .bub{background:var(--track);color:var(--dim)}
+.gap.sel .bub{outline:2px solid var(--accent);outline-offset:2px}
+.gap .lb{font-size:10.5px;color:var(--muted);white-space:nowrap;letter-spacing:.02em;text-align:center;position:absolute;left:50%;top:26px;transform:translate(-50%,0)}
+.gap:nth-child(even) .lb{top:44px}   /* stagger — even-indexed labels drop a row so they don't collide */
+.statusline{margin-top:26px;padding:11px 14px;border:1px solid var(--line);
+  border-left:3px solid var(--warn);border-radius:var(--radius);background:var(--band);
+  font-size:12.5px;color:var(--muted)}
+.statusline b{color:var(--ink);font-weight:650}
+
+/* ---------- comparison ---------- */
+.cmphead{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:13px 14px;
+  border-bottom:1px solid var(--line2)}
+.cmphead h4{font-size:15px}
+.cmphead .arrow{color:var(--muted)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.chip{border:1px solid var(--line);border-radius:var(--chipr);padding:3px 11px;font-size:11.5px;
+  cursor:pointer;background:var(--panel);color:var(--muted);font-family:var(--font)}
+.chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.chip i{font-style:normal;font-weight:650;margin-left:6px;opacity:.75}
+
+.tablewrap{overflow:auto;max-height:560px}
+table{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px;white-space:nowrap}
+th{position:sticky;top:0;background:var(--head);color:var(--headtx);text-align:left;
+  padding:7px 9px;font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;
+  font-weight:600;z-index:2;border-bottom:1px solid var(--line)}
+th.band-a{background:var(--sideA-hd);color:var(--sideA-tx)}
+th.band-b{background:var(--sideB-hd);color:var(--sideB-tx)}
+th.band-v{color:var(--muted)}
+td{padding:6px 9px;border-bottom:1px solid var(--line2);max-width:240px;overflow:hidden;
+  text-overflow:ellipsis}
+tbody tr:hover{background:var(--band)}
+td.rn{color:var(--dim);text-align:right;position:sticky;left:0;background:var(--panel);
+  border-right:1px solid var(--line2)}
+td.a{background:var(--sideA-bg)}
+td.b{background:var(--sideB-bg)}
+tbody tr:hover td.a{background:var(--sideA-hd)}
+tbody tr:hover td.b{background:var(--sideB-hd)}
+td.divider,th.divider{border-left:2px solid var(--panel)}
+td.num{text-align:right}
+.vd{font-weight:700;font-size:12.5px;letter-spacing:.01em;white-space:nowrap}
+.vd.v-ok{color:var(--ok)}
+.vd.v-miss{color:var(--miss)}
+.vd.v-short{color:var(--short)}
+.vd.v-rev,.vd.v-batch{color:var(--rev)}
+.vd.v-extra{color:var(--extra)}
+.rowcount{padding:9px 14px;font-size:11.5px;color:var(--dim);border-top:1px solid var(--line)}
+.note{background:var(--band);border:1px solid var(--line);border-left:3px solid var(--warn);
+  border-radius:var(--radius);padding:10px 13px;font-size:12px;margin:12px;color:var(--muted)}
+.note b{color:var(--ink)}
+.pill{display:inline-block;background:var(--band);border:1px solid var(--line);
+  border-radius:var(--chipr);padding:1px 9px;font-size:11px;color:var(--muted)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--dim);padding:9px 14px;
+  border-bottom:1px solid var(--line2)}
+.sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+
+.tabs{display:flex;gap:0;padding:0 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:12px 18px;
+  font-family:var(--font);font-size:14px;color:var(--muted);cursor:pointer;font-weight:500}
+.tabs button:hover{color:var(--ink)}
+.tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.view{display:none}
+.view.on{display:block}
+.tracebar{display:grid;grid-template-columns:180px 200px 200px 200px 140px 140px auto auto;
+  gap:10px;align-items:end;padding:14px}
+.tracebar label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;letter-spacing:.03em;text-transform:uppercase}
+.tracebar input,.tracebar select{width:100%;padding:7px 10px;border:1px solid var(--line);
+  border-radius:var(--chipr);font-family:var(--font);font-size:13px;color:var(--ink);background:var(--panel)}
+.tracebar input:focus,.tracebar select:focus{outline:0;border-color:var(--accent)}
+.trace-note{padding:0 14px 6px;font-size:12px;color:var(--muted)}
+.unit-card{border:1px solid var(--line);border-radius:var(--radius);margin:12px 14px;background:var(--panel)}
+.unit-hd{display:flex;align-items:baseline;gap:12px;padding:10px 14px;background:var(--head);
+  border-bottom:1px solid var(--line);border-radius:var(--radius) var(--radius) 0 0}
+.unit-hd b{font-size:15px}
+.unit-hd .meta{color:var(--muted);font-size:12px}
+.unit-hd .none{color:var(--miss);font-size:12px;margin-left:auto}
+.chainrow{display:flex;padding:12px 14px;gap:0;overflow-x:auto}
+.chainstep{flex:1;min-width:100px;padding:8px 6px;border-right:1px dashed var(--line2);text-align:center}
+.chainstep:last-child{border-right:0}
+.chainstep .st-nm{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.chainstep .st-qty{font-size:20px;font-weight:600;margin:4px 0 2px;color:var(--ink)}
+.chainstep .st-b{font-size:11px;color:var(--muted);word-break:break-word}
+.chainstep.empty .st-qty{color:var(--dim);font-weight:400}
+.chainstep.empty{background:repeating-linear-gradient(45deg,transparent,transparent 6px,var(--band) 6px,var(--band) 12px)}
+.chainstep.flag{background:#FCF3F1;border-top:2px solid var(--miss)}
+.chainstep.flag .st-b{color:var(--miss);font-weight:600}
+.emptyresult{padding:14px;color:var(--muted);text-align:center}
+.trace-hits{padding:6px 14px 4px;font-size:12px;color:var(--muted)}
+
+
+.newunit{padding:14px 18px;background:#FDEDE0;border-bottom:1px solid var(--line);
+  display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.newunit .msg{font-size:13px;color:#8A5312;flex-basis:100%;margin-bottom:2px}
+.newunit .msg b{color:#5C3606}
+.newunit .fld{display:flex;flex-direction:column;gap:3px}
+.newunit label{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.newunit input{padding:6px 10px;border:1px solid var(--line);border-radius:var(--chipr);
+  font-family:var(--font);font-size:13px;background:var(--panel);min-width:150px}
+.newunit input:focus{outline:0;border-color:var(--accent)}
+.newunit input.req{border-color:var(--warn)}
+
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>As-Built Tracker</h1>
+  <span class="sub">Every part followed from stock to work-order close. The line reaches as far as the uploads do.</span>
+  <span class="sp"></span>
+  <button class="themebtn on" id="th_light" onclick="setTheme('light')">Light</button>
+  <button class="themebtn" id="th_dark" onclick="setTheme('dark')">Dark</button>
+</div>
+
+<div class="chipbar" id="chipbar"></div>
+
+<div class="newunit" id="newunit" style="display:none">
+  <div class="msg"><b>No unit yet.</b> A unit is what all the uploads attach to (one equipment, one build). Create it first, then click a station to upload its file.</div>
+  <div class="fld"><label>Equipment no</label><input id="nu_eq" class="req" placeholder="10427449"></div>
+  <div class="fld"><label>Serial</label><input id="nu_sn" placeholder="A6015"></div>
+  <div class="fld"><label>Order</label><input id="nu_ord" placeholder="294527"></div>
+  <div class="fld"><label>Sach-Nr</label><input id="nu_sach" placeholder="3000288 Rev B"></div>
+  <div class="fld"><label>Product</label><input id="nu_prod" placeholder="A6L Loose Items"></div>
+  <div class="fld"><label>&nbsp;</label><button class="btn" onclick="createUnit()">Create unit</button></div>
+</div>
+
+<input type="file" id="picker" accept=".xlsx,.xlsm,.xls" style="display:none">
+
+<div class="tabs">
+  <button class="on" id="tab_chain" onclick="showView('chain')">Chain of custody</button>
+  <button id="tab_trace" onclick="showView('trace')">Trace</button>
+</div>
+
+<div class="view on" id="view_chain">
+<div class="wrap">
+
+  <div class="card">
+    <h3>Chain of custody <span class="sub">click a station to upload its export · click a bubble to open that comparison</span></h3>
+    <div class="body">
+      <div class="chain">
+        <div class="stations" id="stations"></div>
+        <div class="track" id="track"></div>
+      </div>
+      <div class="statusline" id="statusline"></div>
+    </div>
+  </div>
+
+  <div class="card" id="cmpcard">
+    <h3 id="cmptitle">Comparison</h3>
+    <div class="cmphead" id="cmphead"></div>
+    <div class="legend">
+      <span><span class="vd v-ok">Matched</span> &nbsp;as expected</span>
+      <span><span class="vd v-miss">Missing</span> &nbsp;expected, not present</span>
+      <span><span class="vd v-short">Short qty</span> &nbsp;fewer than expected</span>
+      <span><span class="vd v-rev">Revision differs</span> &nbsp;/ batch not recorded</span>
+      <span><span class="vd v-extra">Extra</span> &nbsp;present, not expected</span>
+    </div>
+    <div class="tablewrap"><table id="cmptbl"></table></div>
+    <div class="rowcount" id="cmpcount"></div>
+  </div>
+
+  <div class="card">
+    <h3>Checkpoints <span class="sub">a checkpoint is a row in the database, not code — adding or retiring one needs no rebuild</span></h3>
+    <div class="body" id="admin"></div>
+  </div>
+
+</div>
+
+</div><!-- /view_chain -->
+
+<div class="view" id="view_trace">
+  <div class="wrap">
+    <div class="card">
+      <h3>Trace <span class="sub">where has this material, batch or serial been across the chain?</span></h3>
+      <div class="tracebar">
+        <div><label>Project</label>
+          <select id="tr_project"><option value="">every project</option></select></div>
+        <div><label>Material</label>
+          <input id="tr_material" placeholder="e.g. C3529124-C"></div>
+        <div><label>Batch</label>
+          <input id="tr_batch" placeholder="e.g. 288-018 or 288018A"></div>
+        <div><label>Serial</label>
+          <input id="tr_serial" placeholder="e.g. VGC-009"></div>
+        <div><label>Date from</label>
+          <input id="tr_from" type="date"></div>
+        <div><label>Date to</label>
+          <input id="tr_to" type="date"></div>
+        <div><label>&nbsp;</label>
+          <button class="btn" onclick="doTrace()">Trace</button></div>
+        <div><label>&nbsp;</label>
+          <button class="btn ghost" onclick="clearTrace()">Clear</button></div>
+      </div>
+      <div class="trace-note">
+        Separators and case don't matter: <code>288-018</code>, <code>288.018</code>, <code>288 018</code> all match <code>288018</code>.
+        A suffix stays: <code>288018-A</code> stays distinct from <code>288018</code> — a re-cert lot is a different lot.
+      </div>
+      <div id="trace_result"></div>
+    </div>
+  </div>
+</div>
+
+
+
+<script>
+
+let STATE=null, GATE=null, SELGAP=null, FILTER='ALL', UNIT=null;
+
+async function api(path, opts){
+  const r=await fetch(path, opts);
+  const ct=r.headers.get('content-type')||'';
+  const body=ct.includes('json') ? await r.json() : null;
+  if(!r.ok) throw new Error((body&&body.error)||(r.status+' '+r.statusText));
+  return body;
+}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function q(u){ return UNIT? (u.includes('?')?'&':'?')+'unit_id='+UNIT : ''; }
+
+async function load(){
+  STATE=await api('api/state'+(UNIT?'?unit_id='+UNIT:''));
+  if(STATE.unit) UNIT=STATE.unit.id;
+  if(SELGAP && !(STATE.gates.find(g=>g.key===SELGAP&&g.ready))) SELGAP=null;
+  draw();
+}
+
+/* ---------- header ---------- */
+function renderChips(){
+  const el=document.getElementById('chipbar');
+  document.getElementById('newunit').style.display = STATE.unit ? 'none' : 'flex';
+  if(!STATE.unit){ el.innerHTML='<span class="idchip">No unit yet</span>'; return; }
+  const u=STATE.unit;
+  let h=`<span class="idchip">Order <b>${esc(u.order_no||'—')}</b></span>
+    <span class="idchip">Equipment <b>${esc(u.equipment_no)}</b></span>
+    <span class="idchip">Serial <b>${esc(u.serial||'—')}</b></span>
+    <span class="idchip">Sach-Nr <b>${esc(u.sach_nr||'—')}</b></span>
+    <span class="idchip">Product <b>${esc(u.product||'—')}</b></span>`;
+  if(STATE.units.length>1){
+    h+=`<select class="themebtn" onchange="UNIT=+this.value;SELGAP=null;load()">`+
+      STATE.units.map(x=>`<option value="${x.id}" ${x.id===UNIT?'selected':''}>${esc(x.equipment_no)} · ${esc(x.serial||'')}</option>`).join('')+
+      `</select>`;
+  }
+  h+=`<span style="flex:1"></span><span class="idchip">build <b>${esc(STATE.version)}</b></span>`;
+  el.innerHTML=h;
+}
+
+/* ---------- chain ---------- */
+function renderChain(){
+  const host=document.getElementById('stations'); host.innerHTML='';
+  const sts=STATE.stations, n=sts.length;
+  const fi=sts.findIndex(s=>STATE.frontier&&s.id===STATE.frontier.id);
+  sts.forEach((s,i)=>{
+    const d=document.createElement('div');
+    d.className='st'+(s.uploaded?' has':'')+(i===fi?' frontier':'');
+    d.innerHTML=`<div class="box" title="${s.uploaded?esc(s.filename)+' · '+s.rows_loaded+' rows':'nothing uploaded'}">${esc(s.icon)}</div>
+      <div class="nm">${esc(s.name)}</div><div class="src">${esc(s.source)}</div>
+      <div class="up"><button>${s.uploaded?'✓ '+s.uploaded_at:'⤒ upload'}</button></div>`;
+    d.querySelector('.up button').onclick=()=>pickFile(s.key,s.name);
+    host.appendChild(d);
+  });
+
+  const track=document.getElementById('track');
+  const pct = fi<0 ? 0 : ((fi+0.5)/n)*100;
+  let html=`<div class="rail"></div><div class="done" style="width:${pct}%"></div>`;
+  STATE.gates.forEach(g=>{
+    const ia=sts.findIndex(s=>'station:'+s.key===g.expected_ref);
+    const ib=sts.findIndex(s=>'station:'+s.key===g.present_ref);
+    // a gate against a BOM sits just before its present station
+    const idx = ib<0 ? -1 : (ia<0 ? ib-0.5 : (ia+ib)/2);
+    if(idx<0) return;
+    const x=((idx+0.5)/n)*100;
+    const c=g.counts;
+    let cls='gap '+(!g.ready?'off':(c.ATTENTION? (c.ATTENTION>3?'bad':'warn') : 'ok'));
+    if(SELGAP===g.key) cls+=' sel';
+    html+=`<div class="${cls}" style="left:${x}%" data-gate="${esc(g.key)}">
+      <div class="bub">${g.ready?c.ATTENTION:'·'}</div>
+      <div class="lb">${esc(g.label_a)} ↔ ${esc(g.label_b)}</div></div>`;
+  });
+  track.innerHTML=html;
+  track.querySelectorAll('.gap').forEach(el=>{
+    el.onclick=()=>openGate(el.dataset.gate);
+  });
+
+  const sl=document.getElementById('statusline');
+  if(!STATE.frontier){ sl.innerHTML='<b>Nothing uploaded.</b> The chain has no evidence yet.'; return; }
+  const after=sts.slice(fi+1).map(s=>s.name);
+  sl.innerHTML=`<b>As-built status: evidence reaches ${esc(STATE.frontier.name)}.</b> `+
+    (after.length
+      ? `Nothing has been uploaded for ${after.map(esc).join(' · ')}. Until those arrive the as-built cannot be closed, and the gaps beyond ${esc(STATE.frontier.name)} are unknown — not empty.`
+      : `Every station has a file. The as-built is fully evidenced.`);
+}
+
+/* ---------- upload ---------- */
+function pickFile(key,name){
+  const el=document.getElementById('picker');
+  el.value='';
+  el.onchange=async()=>{
+    const f=el.files[0]; if(!f) return;
+    const fd=new FormData(); fd.append('file',f); if(UNIT) fd.append('unit_id',UNIT);
+    try{
+      const r=await api('api/upload/'+key,{method:'POST',body:fd});
+      await load();
+      alert(`${name}: ${r.rows} rows read from ${r.filename}.\nColumns recognised: ${r.fields.join(', ')}`);
+    }catch(e){ alert('Not loaded: '+e.message); }
+  };
+  el.click();
+}
+async function clearStation(key,name){
+  if(!confirm('Remove the data at “'+name+'”?\n\nThe uploaded file is kept, so it can be loaded again.')) return;
+  try{ await api('api/upload/'+key+(UNIT?'?unit_id='+UNIT:''),{method:'DELETE'}); await load(); }
+  catch(e){ alert(e.message); }
+}
+
+/* ---------- comparison ---------- */
+async function openGate(key){
+  try{ GATE=await api('api/gate/'+key+(UNIT?'?unit_id='+UNIT:'')); SELGAP=key; FILTER='ALL'; draw(); }
+  catch(e){ alert(e.message); }
+}
+function renderCompare(){
+  const head=document.getElementById('cmphead'), tbl=document.getElementById('cmptbl'),
+        cnt=document.getElementById('cmpcount');
+  if(!SELGAP||!GATE){
+    document.getElementById('cmptitle').textContent='Comparison';
+    head.innerHTML='<span style="color:var(--muted)">Pick a bubble on the line above to open that comparison.</span>';
+    tbl.innerHTML=''; cnt.textContent=''; return;
+  }
+  const g=GATE.gate, c=GATE.counts;
+  document.getElementById('cmptitle').innerHTML=
+    `${esc(g.label_a)} <span class="sub">↔</span> ${esc(g.label_b)} <span class="sub">side by side · material joins · quantity reconciles · revision judges · batch witnesses</span>`;
+  const chip=(k,l,n)=>`<span class="chip${FILTER===k?' on':''}" data-f="${k}">${l}<i>${n}</i></span>`;
+  head.innerHTML=`<h4>${esc(g.label_a)}</h4><span class="arrow">↔</span><h4>${esc(g.label_b)}</h4>
+    <div class="chips">
+      ${chip('ALL','All',c.TOTAL)}${chip('OK','Matched',c.OK)}${chip('MISSING','Missing',c.MISSING)}
+      ${chip('SHORT','Short qty',c.SHORT)}${chip('OVER','Over qty',c.OVER)}
+      ${chip('REVISION','Revision',c.REVISION)}${chip('BATCH','No batch',c.BATCH)}
+      ${chip('EXTRA','Extra',c.EXTRA)}
+      <span class="chip" onclick="window.location='api/export/${esc(g.key)}'+'${UNIT?'?unit_id='+UNIT:''}'">⤓ Excel</span>
+    </div>`;
+  head.querySelectorAll('.chip[data-f]').forEach(x=>x.onclick=()=>{FILTER=x.dataset.f;draw();});
+
+  const VC={OK:'v-ok',MISSING:'v-miss',SHORT:'v-short',OVER:'v-short',
+            REVISION:'v-rev',BATCH:'v-batch',EXTRA:'v-extra'};
+  const rows=GATE.rows.filter(r=>FILTER==='ALL'||r.verdict===FILTER);
+  let h=`<thead><tr>
+      <th class="rn">#</th>
+      <th class="band-a divider">Material</th><th class="band-a">Description</th>
+      <th class="band-a">Rev</th><th class="band-a">Qty</th><th class="band-a">Pos</th>
+      <th class="band-b divider">Rev</th><th class="band-b">Qty</th><th class="band-b">Batches</th>
+      <th class="band-b">Traceable</th>
+      <th class="band-v divider">Verdict</th><th class="band-v">Detail</th>
+    </tr><tr><th class="rn"></th>
+      <th class="band-a divider" colspan="5">AS-DESIGN · ${esc(g.label_a).toUpperCase()}</th>
+      <th class="band-b divider" colspan="4">AS-BUILT · ${esc(g.label_b).toUpperCase()}</th>
+      <th class="band-v divider" colspan="2"></th></tr></thead><tbody>`;
+  rows.forEach((r,i)=>{
+    const a=r.a,b=r.b;
+    h+=`<tr><td class="rn">${i+1}</td>
+      <td class="a">${a?esc(a.material):esc(b.material)}</td>
+      <td class="a" title="${esc((a||b).description||'')}">${esc((a||b).description||'')}</td>
+      <td class="a">${a?esc(a.revisions.join('/')):''}</td>
+      <td class="a num">${a?fq(a.qty):''}</td>
+      <td class="a num">${a?a.positions:''}</td>
+      <td class="b divider">${b?esc(b.revisions.join('/')):''}</td>
+      <td class="b num">${b?fq(b.qty):''}</td>
+      <td class="b" title="${b?esc(b.batches.join(', ')):''}">${b&&b.batches.length?esc(b.batches.join(', ')):'<span style="color:var(--dim)">—</span>'}</td>
+      <td class="b">${((a&&a.traceable)||(b&&b.traceable))?'yes':'no'}</td>
+      <td class="divider"><span class="vd ${VC[r.verdict]}">${esc(GATE.labels[r.verdict])}</span></td>
+      <td>${esc(r.detail||'')}</td></tr>`;
+  });
+  tbl.innerHTML=h+'</tbody>';
+  cnt.textContent=`${rows.length} of ${c.TOTAL} materials · ${c.ATTENTION} need attention`+
+    ` · a material on one side only still takes a full row`;
+}
+function fq(v){ v=Number(v); return Number.isInteger(v)?String(v):String(v); }
+
+/* ---------- checkpoint admin ---------- */
+function renderAdmin(){
+  const el=document.getElementById('admin');
+  let h=`<table style="width:auto;min-width:0"><thead><tr>
+      <th>#</th><th>Checkpoint</th><th>Source</th><th>Key</th><th>Loaded</th><th></th></tr></thead><tbody>`;
+  STATE.stations.forEach((s,i)=>{
+    h+=`<tr><td class="rn">${i+1}</td><td><b>${esc(s.name)}</b></td>
+      <td style="color:var(--muted)">${esc(s.source)}</td>
+      <td style="color:var(--dim)">${esc(s.key)}</td>
+      <td>${s.uploaded?esc(s.filename)+' · '+s.rows_loaded+' rows':'<span style="color:var(--dim)">—</span>'}</td>
+      <td>${s.uploaded?`<button class="btn ghost" style="padding:2px 9px;font-size:11px" onclick="clearStation('${esc(s.key)}','${esc(s.name)}')">clear data</button> `:''}
+        <button class="btn ghost" style="padding:2px 9px;font-size:11px" onclick="retire('${esc(s.key)}','${esc(s.name)}')">retire</button></td></tr>`;
+  });
+  h+=`</tbody></table>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px">Name</div>
+        <input id="ns_name" placeholder="Kitting" style="padding:6px 9px;border:1px solid var(--line);border-radius:var(--chipr);font-family:var(--font)"></div>
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px">Source label</div>
+        <input id="ns_src" placeholder="KIT LIST" style="padding:6px 9px;border:1px solid var(--line);border-radius:var(--chipr);font-family:var(--font)"></div>
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px">Insert after</div>
+        <select id="ns_after" class="themebtn">${STATE.stations.map(s=>`<option value="${esc(s.key)}">${esc(s.name)}</option>`).join('')}</select></div>
+      <button class="btn" onclick="addStation()">Add checkpoint</button>
+      <span class="pill">also adds the gate against the checkpoint before it</span>
+    </div>`;
+  el.innerHTML=h;
+}
+async function addStation(){
+  const name=document.getElementById('ns_name').value.trim();
+  if(!name){ alert('Give the checkpoint a name.'); return; }
+  const src=document.getElementById('ns_src').value.trim();
+  const after=document.getElementById('ns_after').value;
+  const key=name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+  try{
+    await api('api/station',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({key:key,name:name,source:src,icon:'▣',after:after})});
+    await api('api/gate',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({key:after+'_'+key,expected_ref:'station:'+after,
+        present_ref:'station:'+key,
+        label_a:(STATE.stations.find(s=>s.key===after)||{}).name||after,label_b:name})});
+    await load();
+  }catch(e){ alert('Not added: '+e.message); }
+}
+async function retire(key,name){
+  if(!confirm('Retire “'+name+'”?\n\nIt comes off the chain and its gates go quiet. Nothing is deleted — restoring it brings the data back.')) return;
+  try{ await api('api/station/'+key,{method:'DELETE'}); await load(); }
+  catch(e){ alert(e.message); }
+}
+
+/* ---------- theme ---------- */
+function setTheme(t){
+  document.body.className=t;
+  document.getElementById('th_light').classList.toggle('on', t==='light');
+  document.getElementById('th_dark').classList.toggle('on',  t==='dark');
+  try{ localStorage.setItem('abt_theme', t); }catch(e){}
+}
+function draw(){ renderChips(); renderChain(); renderCompare(); renderAdmin(); }
+
+
+function showView(k){
+  document.getElementById('tab_chain').classList.toggle('on', k==='chain');
+  document.getElementById('tab_trace').classList.toggle('on', k==='trace');
+  document.getElementById('view_chain').classList.toggle('on', k==='chain');
+  document.getElementById('view_trace').classList.toggle('on', k==='trace');
+  if(k==='trace' && !PROJECTS_LOADED) loadProjects();
+}
+
+let PROJECTS_LOADED=false;
+async function loadProjects(){
+  try{
+    const d=await api('api/projects');
+    const sel=document.getElementById('tr_project');
+    d.projects.forEach(p=>{
+      const o=document.createElement('option');
+      o.value=p.equipment_no;
+      o.textContent = p.equipment_no + (p.serial? ' · '+p.serial : '');
+      sel.appendChild(o);
+    });
+    PROJECTS_LOADED=true;
+  }catch(e){ console.error(e); }
+}
+
+function clearTrace(){
+  ['tr_material','tr_batch','tr_serial','tr_from','tr_to'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('tr_project').value='';
+  document.getElementById('trace_result').innerHTML='';
+}
+async function doTrace(){
+  const params=new URLSearchParams();
+  const v=id=>document.getElementById(id).value.trim();
+  if(v('tr_material')) params.set('material', v('tr_material'));
+  if(v('tr_batch'))    params.set('batch',    v('tr_batch'));
+  if(v('tr_serial'))   params.set('serial',   v('tr_serial'));
+  if(v('tr_project'))  params.set('project',  v('tr_project'));
+  if(v('tr_from'))     params.set('date_from',v('tr_from'));
+  if(v('tr_to'))       params.set('date_to',  v('tr_to'));
+  if(!params.has('material') && !params.has('batch') && !params.has('serial')){
+    alert('Give at least one of material, batch or serial.');
+    return;
+  }
+  // sensible default: material search narrows to current project unless batch/serial/project given
+  if(params.has('material') && !params.has('batch') && !params.has('serial') && !params.has('project')
+     && STATE && STATE.unit){
+    params.set('project', STATE.unit.equipment_no);
+  }
+  try{
+    const d=await api('api/trace?'+params.toString());
+    renderTrace(d);
+  }catch(e){
+    document.getElementById('trace_result').innerHTML =
+      '<div class="emptyresult" style="color:var(--miss)">'+esc(e.message)+'</div>';
+  }
+}
+function renderTrace(d){
+  const el=document.getElementById('trace_result');
+  const q=d.query;
+  const parts=[];
+  if(q.material_key) parts.push('material <b>'+esc(q.material)+'</b> \u2192 <code>'+esc(q.material_key)+'</code>');
+  if(q.batch_key)    parts.push('batch <b>'+esc(q.batch)+'</b> \u2192 <code>'+esc(q.batch_key)+'</code>');
+  if(q.serial_key)   parts.push('serial <b>'+esc(q.serial)+'</b> \u2192 <code>'+esc(q.serial_key)+'</code>');
+  if(q.project)      parts.push('project <b>'+esc(q.project)+'</b>');
+
+  let h='<div class="trace-hits">Looking for '+parts.join(' \u00b7 ')+' \u2014 found on <b>'+d.counts.units+'</b> unit(s), <b>'+d.counts.hits+'</b> station hit(s)</div>';
+
+  if(d.units.length===0){
+    h+='<div class="emptyresult">Nothing matched. Either the material has never touched any project, or nothing has been uploaded yet.</div>';
+    el.innerHTML=h; return;
+  }
+  d.units.forEach(u=>{
+    const anyHit=u.chain.some(s=>s.present);
+    const expQty = (u.expected||[]).reduce((n,e)=>n+e.qty,0);
+    h+='<div class="unit-card"><div class="unit-hd"><b>'+esc(u.equipment_no)+'</b>'+
+       '<span class="meta">'+(u.unit_serial?'serial '+esc(u.unit_serial):'')+'</span>'+
+       (!anyHit && expQty>0 ? '<span class="none">expected on MBOM ('+expQty+') but nothing arrived at any station</span>' : '')+
+       '</div><div class="chainrow">';
+    u.chain.forEach(s=>{
+      const cls = s.present ? (s.flag?'flag':'') : 'empty';
+      const qty = s.present ? Math.round(s.qty) : '\u2014';
+      const info = s.present
+        ? (s.flag ? 'traceable \u00b7 no batch' :
+           (s.batches.length ? 'batch '+s.batches.map(esc).join(', ') :
+            (s.serials.length ? 'serial '+s.serials.map(esc).join(', ') : '&nbsp;')))
+        : 'no data';
+      h+='<div class="chainstep '+cls+'" title="'+esc(s.name)+'">'+
+         '<div class="st-nm">'+esc(s.name)+'</div>'+
+         '<div class="st-qty">'+qty+'</div>'+
+         '<div class="st-b">'+info+'</div></div>';
+    });
+    h+='</div></div>';
+  });
+  el.innerHTML=h;
+}
+
+
+
+async function createUnit(){
+  const v=id=>document.getElementById(id).value.trim();
+  const eq=v('nu_eq');
+  if(!eq){ alert('Equipment no is required.'); document.getElementById('nu_eq').focus(); return; }
+  try{
+    const u=await api('api/unit',{method:'POST',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({equipment_no:eq, serial:v('nu_sn'), order_no:v('nu_ord'),
+                           sach_nr:v('nu_sach'), product:v('nu_prod')})});
+    UNIT=u.id;
+    ['nu_eq','nu_sn','nu_ord','nu_sach','nu_prod'].forEach(id=>document.getElementById(id).value='');
+    await load();
+  }catch(e){ alert('Not created: '+e.message); }
+}
+
+setTheme(localStorage.getItem('abt_theme') || 'light');
+load();
+
+</script>
+</body>
+</html>

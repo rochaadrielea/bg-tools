@@ -1,0 +1,2061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SAS export builder — merge &amp; join check</title>
+<script src="xlsx.full.min.js"></script>
+<style>
+:root{--bg:#081521;--card:#0F2536;--card2:#123049;--line:#1c3b57;--ink:#e8f1fa;
+ --muted:#8ba7c2;--accent:#1E9BE0;--bright:#4FC3F7;--green:#3fb56b;--amber:#e0a63e;
+ --red:#e5533e;--violet:#8b6fd6}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+ font-family:"Segoe UI",system-ui,sans-serif;font-size:14px}
+.wrap{max-width:1500px;margin:0 auto;padding:20px 22px 90px}
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+ border-bottom:1px solid var(--line);padding-bottom:14px}
+h1{font-size:21px;margin:0;font-weight:600}
+.sub{color:var(--muted);font-size:13px}
+.spacer{flex:1}
+.btn{background:var(--card2);color:var(--ink);border:1px solid var(--line);
+ border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#04121e;font-weight:600}
+.btn.primary[disabled]{background:#2c4560;border-color:#2c4560;color:#7b93a8;cursor:not-allowed}
+.btn.small{padding:4px 9px;font-size:12px}
+.btn.on{background:var(--accent);border-color:var(--accent);color:#04121e;font-weight:600}
+section{margin:24px 0}
+.stitle{display:flex;align-items:center;gap:11px;margin-bottom:10px}
+.stitle .idx{font-size:12px;color:var(--accent);font-weight:700;border:1px solid var(--accent);
+ border-radius:5px;padding:2px 7px}
+.stitle h2{font-size:16px;margin:0;font-weight:600}
+.stitle .note{color:var(--muted);font-size:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:14px 16px;
+ margin-bottom:12px}
+.card h3{margin:0 0 4px;font-size:14px}
+.card .hint{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);text-transform:uppercase;font-size:10.5px;letter-spacing:.4px;
+ background:var(--card2);position:sticky;top:0}
+.scroll{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:7px}
+.scroll.short{max-height:250px}
+select,input[type=text]{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+ border-radius:5px;padding:5px 7px;font-size:12.5px;max-width:290px}
+.pill{display:inline-block;padding:2px 8px;border-radius:11px;font-size:11px;font-weight:600}
+.p-ok{background:#14432a;color:#7ee2a8;border:1px solid #276b45}
+.p-warn{background:#4a3a12;color:#f0cd7c;border:1px solid #7a5f1c}
+.p-bad{background:#4d1d17;color:#ffab9c;border:1px solid #7d2e24}
+.p-info{background:#12324a;color:#8fd3f7;border:1px solid #1d5478}
+.p-none{background:#22303c;color:#93a8ba;border:1px solid #33475a}
+.drop{border:2px dashed var(--line);border-radius:9px;padding:26px;text-align:center;
+ color:var(--muted);cursor:pointer}
+.drop:hover{border-color:var(--accent)}
+.drop.over{border-color:var(--accent);background:#0d2434;color:var(--ink)}
+.offscreen{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.files{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.filerow{display:flex;align-items:center;gap:10px;background:var(--card2);
+ border:1px solid var(--line);border-radius:7px;padding:8px 11px;flex-wrap:wrap}
+.filerow b{font-size:13px}
+.filerow .meta{color:var(--muted);font-size:11.5px}
+.mono{font-family:Consolas,"Courier New",monospace;font-size:11px;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}
+.kpi{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:11px 12px}
+.kpi .v{font-size:21px;font-weight:700}
+.kpi .l{color:var(--muted);font-size:11px;text-transform:uppercase;margin-top:4px}
+.warnbox{background:#3a1f1a;border:1px solid #7d2e24;border-radius:8px;padding:12px 14px;
+ margin-bottom:12px}
+.okbox{background:#14321f;border:1px solid #276b45;border-radius:8px;padding:12px 14px;
+ margin-bottom:12px}
+.infobox{background:#10293d;border:1px solid #1d5478;border-radius:8px;padding:12px 14px;
+ margin-bottom:12px}
+.small{font-size:12px;color:var(--muted)}
+code{background:#0a1c2b;padding:1px 5px;border-radius:4px;font-size:11.5px}
+.evid{font-size:11.5px;color:var(--muted);margin-top:4px}
+.hidden{display:none}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:var(--card2);border:1px solid var(--accent);color:var(--ink);
+  padding:12px 22px;border-radius:8px;display:none;z-index:60;font-size:14px}
+.modebar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.repcard{border:1px solid var(--line);border-radius:8px;background:var(--card2);
+ padding:11px 13px;margin-bottom:10px}
+.repcard .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rank{font-size:11px;font-weight:700;color:#04121e;background:var(--accent);
+ border-radius:4px;padding:2px 7px}
+.vals{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-height:190px;overflow:auto}
+.vals label{background:var(--bg);border:1px solid var(--line);border-radius:5px;
+ padding:3px 7px;font-size:12px;cursor:pointer}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.tab{background:var(--card2);border:1px solid var(--line);border-radius:6px;
+ padding:6px 11px;font-size:12.5px;cursor:pointer}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#04121e;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>SAS export builder</h1>
+  <span class="sub">SAP · Teamcenter · Opcenter → the export the SAS dashboard eats</span>
+  <span class="spacer"></span>
+  <span class="sub mono">v3.8 · runs fully offline · nothing leaves this machine</span>
+</header>
+
+<div id="engineBox" class="hidden"></div>
+
+<div class="infobox">
+  <b>What this does.</b> You load reports. In <b>Merge</b> mode every report contributes rows;
+  rows that share an NC id collapse into one, and later reports fill only the cells the earlier
+  ones left empty — <b>a value is never overwritten</b>. In <b>Join</b> mode one report is the base
+  and the others only add columns onto it. Output is an .xlsx with the exact headers
+  <code>ingest_sas.py</code> expects.
+  <div class="small" style="margin-top:6px">The engine never guesses a value and never invents a link.
+  Duplicate ids inside one file block the build. Every disagreement between two sources is listed,
+  not silently resolved.</div>
+</div>
+
+<!-- 1 LOAD -->
+<section>
+  <div class="stitle"><span class="idx">1</span><h2>Load reports</h2>
+    <span class="note">.xlsx .xlsm .xls .csv — add as many as you like</span></div>
+  <div class="card">
+    <input type="file" id="fileIn" multiple accept=".xlsx,.xlsm,.xls,.csv" class="offscreen">
+    <div class="drop" id="drop">
+      <div style="margin-bottom:10px">Drop files here</div>
+      <button class="btn primary" id="pickBtn" type="button">Choose files</button>
+    </div>
+    <div id="loadErr"></div>
+    <div class="files" id="fileList"></div>
+    <div id="autoBuildArea" class="hidden" style="margin-top:18px">
+      <div class="card" style="text-align:center;padding:24px">
+        <button class="btn primary" id="autoBuildBtn" onclick="autoBuild()"           style="font-size:16px;padding:14px 36px">Build the dashboard export</button>
+        <div class="small" style="margin-top:10px;color:var(--muted)">reads the file contents · identifies the system · maps every field · scopes to SAS · downloads the .xlsx</div>
+      </div>
+      <div id="autoResult" class="hidden" style="margin-top:14px"></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn small" onclick="toggleAdvanced()">Advanced settings</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="advWrap" class="hidden">
+
+<!-- 2 MODE -->
+<section id="secMode" class="hidden">
+  <div class="stitle"><span class="idx">2</span><h2>How should the reports be combined?</h2></div>
+  <div class="card">
+    <div class="modebar">
+      <button class="btn" id="mAppend" onclick="setMode('append')">Merge rows — every report contributes NCs, duplicates collapse by id</button>
+      <button class="btn" id="mJoin" onclick="setMode('join')">Join columns — one base report, others only add columns</button>
+    </div>
+    <div id="modeNote" class="small"></div>
+  </div>
+</section>
+
+<!-- 2K KEY FINDER -->
+<section id="secKey" class="hidden">
+  <div class="stitle"><span class="idx">2a</span><h2>Find the shared key</h2>
+    <span class="note">measured on your real values — no assumed relationships</span></div>
+  <div class="card">
+    <div class="hint">Pick two reports. Every column pair is compared and ranked by how many
+      values actually overlap. Use this to identify the NC id column in each file, or to prove
+      two files have no key in common.</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+      <div>report A<br><select id="kA"></select></div>
+      <div>report B<br><select id="kB"></select></div>
+      <div><button class="btn small" onclick="runKeyFinder()">Compare all column pairs</button></div>
+    </div>
+    <div id="keyOut" style="margin-top:10px"></div>
+  </div>
+</section>
+
+<!-- 2B PROFILE + CONNECTIONS -->
+<section id="secProf" class="hidden">
+  <div class="stitle"><span class="idx">2b</span><h2>What each file is, and how they connect</h2>
+    <span class="note">read from the values, not the filename</span></div>
+  <div class="card">
+    <div class="hint">Every column is measured against known value patterns. The system label,
+      the suggested id and scope, and the connections below are all evidence from your rows.
+      Nothing here changes the build until you apply it.</div>
+    <div style="margin-bottom:10px">
+      <button class="btn small" onclick="rescan()">Re-scan files and connections</button>
+      <button class="btn small" onclick="saveProfiles()">Save profiles (.json)</button>
+      <button class="btn small" onclick="document.getElementById('profIn').click()">Load profiles (.json)</button>
+      <input type="file" id="profIn" accept=".json" class="offscreen">
+    </div>
+    <div id="profArea"></div>
+    <div id="connArea" style="margin-top:14px"></div>
+  </div>
+</section>
+
+<!-- 3A APPEND CONFIG -->
+<section id="secApp" class="hidden">
+  <div class="stitle"><span class="idx">3</span><h2>Per report: id, priority, scope</h2>
+    <span class="note">priority 1 wins any disagreement</span></div>
+  <div class="card">
+    <div class="hint">The <b>NC id column</b> is what decides whether two rows are the same NC.
+      <b>Scope</b> keeps only the rows you want — leave it untouched to keep everything.</div>
+    <div id="appArea"></div>
+  </div>
+</section>
+
+<!-- 3B MAP (append: per report) -->
+<section id="secMapA" class="hidden">
+  <div class="stitle"><span class="idx">4</span><h2>Map each report's columns to the 22 fields</h2>
+    <span class="note">one tab per report · a field can come from several reports</span></div>
+  <div class="card">
+    <div class="tabs" id="mapTabs"></div>
+    <div style="margin-bottom:10px">
+      <button class="btn small" onclick="autoMapReport()">Suggest mapping for this report</button>
+      <button class="btn small" onclick="clearMapReport()">Clear this report</button>
+    </div>
+    <div class="scroll"><table id="mapTableA"></table></div>
+  </div>
+</section>
+
+<!-- 2 BASE (join mode) -->
+<section id="secBase" class="hidden">
+  <div class="stitle"><span class="idx">3</span><h2>Choose the base report</h2>
+    <span class="note">the one with one row per NC — every other report joins onto it</span></div>
+  <div class="card">
+    <div id="baseChoice"></div>
+    <div id="baseInfo" class="evid"></div>
+  </div>
+</section>
+
+<!-- 3 MAP (join mode) -->
+<section id="secMap" class="hidden">
+  <div class="stitle"><span class="idx">4</span><h2>Map the fields the dashboard needs</h2>
+    <span class="note">22 target fields · suggestions are proposals, you confirm them</span></div>
+  <div class="card">
+    <div class="hint">For each target field pick the report and the column that holds it.
+      Choosing a report other than the base turns on the join check.</div>
+    <div style="margin-bottom:10px">
+      <button class="btn small" onclick="autoMap()">Suggest mapping from headers</button>
+      <button class="btn small" onclick="clearMap()">Clear all</button>
+    </div>
+    <div class="scroll"><table id="mapTable"></table></div>
+  </div>
+</section>
+
+<!-- 4 JOINS (join mode) -->
+<section id="secJoin" class="hidden">
+  <div class="stitle"><span class="idx">5</span><h2>Join check</h2>
+    <span class="note">cardinality and overlap, measured on your actual rows</span></div>
+  <div class="card">
+    <div class="hint">A join is only usable when the key is <b>unique on the joined side</b>.
+      Anything else duplicates NCs and silently inflates every count on the dashboard, so it is blocked.</div>
+    <div id="joinArea"></div>
+  </div>
+</section>
+
+<!-- 5 CHECK / VERDICT -->
+<section id="secVerdict" class="hidden">
+  <div class="stitle"><span class="idx">6</span><h2>Can we build the report?</h2></div>
+  <div id="verdictArea"></div>
+</section>
+
+<!-- 6 BUILD -->
+<section id="secBuild" class="hidden">
+  <div class="stitle"><span class="idx">7</span><h2>Build the export</h2></div>
+  <div class="card">
+    <div class="hint">Produces <code>SAS_export_&lt;date&gt;.xlsx</code> with the exact 22 headers,
+      plus <b>Audit</b>, <b>Provenance</b> (which file each NC came from) and <b>Conflicts</b>
+      (where two files disagreed) sheets.</div>
+    <label class="small" style="display:block;margin-bottom:8px">
+      <input type="checkbox" id="srcCol"> add a <code>Source</code> column as the first column
+      (only tick this if the dashboard loader tolerates an extra column)</label>
+    <button class="btn primary" id="buildBtn" onclick="buildNow()">Build export .xlsx</button>
+    <span id="buildMsg" class="small" style="margin-left:10px"></span>
+  </div>
+</section>
+
+</div><!-- /advWrap -->
+
+<div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ================================================================
+   TARGET CONTRACT — the columns ingest_sas.py requires.
+   Header text must be byte-exact, including the DOUBLE SPACE in
+   'Project Text  (Notification)'. Do not "tidy" these strings.
+   ================================================================ */
+const TARGET=[
+ {h:"Notification",              req:1, grain:1, why:"NC number — the key of the whole report"},
+ {h:"Notification TEXT",         req:1, why:"NC title"},
+ {h:"Notification Type",         req:1, why:"Z2 / Z3 — drives the supplier vs production split"},
+ {h:"Notification Cause C TEXT", req:1, why:"cause — also drives supplier + customer complaint"},
+ {h:"Notif. Status",             req:1, why:"Closed / Open / Deleted"},
+ {h:"Notification Date",         req:1, why:"opened date — all time charts and ageing"},
+ {h:"Closing date",              req:1, why:"closed date"},
+ {h:"WBS Element (Notification)",req:1, why:"PSP element — the batch is its 3-digit tail"},
+ {h:"Defect Class",              req:1, why:"severity 0-5; 4-5 = Major"},
+ {h:"Defect Code TEXT",          req:1, why:"defect type — Pareto and heatmap"},
+ {h:"Disposition Action TEXT",   req:1, why:"Use as is / Rework / Repair / Scrap / Return"},
+ {h:"Material",                  req:1, why:"part — NCs per part"},
+ {h:"[Vendor NC]",               req:1, why:"supplier name"},
+ {h:"CoPQ (NC)",                 req:1, why:"cost of poor quality (negative in SAP)"},
+ {h:"WBS Element Id (CoPQ)",     req:1, why:"cost element; '-' means nothing booked"},
+ {h:"Project Text  (Notification)",req:1, fixed:"KDS SAS Emmen",
+    why:"scope filter — can be a fixed value, note the DOUBLE space"},
+ {h:"Notif. Year",               req:0, why:"year; falls back to the year of the opened date"},
+ {h:"Leadtime",                  req:0, why:"days open — median lead time KPI"},
+ {h:"WBS Text (Notification)",   req:0, why:"PSP description, reference only"},
+ {h:"Batch",                     req:0, why:"SAP batch, reference only"},
+ {h:"Model",                     req:0, why:"flight unit — data quality panel only"},
+ {h:"Vendor Key NC",             req:0, why:"supplier code"},
+ {h:"Status Note",               req:0, why:"documents special status handling (e.g. TC return-to-work)"}
+];
+const REQ_COUNT=TARGET.filter(t=>t.req).length;
+
+/* ---------------- state ---------------- */
+let REPORTS=[];      // {id,name,sha,sheet,sheets,headers,rows}
+let MODE="append";
+let BASE=null;       // join mode
+let MAP={};          // join mode: target -> {rid,col}|{fixed:true}
+let JOINS={};        // join mode: rid -> {baseCol,otherCol,verdict,stats}
+let RCFG={};         // append mode: rid -> {idCol,order,scopeCol,scopeVals:Set,map:{target:col|"__fixed__"}}
+let MAPTAB=null;     // append mode: which report's mapping table is showing
+let MERGE=null;      // append mode: last merge check result
+
+/* ---------------- engine check ---------------- */
+const ENGINE_OK=(typeof XLSX!=="undefined") && !!(XLSX && XLSX.read);
+(function(){
+  const box=document.getElementById("engineBox");
+  if(ENGINE_OK)return;
+  box.className="warnbox";
+  box.innerHTML='<b>The spreadsheet engine did not load.</b> <code>xlsx.full.min.js</code> is '+
+    'missing or unreadable next to this page, so no file can be opened.'+
+    '<div class="small" style="margin-top:6px">It must sit in the SAME folder as this '+
+    '<code>index.html</code>, be about 881 KB, and be readable by nginx.</div>';
+})();
+
+/* ---------------- normalisation (deterministic only) ---------------- */
+function normKey(v){
+  if(v===null||v===undefined)return "";
+  let s=String(v).trim();
+  if(!s)return "";
+  s=s.replace(/\s+/g," ");
+  s=s.replace(/\.0+$/,"");
+  return s.toUpperCase();
+}
+function normDigits(s){ return /^[0-9]+$/.test(s)? s.replace(/^0+/,"") : s; }
+function keyOf(v){ return normDigits(normKey(v)); }
+function isBlank(v){
+  if(v===null||v===undefined)return true;
+  const s=String(v).trim();
+  return s===""||s==="-";
+}
+async function sha256(buf){
+  try{
+    const h=await crypto.subtle.digest("SHA-256",buf);
+    return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join("");
+  }catch(e){ return "unavailable (crypto.subtle needs https)"; }
+}
+
+/* ---------------- header row detection ---------------- */
+/* A header row holds LABELS. Counting distinctness alone is not enough: a data
+   row is usually more distinct than a header row that repeats a column name, so
+   the old scoring picked the first data row. Cells that look like data now count
+   against a row. */
+function headerCellScore(v){
+  if(v===null||v===undefined)return 0;
+  if(v instanceof Date)return -2;
+  const s=String(v).trim();
+  if(!s)return 0;
+  if(typeof v==="number")return -2;
+  if(/^-?\d+([.,]\d+)?$/.test(s))return -2;          // pure number
+  if(/^\d{4}-\d{2}-\d{2}/.test(s))return -2;         // date
+  if(/^[A-Za-z]{3} [A-Za-z]{3} \d{2} \d{4}/.test(s))return -2;  // JS date string
+  for(const pt of PATTERNS){ if(pt.idlike&&pt.re.test(s))return -3; }  // an id VALUE
+  if(s.length>60)return -1;
+  return 1;
+}
+function findHeaderRow(aoa){
+  let best=0,bestScore=-Infinity;
+  for(let i=0;i<Math.min(15,aoa.length);i++){
+    const row=aoa[i]||[];
+    const vals=row.filter(c=>c!==null&&c!==undefined&&String(c).trim()!=="");
+    if(vals.length<2)continue;
+    const distinct=new Set(vals.map(v=>String(v).trim())).size;
+    let cellSum=0;vals.forEach(v=>{cellSum+=headerCellScore(v);});
+    const score=distinct+cellSum-(vals.length-distinct)*0.5;
+    if(score>bestScore){bestScore=score;best=i;}    // earliest row wins a tie
+  }
+  return best;
+}
+function sheetToRows(ws){
+  const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+  if(!aoa.length)return {headers:[],rows:[]};
+  const hr=findHeaderRow(aoa);
+  const seen={};
+  const headers=(aoa[hr]||[]).map((h,i)=>{
+    let t=(h===null||h===undefined)?"":String(h).trim();
+    if(!t)t="(column "+(i+1)+")";
+    if(seen[t]!==undefined){seen[t]++;t=t+" ("+seen[t]+")";}else seen[t]=1;
+    return t;
+  });
+  const rows=[];
+  for(let i=hr+1;i<aoa.length;i++){
+    const r=aoa[i]||[];
+    if(r.every(c=>c===null||c===undefined||String(c).trim()===""))continue;
+    const o={};
+    headers.forEach((h,j)=>{o[h]=r[j]===undefined?null:r[j];});
+    rows.push(o);
+  }
+  return {headers,rows};
+}
+
+/* ---------------- file loading ---------------- */
+const fileIn=document.getElementById("fileIn");
+const dropEl=document.getElementById("drop");
+const pickBtn=document.getElementById("pickBtn");
+function openPicker(){
+  if(!ENGINE_OK){showLoadErr("Cannot open files: the spreadsheet engine is not loaded.");return;}
+  fileIn.click();
+}
+pickBtn.addEventListener("click",e=>{e.stopPropagation();openPicker();});
+dropEl.addEventListener("click",e=>{if(e.target===pickBtn)return;openPicker();});
+fileIn.addEventListener("click",e=>e.stopPropagation());
+fileIn.addEventListener("change",e=>{
+  const picked=Array.from(e.target.files||[]);   // snapshot BEFORE clearing (FileList is live)
+  fileIn.value="";
+  handleFiles(picked);
+});
+dropEl.addEventListener("dragover",e=>{e.preventDefault();dropEl.classList.add("over");});
+dropEl.addEventListener("dragleave",()=>dropEl.classList.remove("over"));
+dropEl.addEventListener("drop",e=>{
+  e.preventDefault();dropEl.classList.remove("over");
+  if(e.dataTransfer&&e.dataTransfer.files)handleFiles(Array.from(e.dataTransfer.files));
+});
+function showLoadErr(m){const el=document.getElementById("loadErr");
+  el.className="warnbox";el.style.marginTop="10px";el.innerHTML=m;}
+function clearLoadErr(){const el=document.getElementById("loadErr");
+  el.className="";el.innerHTML="";el.style.marginTop="";}
+
+async function handleFiles(fileList){
+  const files=Array.from(fileList||[]);
+  if(!files.length)return;
+  if(!ENGINE_OK){showLoadErr("Cannot read files: the spreadsheet engine is not loaded.");return;}
+  clearLoadErr();
+  const failed=[];
+  for(const f of files){
+    try{
+      const buf=await f.arrayBuffer();
+      const sha=await sha256(buf);
+      const wb=XLSX.read(buf,{type:"array",cellDates:true});
+      if(!wb.SheetNames||!wb.SheetNames.length){failed.push(f.name+" — no sheets");continue;}
+      const id="r"+(REPORTS.length+1)+"_"+Date.now().toString(36);
+      const first=wb.SheetNames[0];
+      const {headers,rows}=sheetToRows(wb.Sheets[first]);
+      if(!headers.length){failed.push(f.name+" — no header row could be read");continue;}
+      REPORTS.push({id,name:f.name,sha,wb,sheet:first,sheets:wb.SheetNames,headers,rows,
+                    baseHeaders:headers.slice()});   // fingerprint uses these, never derived ones
+      RCFG[id]={idCol:"",idCol2:"",order:REPORTS.length,scopeCol:"",scopeVals:new Set(),map:{}};
+    }catch(err){failed.push(f.name+" — "+(err&&err.message?err.message:String(err)));}
+  }
+  if(failed.length)showLoadErr("<b>These files could not be read:</b><br>"+
+    failed.map(x=>"<code>"+esc(x)+"</code>").join("<br>"));
+  if(!MAPTAB&&REPORTS.length)MAPTAB=REPORTS[0].id;
+  REPORTS.forEach(r=>{if(!r._prof)profileReport(r);});
+  scanConnections();
+  invalidate();renderAll();
+}
+/* Options carry an INDEX, never the column name. HTMLOptionElement.value falls
+   back to .text, which the HTML spec strips and collapses — that silently turned
+   'Project Text  (Notification)' into a single-spaced string that matches no
+   column. Index in, exact string out of the array. */
+function optIdx(arr,current){
+  return arr.map((v,i)=>'<option value="'+i+'"'+(v===current?' selected':'')+'>'+esc(v)+'</option>').join("");
+}
+function pick(arr,idx){const i=parseInt(idx,10);return (isNaN(i)||i<0||i>=arr.length)?"":arr[i];}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+
+function renderFiles(){
+  const el=document.getElementById("fileList");el.innerHTML="";
+  REPORTS.forEach(r=>{
+    const d=document.createElement("div");d.className="filerow";
+    let sheetSel="";
+    if(r.sheets.length>1){
+      sheetSel='<select onchange="changeSheet(\''+r.id+'\',this.value)">'+
+        optIdx(r.sheets,r.sheet)+'</select>';
+    }
+    d.innerHTML='<b>'+esc(r.name)+'</b>'+sheetSel+
+      '<span class="meta">'+r.rows.length+' rows · '+r.headers.length+' columns</span>'+
+      '<span class="spacer" style="flex:1"></span>'+
+      '<span class="mono">sha256 '+esc(String(r.sha).slice(0,16))+'…</span>'+
+      '<button class="btn small" onclick="removeReport(\''+r.id+'\')">Remove</button>';
+    el.appendChild(d);
+  });
+  document.getElementById("secMode").classList.toggle("hidden",!REPORTS.length);
+  document.getElementById("autoBuildArea").classList.toggle("hidden",!REPORTS.length);
+}
+function changeSheet(rid,idx){
+  const r=REPORTS.find(x=>x.id===rid);
+  const name=pick(r.sheets,idx);
+  if(!name)return;
+  r.sheet=name;delete r._keysets;
+  const {headers,rows}=sheetToRows(r.wb.Sheets[name]);
+  r.headers=headers;r.rows=rows;r.baseHeaders=headers.slice();
+  Object.keys(MAP).forEach(k=>{if(MAP[k]&&MAP[k].rid===rid)delete MAP[k];});
+  delete JOINS[rid];
+  RCFG[rid]={idCol:"",idCol2:"",order:RCFG[rid]?RCFG[rid].order:REPORTS.length,
+             scopeCol:"",scopeVals:new Set(),map:{}};
+  delete r._prof;profileReport(r);scanConnections();
+  invalidate();renderAll();
+}
+function removeReport(rid){
+  REPORTS=REPORTS.filter(r=>r.id!==rid);
+  if(BASE===rid)BASE=null;
+  if(MAPTAB===rid)MAPTAB=REPORTS.length?REPORTS[0].id:null;
+  Object.keys(MAP).forEach(k=>{if(MAP[k]&&MAP[k].rid===rid)delete MAP[k];});
+  delete JOINS[rid];delete RCFG[rid];
+  scanConnections();invalidate();renderAll();
+}
+
+/* ---------------- mode ---------------- */
+function setMode(m){MODE=m;invalidate();renderAll();}
+function renderMode(){
+  document.getElementById("mAppend").className="btn"+(MODE==="append"?" on":"");
+  document.getElementById("mJoin").className="btn"+(MODE==="join"?" on":"");
+  document.getElementById("modeNote").innerHTML= MODE==="append"
+    ? "Output has one row per distinct NC id across all reports, after each report's scope filter."
+    : "Output has exactly one row per row of the base report. Other reports can only add columns.";
+}
+
+/* ================================================================
+   PATTERN LIBRARY — what a value looks like decides what it is.
+   Header names are only a hint; these are matched against the real
+   cell values. 'full' = the whole cell is this pattern (so the column
+   IS that thing). 'embed' = the pattern sits inside a longer string
+   (so the thing can be EXTRACTED from it).
+   ================================================================ */
+const PATTERNS=[
+ {id:"sap_ecc_notif", label:"SAP ECC notification (6 digits)",
+  re:/^\d{6}$/, ex:null, sys:"SAP ECC (legacy)", idlike:1},   /* no extraction: a loose
+      6-digit run inside text is not evidence — it matched the IR sequence number */
+ {id:"s4_notif", label:"SAP S/4HANA notification (7-8 digits)",
+  re:/^\d{7,8}$/, ex:/NC_\d{10,16}_(\d{6,8})/, sys:"SAP S/4HANA", idlike:1},
+ {id:"ir_id", label:"Teamcenter issue id (IR-nnnnnn)",
+  re:/^IR-\d{4,7}(\/[A-Z];\d+)?$/, ex:/(IR-\d{4,7})/, sys:"Teamcenter", idlike:1},
+ {id:"tc_object", label:"Teamcenter object string (IR-nnnnnn/A;n-…)",
+  re:/^IR-\d{4,7}\/[A-Z];\d+-.+/, ex:null, sys:"Teamcenter", idlike:1},
+ {id:"nc_uid", label:"Opcenter/S4 NC uid (NC_<epoch>_<number>)",
+  re:/^NC_\d{10,16}_\d{6,8}$/, ex:/(NC_\d{10,16}_\d{6,8})/, sys:"Teamcenter", idlike:1},
+ {id:"tc_wbs", label:"Teamcenter WBS (R-nnnn-nnnnn-…)",
+  re:/^R-\d{3,5}-\d{4,6}(-\d+)*$/, ex:/(R-\d{3,5}-\d{4,6}(?:-\d+)*)/, sys:"Teamcenter"},
+ {id:"sap_wbs", label:"SAP WBS / PSP element (X.XXXnn.Q.nnn)",
+  re:/^[A-Z]\.[A-Z0-9]+\.Q\.\d{3}$/, ex:/([A-Z]\.[A-Z0-9]+\.Q\.\d{3})/, sys:"SAP"},
+ {id:"tc_project", label:"Teamcenter project (P-nnnn-nnnnn-NAME)",
+  re:/^P-\d{3,5}-\d{4,6}-.+/, ex:/(P-\d{3,5}-\d{4,6}-[A-Z0-9 \-]+)/, sys:"Teamcenter", scopelike:1},
+ {id:"notif_type", label:"SAP notification type (Z2 / Z3 …)",
+  re:/^Z\d\b.*/, ex:null, sys:"SAP", scopelike:1},
+ {id:"severity_tc", label:"Teamcenter severity (Low-Minor …)",
+  re:/^(Low|Medium|High)-(Minor|Major|Observation)$/, ex:null, sys:"Teamcenter", scopelike:1},
+ {id:"defect_class", weak:1, label:"SAP defect class (0-5)", re:/^[0-5]$/, ex:null, sys:"SAP"},
+ {id:"status_word", weak:1, label:"status word (Open / Closed / Deleted …)",
+  re:/^(open|closed|deleted|cancelled|released|notified.*|close and.*)$/i, ex:null, scopelike:1},
+ {id:"date_iso", weak:1, label:"date", re:/^\d{4}-\d{2}-\d{2}([ T].*)?$/, ex:null},
+ {id:"money", weak:1, label:"amount", re:/^-?\d+([.,]\d+)?$/, ex:null}
+];
+
+/* ================================================================
+   AUTO-BUILD — one click from files to export.
+   Applies every suggestion, scopes to SAS, runs the merge, builds.
+   ================================================================ */
+function toggleAdvanced(){
+  document.getElementById('advWrap').classList.toggle('hidden');
+}
+
+function autoBuild(){
+  if(!REPORTS.length)return;
+
+  // 1. Profile every file and scan connections
+  REPORTS.forEach(r=>{if(!r._prof)profileReport(r);});
+  scanConnections();
+
+  // 2. Apply suggestions on every file (id, scope, field mapping)
+  REPORTS.forEach(rep=>applySuggestion(rep.id));
+
+  // 3. Auto-scope to SAS on every file that has a scope column
+  REPORTS.forEach(rep=>{
+    const c=RCFG[rep.id];
+    if(!c.scopeCol)return;
+    // Find the SAS value in the scope column
+    const vals=distinctValues(rep,c.scopeCol);
+    // Match the actual SAS project identifier, not any string containing 'SAS'.
+    // 'not sas' contains 'SAS' but is explicitly NOT the SAS project.
+    // The Teamcenter project code is P-3011-00004-SAS; the SAP scope is KDS SAS Emmen.
+    const sasVal=vals.find(([v])=>{
+      const s=v.trim();
+      if(/^P-3011-00004/i.test(s))return true;              // TC project code
+      if(/^KDS\s+SAS\s+Emmen$/i.test(s))return true;        // SAP project text
+      if(/^KDS.*SAS/i.test(s)&&!/^not\b/i.test(s))return true; // KDS SAS but not 'not sas'
+      return false;
+    });
+    if(sasVal)c.scopeVals=new Set([sasVal[0]]);
+  });
+
+  // 4. For non-SAP files (Teamcenter), set Project Text to fixed value
+  REPORTS.forEach(rep=>{
+    const pr=rep._prof||{};
+    if(pr.system&&pr.system!=="SAP ECC (legacy)"&&pr.system!=="SAP"){
+      RCFG[rep.id].map["Project Text  (Notification)"]="__fixed__";
+    }
+  });
+
+  // 5. Add derived columns where offered (S4 notification, IR id)
+  REPORTS.forEach(rep=>{
+    const offers=derivedOffers(rep).filter(o=>!o.exists);
+    offers.forEach(o=>{
+      if(o.pat.idlike)addDerived(rep.id,o.col,o.pat.id);
+    });
+  });
+
+  // 6. Set mode to merge
+  MODE="append";
+
+  // 7. Render, run merge check, and scroll to the verdict
+  invalidate();renderAll();
+  // Small delay so the DOM renders before we run the merge
+  setTimeout(()=>{
+    MERGE=mergeAll();
+    renderVerdict();
+    // Scroll to the verdict
+    const v=document.getElementById("secVerdict");
+    if(v)v.scrollIntoView({behavior:"smooth",block:"start"});
+    // If it passed, auto-click build
+    // Show result inline
+    const res=document.getElementById("autoResult");
+    res.classList.remove("hidden");
+    if(MERGE&&MERGE.ok){
+      document.getElementById("srcCol").checked=true;
+      // Per-file summary
+      let fileLines="";
+      ordered().forEach(rep=>{
+        const q=MERGE.per[rep.name]||{};
+        const pr=rep._prof||{};
+        fileLines+='<div style="display:flex;gap:14px;align-items:center;margin:6px 0">'+
+          '<span class="pill p-info">'+esc(pr.system||"?")+'</span>'+
+          '<b>'+esc(rep.name)+'</b>'+
+          '<span class="small">'+q.read+' rows in scope</span>'+
+          '<span class="small">'+Object.keys(RCFG[rep.id].map).length+'/22 fields mapped</span>'+
+          '</div>';
+      });
+      // Coverage: which required fields are empty
+      const reqEmpty=TARGET.filter(t=>t.req&&MERGE.cov[t.h]&&MERGE.cov[t.h].pct===0);
+      const partFilled=TARGET.filter(t=>t.req&&MERGE.cov[t.h]&&MERGE.cov[t.h].pct>0&&MERGE.cov[t.h].pct<100);
+      res.innerHTML='<div class="okbox">'+
+        '<div style="font-size:22px;font-weight:700;margin-bottom:8px">'+MERGE.stats.rows+' rows ready</div>'+
+        fileLines+
+        (MERGE.stats.mergedRows?'<div class="small" style="margin-top:8px">'+MERGE.stats.mergedRows+' rows merged (same NC in multiple files), '+MERGE.stats.filled+' empty cells filled</div>':'')+
+        (MERGE.conflicts.length?'<div class="small">'+MERGE.conflicts.length+' disagreements between files (logged in the Conflicts sheet)</div>':'')+
+        (reqEmpty.length?'<div style="margin-top:8px;color:var(--amber)">⚠ Empty required fields: '+reqEmpty.map(t=>t.h).join(", ")+'</div>':'')+
+        (partFilled.length?'<div class="small" style="margin-top:4px">Partially filled: '+partFilled.map(t=>t.h+" ("+MERGE.cov[t.h].pct+"%)").join(", ")+'</div>':'')+
+        '<div style="margin-top:14px">'+
+        '<button class="btn primary" style="font-size:15px;padding:12px 28px" onclick="buildNow()">Download .xlsx</button>'+
+        '</div></div>';
+    } else if(MERGE) {
+      res.innerHTML='<div class="warnbox"><b>Cannot build yet:</b><ul>'+
+        (MERGE.blockers||[]).map(b=>'<li>'+esc(b)+'</li>').join("")+
+        '</ul></div>';
+    }
+  },200);
+}
+
+function toast(m){
+  const t=document.getElementById("toast");
+  if(!t){const d=document.createElement("div");d.id="toast";d.className="toast";
+    document.body.appendChild(d);}
+  const el=document.getElementById("toast");
+  el.textContent=m;el.style.display="block";
+  clearTimeout(el._t);el._t=setTimeout(()=>el.style.display="none",4000);
+}
+
+/* ================================================================
+   FIELD VOCABULARIES — known values that identify which dashboard
+   field a column belongs to. The builder scores every column against
+   every vocabulary. A column whose values match a vocabulary at >30%
+   is proposed for that field, regardless of its name.
+   ================================================================ */
+const FIELD_VOCAB = {
+  "Notif. Status": {
+    values: new Set(["open","closed","deleted","close and return to work",
+      "notified engineering issue","cancelled","in process","outstanding"]),
+    transform: v => String(v).trim().toLowerCase(),
+    minMatch: 0.3,
+  },
+  "Notification Cause C TEXT": {
+    values: new Set(["customer complaint","supplier","manufacturing","inspection",
+      "assembly","incoming inspection","test","handling","handling / transportation",
+      "machining","bonding","completion","integration"]),
+    transform: v => String(v).trim().toLowerCase(),
+    minMatch: 0.25,
+  },
+  "Disposition Action TEXT": {
+    values: new Set(["rework","scrap","use as is","repair","return","return to vendor",
+      "investigate","approved","nrb","1.nrb","reject","accept"]),
+    transform: v => String(v).trim().toLowerCase(),
+    minMatch: 0.2,
+  },
+  "Defect Code TEXT": {
+    values: new Set(["dimensional deviation","surface finish","wrong installation",
+      "material not compliant","function/performance","manufacturing / assembly",
+      "damage of part","process failure","wrong labelling","contamination",
+      "presence of dents","mechanical functional","procedure & documentation",
+      "missing / incorrect documentation","surface finish and appearance",
+      "deviation from manufacturing","manufacturing / assembly execution",
+      "material not compliant with specification","inaccurate surface properties",
+      "wrong installation / mounting"]),
+    transform: v => {
+      const s = String(v).trim().toLowerCase().replace(/\s+/g," ");
+      // partial match: check if any vocab term is contained in the value or vice versa
+      return s;
+    },
+    partialMatch: true,   // a value that CONTAINS a vocab term counts
+    minMatch: 0.15,
+  },
+  "Notification Type": {
+    values: new Set(["z2","z3","z2 - procurem. complaint","z3 - production nc"]),
+    transform: v => String(v).trim().toLowerCase(),
+    minMatch: 0.5,
+  },
+  "[Vendor NC]": {
+    // vendors are proper nouns — cannot enumerate. Detect by: mostly unique
+    // strings, not numbers, not dates, AND the column name hints at vendor/supplier
+    nameHints: ["vendor","supplier","lieferant","contractor"],
+    minMatch: 0,   // name hint alone is enough
+  },
+  "Material": {
+    nameHints: ["material","part","problem item","artikel","teil"],
+    minMatch: 0,
+  },
+  "CoPQ (NC)": {
+    // negative numbers or numbers with high magnitude
+    detect: vals => {
+      let neg=0,num=0;
+      vals.forEach(v=>{const n=parseFloat(v);if(!isNaN(n)){num++;if(n<0)neg++;}});
+      return num>0 && neg/num > 0.3 ? 0.8 : 0;
+    },
+    nameHints: ["copq","cost","kosten","poor quality"],
+    minMatch: 0.2,
+  },
+  "Defect Class": {
+    values: new Set(["0","1","2","3","4","5",
+      "low-minor","low-major","low-observation","medium-minor","medium-major",
+      "high-minor","high-major"]),
+    transform: v => String(v).trim().toLowerCase(),
+    minMatch: 0.4,
+  },
+  "Notification Date": {
+    nameHints: ["creation date","opened","notification date","created","erstellt"],
+    detect: vals => {
+      let dates=0;
+      vals.forEach(v=>{
+        const s=String(v).trim();
+        if(!s||s==="nan"||s==="None")return;
+        // JS Date, ISO string, or Excel serial
+        if(s instanceof Date || /^\d{4}-\d{2}-\d{2}/.test(s) ||
+           /^\w{3} \w{3} \d{2} \d{4}/.test(s))dates++;
+        else{const n=parseFloat(s);if(!isNaN(n)&&n>30000&&n<60000)dates++;}
+      });
+      return vals.length? dates/vals.length : 0;
+    },
+    minMatch: 0.5,
+    prefer: "first",  // when multiple date columns match, prefer the one with higher fill
+  },
+  "Closing date": {
+    nameHints: ["closure","closing","closed","geschlossen"],
+    detect: vals => {
+      let dates=0;
+      vals.forEach(v=>{
+        const s=String(v).trim();
+        if(!s||s==="nan"||s==="None")return;
+        if(s instanceof Date || /^\d{4}-\d{2}-\d{2}/.test(s) ||
+           /^\w{3} \w{3} \d{2} \d{4}/.test(s))dates++;
+        else{const n=parseFloat(s);if(!isNaN(n)&&n>30000&&n<60000)dates++;}
+      });
+      return vals.length? dates/vals.length : 0;
+    },
+    minMatch: 0.3,   // closure dates are often sparse
+  },
+  "WBS Element (Notification)": {
+    detect: vals => {
+      let wbs=0;
+      vals.forEach(v=>{
+        const s=String(v).trim();
+        if(/[A-Z]\.[A-Z0-9]+\.Q\.\d{3}/.test(s))wbs++;       // SAP WBS
+        else if(/R-\d{3,5}-\d{4,6}/.test(s))wbs++;            // TC WBS
+      });
+      return vals.length? wbs/vals.length : 0;
+    },
+    nameHints: ["wbs","psp","parent wbs","nc wbs"],
+    minMatch: 0.15,
+  },
+  "Notification TEXT": {
+    // the title/description — longest average text length, not a code column
+    nameHints: ["description","title","text","bezeichnung","object","problem description"],
+    minMatch: 0,
+  },
+};
+
+/* Score a column's values against a field vocabulary.
+   Returns 0..1 (fraction of non-blank values that matched). */
+function vocabScore(vals, fieldKey) {
+  const spec = FIELD_VOCAB[fieldKey];
+  if (!spec) return 0;
+  if (spec.detect) return spec.detect(vals);
+  if (!spec.values) return 0;
+  const tx = spec.transform || (v => String(v).trim().toLowerCase());
+  let hit=0, total=0;
+  vals.forEach(v => {
+    const s = tx(v);
+    if (!s || s==="nan" || s==="none" || s==="") return;
+    total++;
+    if (spec.values.has(s)) { hit++; return; }
+    if (spec.partialMatch) {
+      for (const term of spec.values) {
+        if (s.includes(term) || term.includes(s)) { hit++; return; }
+      }
+    }
+  });
+  return total > 0 ? hit / total : 0;
+}
+
+/* Score a column name against a field's name hints. */
+function nameHintScore(colName, fieldKey) {
+  const spec = FIELD_VOCAB[fieldKey];
+  if (!spec || !spec.nameHints) return 0;
+  const cl = colName.toLowerCase();
+  for (const hint of spec.nameHints) {
+    if (cl.includes(hint)) return 1;
+  }
+  return 0;
+}
+
+const SAMPLE_MAX=500;   // pattern detection is sampled; extraction runs on every row
+
+function sampleRows(rows){
+  if(rows.length<=SAMPLE_MAX)return rows;
+  const step=rows.length/SAMPLE_MAX, out=[];
+  for(let i=0;i<SAMPLE_MAX;i++)out.push(rows[Math.floor(i*step)]);
+  return out;
+}
+function profileReport(rep){
+  const rows=rep.rows, samp=sampleRows(rows), cols={};
+  rep.headers.forEach(h=>{
+    let fill=0; const set=new Set();
+    rows.forEach(r=>{const k=keyOf(r[h]);if(k!==""){fill++;set.add(k);}});
+    const vals=samp.map(r=>r[h]).filter(v=>!isBlank(v)).map(v=>String(v).trim());
+    const full={},embed={};
+    PATTERNS.forEach(pt=>{
+      let f=0,e=0;
+      vals.forEach(v=>{
+        if(pt.re.test(v))f++;
+        else if(pt.ex&&pt.ex.test(v))e++;
+      });
+      if(vals.length){
+        if(f)full[pt.id]=f/vals.length;
+        if(e)embed[pt.id]=e/vals.length;
+      }
+    });
+    cols[h]={fill,distinct:set.size,unique:set.size===fill&&fill>0,
+             fillPct:rows.length?Math.round(1000*fill/rows.length)/10:0,
+             sampled:vals.length,full,embed,derived:DERIVED_NAMES.has(rep.id+"|"+h)};
+  });
+  // system fingerprint: pattern evidence weighted by how much of the column matches
+  const sys={};const ev=[];
+  Object.entries(cols).forEach(([h,c])=>{
+    Object.entries(c.full).forEach(([pid,frac])=>{
+      const pt=PATTERNS.find(x=>x.id===pid);
+      if(!pt||!pt.sys||pt.weak||frac<0.5)return;
+      sys[pt.sys]=(sys[pt.sys]||0)+frac*(pt.idlike?2:1);
+      ev.push({sys:pt.sys,col:h,pat:pt.label,frac:Math.round(100*frac)});
+    });
+  });
+  const best=Object.entries(sys).sort((a,b)=>b[1]-a[1]);
+  rep._prof={cols,system:best.length?best[0][0]:"unknown",
+    systemScores:best,evidence:ev.sort((a,b)=>b.frac-a.frac).slice(0,6)};
+  return rep._prof;
+}
+
+/* ---------- derived columns: extraction only, never invention ---------- */
+const DERIVED_NAMES=new Set();
+function derivedOffers(rep){
+  const out=[];
+  const pr=rep._prof||profileReport(rep);
+  Object.entries(pr.cols).forEach(([h,c])=>{
+    Object.entries(c.embed).forEach(([pid,frac])=>{
+      const pt=PATTERNS.find(x=>x.id===pid);
+      if(!pt||!pt.ex||frac<0.2)return;
+      if((c.full[pid]||0)>0.8)return;        // already is that thing
+      const name=h+" → "+pt.id;
+      out.push({col:h,pat:pt,frac,name,exists:rep.headers.indexOf(name)>=0});
+    });
+  });
+  return out;
+}
+function addDerived(rid,col,patId){
+  const rep=REPORTS.find(r=>r.id===rid);
+  const pt=PATTERNS.find(x=>x.id===patId);
+  if(!rep||!pt||!pt.ex)return;
+  const name=col+" → "+pt.id;
+  if(rep.headers.indexOf(name)>=0)return;
+  let got=0;
+  rep.rows.forEach(r=>{                       // runs on EVERY row, not the sample
+    const v=isBlank(r[col])?"":String(r[col]);
+    const m=v.match(pt.ex);
+    r[name]=m?(m[1]!==undefined?m[1]:m[0]):null;
+    if(r[name])got++;
+  });
+  rep.headers.push(name);
+  DERIVED_NAMES.add(rid+"|"+name);
+  DERIVED_RULES.push({file:rep.name,column:name,from:col,rule:String(pt.ex),
+    pattern:pt.label,rowsFilled:got,rows:rep.rows.length});
+  delete rep._keysets;delete rep._prof;
+  invalidate();scanConnections();renderAll();
+}
+const DERIVED_RULES=[];
+
+/* ---------- suggestions: proposed, never applied ---------- */
+function suggestFor(rep){
+  const pr=rep._prof||profileReport(rep);
+  let idBest=null,idScore=0,idNote="";
+  Object.entries(pr.cols).forEach(([h,c])=>{
+    if(c.fill===0)return;
+    const uniqRatio=c.distinct/c.fill;          // 1.0 = one row per value
+    if(uniqRatio<0.99||c.fillPct<95)return;     // near-unique still qualifies, flagged below
+    let sc=uniqRatio*(c.fillPct/100)+(c.unique?0.5:0);
+    Object.entries(c.full).forEach(([pid,frac])=>{
+      const pt=PATTERNS.find(x=>x.id===pid);
+      if(pt&&pt.idlike&&frac>=0.5)sc+=2*frac;
+    });
+    if(c.derived)sc+=0.25;
+    if(sc>idScore){idScore=sc;idBest=h;
+      idNote=c.unique?"":(c.fill-c.distinct)+" value(s) repeat — the build will block until fixed";}
+  });
+  /* Scope = "which programme/unit is this row about". Name words carry real
+     signal here, so they are used ALONGSIDE the value pattern, never alone. */
+  const SCOPE_STRONG=["project","projekt","programme","program"];   // names the thing directly
+  const SCOPE_WEAK=["business unit","plant","model","type"];         // could be a scope, weaker
+  let scBest=null,scScore=0,scopeNote="";
+  Object.entries(pr.cols).forEach(([h,c])=>{
+    if(c.distinct<2||c.distinct>300||c.fill===0)return;
+    let sc=1/Math.log(2+c.distinct);
+    const hl=h.toLowerCase();
+    /* The contract itself names the scope field, so an exact match with it wins
+       over any other project-ish column. */
+    const contractScope=(TARGET.find(t=>t.fixed)||{}).h;
+    if(contractScope&&h===contractScope)sc+=2.5;
+    if(SCOPE_STRONG.some(w=>hl.includes(w)))sc+=2.0;
+    else if(SCOPE_WEAK.some(w=>hl.includes(w)))sc+=0.6;
+    Object.entries(c.full).forEach(([pid,frac])=>{
+      const pt=PATTERNS.find(x=>x.id===pid);
+      if(pt&&pt.scopelike&&frac>=0.5)sc+=0.6*frac;
+    });
+    if(sc>=1.0&&sc>scScore){scScore=sc;scBest=h;   // below 1.0 nothing is proposed
+      scopeNote=c.fillPct<100?("only "+c.fillPct+"% of rows carry a value — the rest cannot be scoped"):"";}
+  });
+  const map={};
+  // Phase 1: header-name matching (existing, strong signal)
+  TARGET.forEach(tg=>{
+    let best=null,bs=0;
+    rep.headers.forEach(col=>{const v=headerScore(tg.h,col);if(v>=70&&v>bs){bs=v;best=col;}});
+    if(best)map[tg.h]=best;
+  });
+  // Phase 2: vocabulary matching — fills fields that name matching missed.
+  // Only proposes a column if it is not already mapped to another field and
+  // the vocab match exceeds the minimum threshold.
+  const used=new Set(Object.values(map));
+  const samp=sampleRows(rep.rows);
+  TARGET.forEach(tg=>{
+    if(map[tg.h])return;                              // already mapped by name
+    if(tg.fixed)return;                               // fixed value, not a column
+    const spec=FIELD_VOCAB[tg.h];
+    if(!spec)return;                                  // no vocabulary for this field
+    let bestCol=null,bestScore=0;
+    rep.headers.forEach(col=>{
+      if(used.has(col))return;                        // already used for another field
+      const vals=samp.map(r=>r[col]).filter(v=>!isBlank(v));
+      if(!vals.length)return;
+      let sc=vocabScore(vals,tg.h);
+      // name hints add to the score (vendor, material — cannot enumerate values)
+      sc+=nameHintScore(col,tg.h)*0.3;
+      if(sc>=(spec.minMatch||0.3)&&sc>bestScore){bestScore=sc;bestCol=col;}
+    });
+    if(bestCol){map[tg.h]=bestCol;used.add(bestCol);}
+  });
+  return {idCol:idBest,idNote,scopeCol:scBest,scopeNote,map};
+}
+function applySuggestion(rid){
+  const rep=REPORTS.find(r=>r.id===rid);
+  const s=suggestFor(rep);
+  const c=RCFG[rid];
+  if(s.idCol)c.idCol=s.idCol;
+  if(s.scopeCol&&!c.scopeCol)c.scopeCol=s.scopeCol;
+  Object.entries(s.map).forEach(([k,v])=>{if(!c.map[k])c.map[k]=v;});
+  invalidate();renderAll();
+}
+
+/* ---------- connection scan: exact, on every row ---------- */
+let CONN=[];
+function scanConnections(){
+  CONN=[];
+  for(let i=0;i<REPORTS.length;i++)for(let j=i+1;j<REPORTS.length;j++){
+    const a=REPORTS[i],b=REPORTS[j];
+    const A=colKeySets(a),B=colKeySets(b);
+    const pairs=[];
+    a.headers.forEach(ha=>{
+      const ca=A[ha];if(ca.distinct<2)return;
+      b.headers.forEach(hb=>{
+        const cb=B[hb];if(cb.distinct<2)return;
+        const small=ca.set.size<=cb.set.size?ca.set:cb.set;
+        const big=ca.set.size<=cb.set.size?cb.set:ca.set;
+        let ov=0;small.forEach(k=>{if(big.has(k))ov++;});
+        if(!ov)return;
+        const tier=(ca.distinct===ca.filled?1:0)+(cb.distinct===cb.filled?1:0);
+        pairs.push({ha,hb,ov,tier,
+          covA:Math.round(1000*ov/Math.max(1,ca.distinct))/10,
+          covB:Math.round(1000*ov/Math.max(1,cb.distinct))/10});
+      });
+    });
+    pairs.sort((x,y)=>(y.tier-x.tier)||(y.ov-x.ov));
+    CONN.push({a:a.id,b:b.id,aName:a.name,bName:b.name,pairs});
+  }
+}
+function rescan(){
+  REPORTS.forEach(r=>{delete r._keysets;delete r._prof;profileReport(r);});
+  scanConnections();renderAll();
+}
+
+/* ---------- profiles saved as JSON, keyed by header fingerprint ---------- */
+/* Fingerprint = the file's ORIGINAL column set. Derived columns must not change
+   it, or a saved profile would stop matching the very file it was saved from. */
+function fingerprint(rep){
+  const s=(rep.baseHeaders||rep.headers).slice().sort().join("|");
+  let h=5381;for(let i=0;i<s.length;i++)h=((h*33)^s.charCodeAt(i))>>>0;
+  return "fp"+h.toString(16)+"-"+(rep.baseHeaders||rep.headers).length;
+}
+function saveProfiles(){
+  const out={saved:new Date().toISOString(),profiles:{}};
+  REPORTS.forEach(r=>{
+    const c=RCFG[r.id];
+    out.profiles[fingerprint(r)]={file:r.name,system:(r._prof||{}).system||"unknown",
+      idCol:c.idCol,idCol2:c.idCol2,scopeCol:c.scopeCol,
+      scopeVals:[...c.scopeVals],map:c.map,
+      derived:DERIVED_RULES.filter(d=>d.file===r.name).map(d=>({column:d.column,from:d.from,pattern:d.pattern}))};
+  });
+  const blob=new Blob([JSON.stringify(out,null,1)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="sas_builder_profiles.json";a.click();
+}
+document.getElementById("profIn").addEventListener("change",async e=>{
+  const f=(e.target.files||[])[0];e.target.value="";
+  if(!f)return;
+  try{
+    const j=JSON.parse(await f.text());
+    let hit=0,miss=[];
+    REPORTS.forEach(r=>{
+      const pf=j.profiles?j.profiles[fingerprint(r)]:null;
+      if(!pf){miss.push(r.name);return;}
+      hit++;
+      (pf.derived||[]).forEach(d=>{
+        const pt=PATTERNS.find(x=>x.label===d.pattern);
+        if(pt&&r.headers.indexOf(d.column)<0&&r.headers.indexOf(d.from)>=0)addDerived(r.id,d.from,pt.id);
+      });
+      const c=RCFG[r.id];
+      if(pf.idCol&&r.headers.indexOf(pf.idCol)>=0)c.idCol=pf.idCol;
+      if(pf.idCol2&&r.headers.indexOf(pf.idCol2)>=0)c.idCol2=pf.idCol2;
+      if(pf.scopeCol&&r.headers.indexOf(pf.scopeCol)>=0)c.scopeCol=pf.scopeCol;
+      if(pf.scopeVals)c.scopeVals=new Set(pf.scopeVals);
+      Object.entries(pf.map||{}).forEach(([k,v])=>{
+        if(v==="__fixed__"||r.headers.indexOf(v)>=0)c.map[k]=v;});
+    });
+    invalidate();renderAll();
+    alert("Profiles applied to "+hit+" file(s)."+(miss.length?
+      "\nNo saved profile matched: "+miss.join(", ")+
+      "\n(a profile matches only a file with the exact same column set)":""));
+  }catch(err){alert("Could not read that profile file: "+err.message);}
+});
+
+/* ================================================================
+   KEY FINDER — proves or disproves a link between two reports.
+   Per column: the set of normalised keys, its distinct count and how
+   many rows carry a value. Then every A×B pair is scored by real
+   overlap. Nothing is inferred from column names.
+   ================================================================ */
+function colKeySets(rep){
+  if(rep._keysets)return rep._keysets;
+  const out={};
+  rep.headers.forEach(h=>{
+    const set=new Set();let filled=0;
+    rep.rows.forEach(r=>{const k=keyOf(r[h]);if(k!==""){set.add(k);filled++;}});
+    out[h]={set,distinct:set.size,filled};
+  });
+  rep._keysets=out;return out;
+}
+function renderKeyPickers(){
+  const a=document.getElementById("kA"),b=document.getElementById("kB");
+  const opts=REPORTS.map((r,i)=>'<option value="'+r.id+'">'+esc(r.name)+'</option>').join("");
+  const keepA=a.value,keepB=b.value;
+  a.innerHTML=opts;b.innerHTML=opts;
+  if(keepA&&REPORTS.some(r=>r.id===keepA))a.value=keepA;
+  if(keepB&&REPORTS.some(r=>r.id===keepB))b.value=keepB;
+  else if(REPORTS.length>1)b.value=REPORTS[1].id;
+  document.getElementById("secKey").classList.toggle("hidden",REPORTS.length<2);
+}
+function runKeyFinder(){
+  const ra=REPORTS.find(r=>r.id===document.getElementById("kA").value);
+  const rb=REPORTS.find(r=>r.id===document.getElementById("kB").value);
+  const out=document.getElementById("keyOut");
+  if(!ra||!rb||ra.id===rb.id){out.innerHTML='<div class="warnbox">Pick two different reports.</div>';return;}
+  out.innerHTML='<div class="infobox">Comparing '+(ra.headers.length*rb.headers.length)+
+    ' column pairs…</div>';
+  setTimeout(()=>{
+    const A=colKeySets(ra),B=colKeySets(rb);
+    const res=[];
+    ra.headers.forEach(ha=>{
+      const a=A[ha];if(a.distinct<2)return;
+      rb.headers.forEach(hb=>{
+        const b=B[hb];if(b.distinct<2)return;
+        const small=a.set.size<=b.set.size?a.set:b.set;
+        const big=a.set.size<=b.set.size?b.set:a.set;
+        let ov=0;const samples=[];
+        small.forEach(k=>{if(big.has(k)){ov++;if(samples.length<3)samples.push(k);}});
+        if(ov===0)return;
+        res.push({ha,hb,ov,samples,
+          aDist:a.distinct,bDist:b.distinct,aFill:a.filled,bFill:b.filled,
+          aUniq:a.distinct===a.filled,bUniq:b.distinct===b.filled,
+          covA:Math.round(1000*ov/Math.max(1,a.distinct))/10,
+          covB:Math.round(1000*ov/Math.max(1,b.distinct))/10});
+      });
+    });
+    /* A key must identify a row. Uniqueness decides the tier; overlap only
+       orders within a tier. Sorting by overlap alone promotes columns like
+       Material, which overlap heavily and identify nothing. */
+    res.forEach(r=>{r.tier=(r.aUniq?1:0)+(r.bUniq?1:0);});
+    res.sort((x,y)=> (y.tier-x.tier) || (y.ov-x.ov) || (y.covA+y.covB-x.covA-x.covB));
+    if(!res.length){
+      out.innerHTML='<div class="warnbox"><b>No column pair shares a single value.</b> '+
+        'These two reports have no key in common as loaded. Merging them by id is not possible '+
+        'without a column that actually contains the other system\'s number.</div>';return;
+    }
+    const keyCands=res.filter(r=>r.tier===2).length;
+    let h='<div class="'+(keyCands?'okbox':'warnbox')+'"><b>'+
+      (keyCands? keyCands+' pair(s) behave like a real key.'
+               : 'No pair behaves like a key.')+'</b> '+
+      (keyCands? 'A KEY CANDIDATE is unique on both sides — one value, one row, both files. '+
+                 'Pairs below it overlap but do not identify a row, so they cannot be used to merge NCs.'
+               : 'Every overlapping pair repeats on at least one side, so no pair can decide whether '+
+                 'two rows are the same NC. These reports cannot be merged by id as loaded.')+'</div>'+
+      '<div class="scroll"><table><tr><th>verdict</th><th>column in '+esc(ra.name)+'</th>'+
+      '<th>column in '+esc(rb.name)+'</th><th>overlapping values</th>'+
+      '<th>covers A</th><th>covers B</th><th>unique in A</th><th>unique in B</th>'+
+      '<th>examples</th></tr>';
+    res.slice(0,60).forEach(r=>{
+      const vp=r.tier===2?'<span class="pill p-ok">KEY CANDIDATE</span>'
+        :(r.tier===1?'<span class="pill p-warn">one-sided</span>'
+                    :'<span class="pill p-bad">not a key</span>');
+      h+='<tr><td>'+vp+'</td><td><code>'+esc(r.ha)+'</code></td><td><code>'+esc(r.hb)+'</code></td>'+
+        '<td><b>'+r.ov+'</b></td><td>'+r.covA+'%</td><td>'+r.covB+'%</td>'+
+        '<td>'+(r.aUniq?'<span class="pill p-ok">yes</span>':'<span class="pill p-warn">repeats</span>')+'</td>'+
+        '<td>'+(r.bUniq?'<span class="pill p-ok">yes</span>':'<span class="pill p-warn">repeats</span>')+'</td>'+
+        '<td class="mono">'+r.samples.map(esc).join(" ")+'</td></tr>';
+    });
+    h+='</table></div>';
+    if(res.length>60)h+='<div class="evid">showing the top 60 of '+res.length+'.</div>';
+    out.innerHTML=h;
+  },30);
+}
+
+/* ================================================================
+   APPEND MODE — per-report config
+   ================================================================ */
+function ordered(){return REPORTS.slice().sort((a,b)=>RCFG[a.id].order-RCFG[b.id].order);}
+function distinctValues(rep,col){
+  const m=new Map();
+  rep.rows.forEach(r=>{const v=r[col];const s=(v===null||v===undefined)?"":String(v).trim();
+    m.set(s,(m.get(s)||0)+1);});
+  return [...m.entries()].sort((a,b)=>b[1]-a[1]);
+}
+function scopedRows(rep){
+  const c=RCFG[rep.id];
+  if(!c.scopeCol||!c.scopeVals.size)return rep.rows;
+  return rep.rows.filter(r=>{
+    const v=r[c.scopeCol];
+    return c.scopeVals.has((v===null||v===undefined)?"":String(v).trim());
+  });
+}
+/* The row's key: the id column, or the fallback column when the id is blank.
+   Rows with neither are unkeyable and are skipped, never guessed at. */
+function rowKey(rep,row){
+  const c=RCFG[rep.id];
+  let k=c.idCol? keyOf(row[c.idCol]) : "";
+  if(k===""&&c.idCol2)k=keyOf(row[c.idCol2]);
+  return k;
+}
+function idStats(rep){
+  const c=RCFG[rep.id];
+  if(!c.idCol)return null;
+  const rows=scopedRows(rep);
+  const counts=new Map();let blank=0,viaFallback=0;
+  rows.forEach(r=>{
+    const primary=keyOf(r[c.idCol]);
+    const k=rowKey(rep,r);
+    if(k===""){blank++;return;}
+    if(primary===""&&c.idCol2)viaFallback++;
+    counts.set(k,(counts.get(k)||0)+1);});
+  const dups=[];let worst=1;
+  counts.forEach((v,k)=>{if(v>1){worst=Math.max(worst,v);if(dups.length<8)dups.push(k+" ×"+v);}});
+  let dupCount=0;counts.forEach(v=>{if(v>1)dupCount++;});
+  return {rows:rows.length,distinct:counts.size,blank,viaFallback,dupCount,worst,dups};
+}
+function renderAppend(){
+  const on=MODE==="append"&&REPORTS.length;
+  document.getElementById("secApp").classList.toggle("hidden",!on);
+  if(!on){document.getElementById("appArea").innerHTML="";return;}
+  let h="";
+  ordered().forEach((r,i)=>{
+    const c=RCFG[r.id];
+    const st=idStats(r);
+    h+='<div class="repcard"><div class="top">'+
+      '<span class="rank">priority '+(i+1)+'</span><b>'+esc(r.name)+'</b>'+
+      '<span class="small">'+r.rows.length+' rows</span>'+
+      '<span class="spacer" style="flex:1"></span>'+
+      '<button class="btn small" onclick="moveRep(\''+r.id+'\',-1)">▲</button>'+
+      '<button class="btn small" onclick="moveRep(\''+r.id+'\',1)">▼</button></div>'+
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;align-items:flex-end">'+
+      '<div>NC id column<br><select onchange="setIdCol(\''+r.id+'\',this.value)">'+
+        '<option value="">— choose —</option>'+optIdx(r.headers,c.idCol)+
+      '</select></div>'+
+      '<div>fallback id column <span class="small">(optional — used only when the id above is blank)</span><br>'+
+      '<select onchange="setIdCol2(\''+r.id+'\',this.value)">'+
+        '<option value="">— none —</option>'+optIdx(r.headers,c.idCol2)+
+      '</select></div>'+
+      '<div>scope column <span class="small">(optional)</span><br>'+
+      '<select onchange="setScopeCol(\''+r.id+'\',this.value)">'+
+        '<option value="">— keep all rows —</option>'+optIdx(r.headers,c.scopeCol)+
+      '</select></div></div>';
+    if(c.scopeCol){
+      const vals=distinctValues(r,c.scopeCol);
+      const shown=vals.slice(0,200);
+      h+='<div class="small" style="margin-top:8px">tick the values to KEEP — none ticked keeps all '+
+         r.rows.length+' rows ('+vals.length+' distinct values'+
+         (vals.length>200?', showing the 200 most common':'')+')</div><div class="vals">';
+      shown.forEach(([v,n])=>{
+        h+='<label><input type="checkbox" '+(c.scopeVals.has(v)?'checked':'')+
+          ' onchange="toggleScope(\''+r.id+'\',this.checked,this.getAttribute(\'data-v\'))" '+
+          'data-v="'+esc(v)+'"> '+esc(v===""?"(blank)":v)+' <span class="small">'+n+'</span></label>';
+      });
+      h+='</div>';
+    }
+    if(st){
+      const bad=st.dupCount>0;
+      h+='<div class="'+(bad?'warnbox':'okbox')+'" style="margin-top:9px;margin-bottom:0">'+
+        '<span class="pill '+(bad?'p-bad':'p-ok')+'">'+(bad?'DUPLICATE IDS':'ONE ROW PER ID')+'</span> '+
+        st.rows+' rows in scope · '+st.distinct+' distinct ids · '+st.blank+' blank ids'+
+        (st.viaFallback?' · '+st.viaFallback+' keyed by the fallback column':'')+
+        (bad?' · '+st.dupCount+' id(s) repeat, worst ×'+st.worst+
+          '<div class="evid">'+st.dups.map(esc).join(" · ")+'</div>'+
+          '<div class="small">The build is blocked while any id repeats inside one file — '+
+          'the export would carry the duplication straight into the dashboard.</div>':'')+
+        (st.blank?'<div class="small">Rows with a blank id cannot be merged and are skipped.</div>':'')+
+        '</div>';
+    }
+    h+='</div>';
+  });
+  document.getElementById("appArea").innerHTML=h;
+}
+function moveRep(rid,d){
+  const list=ordered();const i=list.findIndex(r=>r.id===rid);
+  const j=i+d;if(j<0||j>=list.length)return;
+  const a=RCFG[list[i].id],b=RCFG[list[j].id];
+  const t=a.order;a.order=b.order;b.order=t;
+  invalidate();renderAll();
+}
+function setIdCol(rid,i){const r=REPORTS.find(x=>x.id===rid);RCFG[rid].idCol=pick(r.headers,i);invalidate();renderAll();}
+function setIdCol2(rid,i){const r=REPORTS.find(x=>x.id===rid);RCFG[rid].idCol2=pick(r.headers,i);invalidate();renderAll();}
+function setScopeCol(rid,i){const r=REPORTS.find(x=>x.id===rid);RCFG[rid].scopeCol=pick(r.headers,i);RCFG[rid].scopeVals=new Set();invalidate();renderAll();}
+function toggleScope(rid,on,v){
+  if(on)RCFG[rid].scopeVals.add(v);else RCFG[rid].scopeVals.delete(v);
+  invalidate();renderAll();
+}
+
+/* ---------------- append mapping (per report) ---------------- */
+function renderMapTabs(){
+  const on=MODE==="append"&&REPORTS.length;
+  document.getElementById("secMapA").classList.toggle("hidden",!on);
+  if(!on)return;
+  if(!MAPTAB||!REPORTS.some(r=>r.id===MAPTAB))MAPTAB=REPORTS[0].id;
+  document.getElementById("mapTabs").innerHTML=ordered().map(r=>{
+    const n=Object.keys(RCFG[r.id].map).filter(k=>RCFG[r.id].map[k]).length;
+    return '<div class="tab'+(r.id===MAPTAB?' on':'')+'" onclick="setMapTab(\''+r.id+'\')">'+
+      esc(r.name)+' <span class="small">'+n+'/22</span></div>';
+  }).join("");
+  const rep=REPORTS.find(r=>r.id===MAPTAB);
+  const cm=RCFG[rep.id].map;
+  let h='<tr><th style="width:210px">Target column (exact)</th><th style="width:70px">Need</th>'+
+        '<th>Column in '+esc(rep.name)+'</th><th>What it drives</th></tr>';
+  TARGET.forEach(tg=>{
+    const cur=cm[tg.h]||"";
+    let opts='<option value="">— not from this report —</option>';
+    if(tg.fixed)opts+='<option value="__fixed__"'+(cur==="__fixed__"?' selected':'')+
+      '>fixed value: '+esc(tg.fixed)+'</option>';
+    opts+=rep.headers.map((c,i)=>'<option value="'+i+'"'+(c===cur?' selected':'')+'>'+esc(c)+'</option>').join("");
+    h+='<tr><td><code>'+esc(tg.h)+'</code></td>'+
+      '<td>'+(tg.req?'<span class="pill p-bad">required</span>':'<span class="pill p-none">optional</span>')+'</td>'+
+      '<td><select onchange="setRMap(\''+rep.id+'\',this.getAttribute(\'data-t\'),this.value)" '+
+      'data-t="'+esc(tg.h)+'">'+opts+'</select></td>'+
+      '<td class="small">'+esc(tg.why)+'</td></tr>';
+  });
+  document.getElementById("mapTableA").innerHTML=h;
+}
+function setMapTab(rid){MAPTAB=rid;renderMapTabs();}
+function setRMap(rid,target,val){
+  const rep=REPORTS.find(x=>x.id===rid);
+  if(!val)delete RCFG[rid].map[target];
+  else if(val==="__fixed__")RCFG[rid].map[target]="__fixed__";
+  else{const h=pick(rep.headers,val);if(h)RCFG[rid].map[target]=h;else delete RCFG[rid].map[target];}
+  invalidate();renderMapTabs();renderVerdict();
+}
+function autoMapReport(){
+  const rep=REPORTS.find(r=>r.id===MAPTAB);if(!rep)return;
+  const cm=RCFG[rep.id].map;
+  TARGET.forEach(tg=>{
+    if(cm[tg.h])return;
+    let best=null,bs=0;
+    rep.headers.forEach(col=>{const s=headerScore(tg.h,col);if(s>=70&&s>bs){bs=s;best=col;}});
+    if(best)cm[tg.h]=best;
+  });
+  invalidate();renderMapTabs();renderVerdict();
+}
+function clearMapReport(){
+  const rep=REPORTS.find(r=>r.id===MAPTAB);if(!rep)return;
+  RCFG[rep.id].map={};invalidate();renderMapTabs();renderVerdict();
+}
+
+/* ================================================================
+   MERGE — the part that has to be right.
+   Reports are processed in priority order. First value wins; later
+   reports fill ONLY empty cells. Nothing is overwritten, and every
+   refused overwrite is recorded as a conflict.
+   ================================================================ */
+function mergeAll(){
+  const list=ordered();
+  const blockers=[];
+  list.forEach(r=>{
+    const c=RCFG[r.id];
+    if(!c.idCol){blockers.push(r.name+": no NC id column chosen");return;}
+    const st=idStats(r);
+    if(st&&st.dupCount>0)blockers.push(r.name+": "+st.dupCount+" id(s) repeat inside the file (worst ×"+st.worst+")");
+    if(!Object.keys(c.map).length)blockers.push(r.name+": no columns mapped");
+  });
+  if(blockers.length)return {ok:false,blockers};
+
+  const index=new Map();      // key -> output row
+  const srcOf=new Map();      // key -> [file names]
+  const conflicts=[];
+  let skippedBlank=0,newRows=0,mergedRows=0,filled=0,rowsRead=0;
+  const per={};   // per file: rows read, NCs created, rows merged into an existing NC
+
+  list.forEach(rep=>{
+    const c=RCFG[rep.id];
+    const rows=scopedRows(rep);
+    per[rep.name]={read:rows.length,created:0,merged:0,skipped:0,filled:0};
+    rowsRead+=rows.length;
+    rows.forEach(row=>{
+      const k=rowKey(rep,row);
+      if(k===""){skippedBlank++;per[rep.name].skipped++;return;}
+      const vals={};
+      TARGET.forEach(tg=>{
+        const m=c.map[tg.h];
+        if(!m)return;
+        vals[tg.h]= m==="__fixed__" ? tg.fixed :
+          (row[m]===undefined?null:row[m]);
+      });
+      if(!index.has(k)){
+        const o={};
+        TARGET.forEach(tg=>{o[tg.h]= (tg.h in vals)? vals[tg.h] : null;});
+        // the id column always wins over a mapped Notification value
+        if(isBlank(o["Notification"]))o["Notification"]=
+          isBlank(row[c.idCol])? (c.idCol2?row[c.idCol2]:null) : row[c.idCol];
+        index.set(k,o);srcOf.set(k,[rep.name]);newRows++;per[rep.name].created++;
+      }else{
+        const o=index.get(k);
+        srcOf.get(k).push(rep.name);mergedRows++;per[rep.name].merged++;
+        TARGET.forEach(tg=>{
+          if(!(tg.h in vals))return;
+          const nv=vals[tg.h];
+          if(isBlank(nv))return;
+          if(isBlank(o[tg.h])){o[tg.h]=nv;filled++;per[rep.name].filled++;return;}
+          if(normKey(o[tg.h])!==normKey(nv)&&conflicts.length<5000){
+            conflicts.push({nc:k,field:tg.h,kept:o[tg.h],keptFrom:srcOf.get(k)[0],
+                            ignored:nv,ignoredFrom:rep.name});
+          }
+        });
+      }
+    });
+  });
+
+  const out=[...index.values()];
+  const keys=[...index.keys()];
+
+  // ---- clean TC notifications: IR-001579/A;1-... -> IR-001579 ----
+  // The full Object string is the right TITLE but NOT the right NC id.
+  // Extract the short IR id for the Notification column only.
+  const _tcIdRe=/^(IR-\d{4,8})/;
+  out.forEach(o=>{
+    const n=String(o["Notification"]||"").trim();
+    const m=n.match(_tcIdRe);
+    if(m && n.length>m[1].length) o["Notification"]=m[1];
+  });
+
+  // ---- TC supplier/production rule: has a vendor -> supplier, no vendor -> production ----
+  // Teamcenter has no Z2/Z3 type. The rule (per SAS owner): a vendor name means
+  // it is a supplier NC, no vendor means production. Only applied to TC rows
+  // (those whose notification is an IR id) that have no type already.
+  out.forEach(o=>{
+    const n=String(o["Notification"]||"").trim();
+    if(!/^IR-/.test(n))return;                        // TC rows only
+    const hasType=String(o["Notification Type"]||"").trim();
+    if(hasType)return;                                // already typed, leave it
+    const vendor=String(o["[Vendor NC]"]||"").trim();
+    const hasVendor=vendor&&vendor.toLowerCase()!=="nan"&&vendor.toLowerCase()!=="none"&&vendor!=="-";
+    o["Notification Type"]=hasVendor?"Z2 - Procurem. Complaint":"Z3 - Production NC";
+  });
+
+  // ---- TC severity -> defect class: *-Major = 4, *-Minor / *-Observation = 2 ----
+  // Teamcenter severity (Low-Minor, Medium-Major, Low-Observation) is not the
+  // SAP 0-5 scale. Rule: any *-Major -> Major (4); *-Minor and *-Observation
+  // -> Minor (2). The dashboard reads 4-5 as Major, 0-3 as Minor.
+  out.forEach(o=>{
+    const dc=String(o["Defect Class"]||"").trim();
+    if(/^(low|medium|high)-major$/i.test(dc))o["Defect Class"]=4;
+    else if(/^(low|medium|high)-(minor|observation)$/i.test(dc))o["Defect Class"]=2;
+  });
+
+  // ---- clean closing dates: non-date values like "Open" become blank ----
+  out.forEach(o=>{
+    const cd=o["Closing date"];
+    if(cd!==null&&cd!==undefined){
+      const s=String(cd).trim();
+      const isDate=/^\d{4}-\d{2}-\d{2}/.test(s)||
+                   (cd instanceof Date)||
+                   (!isNaN(parseFloat(s))&&parseFloat(s)>20000);
+      if(!isDate)o["Closing date"]=null;
+    }
+  });
+
+  // ---- clean status values: TC vocabulary -> dashboard vocabulary ----
+  // Special case: "CLOSE AND RETURN TO WORK" is CLOSED in Teamcenter but the
+  // process treats it as OPEN (the item returned to the line, work continues).
+  // We flag it Open, blank the closing date so the dashboard accepts it, and
+  // record what happened in Status Note so nothing is lost.
+  const STATUS_MAP={"NOTIFIED ENGINEERING ISSUE":"Open",
+    "Cancelled":"Deleted","OPEN":"Open","Released":"Closed","Closed":"Closed"};
+  out.forEach(o=>{
+    const st=String(o["Notif. Status"]||"").trim();
+    if(st==="CLOSE AND RETURN TO WORK"){
+      const origClose=o["Closing date"];
+      o["Notif. Status"]="Open";
+      o["Status Note"]="Closed in Teamcenter (return to work"+
+        (origClose&&String(origClose).trim()&&String(origClose).trim()!=="Open"?
+          " "+String(origClose).slice(0,10):"")+"), tracked as Open";
+      o["Closing date"]=null;   // blank so 'Open with closing date' does not trip the validator
+    } else if(STATUS_MAP[st]){
+      o["Notif. Status"]=STATUS_MAP[st];
+    } else if(!st||st.toLowerCase()==="nan"||st.toLowerCase()==="none"){
+      o["Notif. Status"]="Open";
+    }
+  });
+
+  // conservation guard
+  if(out.length!==index.size)return {ok:false,blockers:["internal row count mismatch — build aborted"]};
+
+  // coverage per field, measured on the real output
+  const cov={};
+  TARGET.forEach(tg=>{
+    let n=0;out.forEach(o=>{if(!isBlank(o[tg.h]))n++;});
+    cov[tg.h]={filled:n,pct:out.length?Math.round(1000*n/out.length)/10:0};
+  });
+  const provenance=keys.map(k=>({nc:index.get(k)["Notification"],
+    sources:[...new Set(srcOf.get(k))].join(" + ")}));
+  return {ok:true,out,cov,conflicts,provenance,per,
+    stats:{rowsRead,newRows,mergedRows,skippedBlank,filled,rows:out.length}};
+}
+
+/* ---------------- join mode (unchanged engine) ---------------- */
+function headerScore(target,col){
+  const t=target.toLowerCase().replace(/[^a-z0-9]/g,"");
+  const c=col.toLowerCase().replace(/[^a-z0-9]/g,"");
+  if(!t||!c)return 0;
+  if(t===c)return 100;
+  /* Containment only counts when the shorter name is a substantial part of the
+     longer one. Without this, 'ID' scores 70 against 'WBS Element Id (CoPQ)'
+     and a Teamcenter object id gets suggested for a cost-element column. */
+  if(c.includes(t)||t.includes(c)){
+    const short=Math.min(t.length,c.length), long=Math.max(t.length,c.length);
+    if(short>=5 && short/long>=0.5)return 70;
+  }
+  const tk=new Set(target.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  const ck=new Set(col.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  let hit=0;tk.forEach(x=>{if(ck.has(x))hit++;});
+  return hit?Math.round(40*hit/tk.size):0;
+}
+function autoMap(){
+  TARGET.forEach(t=>{
+    if(MAP[t.h])return;
+    let best=null,bs=0;
+    REPORTS.forEach(r=>r.headers.forEach(col=>{
+      const s=headerScore(t.h,col);if(s>=70&&s>bs){bs=s;best={rid:r.id,col};}}));
+    if(best)MAP[t.h]=best;
+  });
+  renderAll();
+}
+function clearMap(){MAP={};JOINS={};renderAll();}
+function renderBase(){
+  const on=MODE==="join"&&REPORTS.length;
+  document.getElementById("secBase").classList.toggle("hidden",!on);
+  document.getElementById("secMap").classList.toggle("hidden",!on);
+  if(!on)return;
+  document.getElementById("baseChoice").innerHTML=REPORTS.map(r=>
+    '<label style="margin-right:16px"><input type="radio" name="base" '+
+    (BASE===r.id?'checked':'')+' onchange="setBase(\''+r.id+'\')"> '+esc(r.name)+
+    ' <span class="meta">('+r.rows.length+' rows)</span></label>').join("");
+  const info=document.getElementById("baseInfo");
+  if(BASE){const r=REPORTS.find(x=>x.id===BASE);
+    info.textContent="Base: "+r.name+" — "+r.rows.length+" rows. This row count is what the finished export must have.";
+  }else info.textContent="";
+}
+function setBase(rid){BASE=rid;renderAll();}
+function renderMapJoin(){
+  const t=document.getElementById("mapTable");
+  if(MODE!=="join"||!REPORTS.length){t.innerHTML="";return;}
+  let h='<tr><th style="width:210px">Target column (exact)</th><th style="width:70px">Need</th>'+
+        '<th>Source report</th><th>Source column</th><th>What it drives</th></tr>';
+  TARGET.forEach(tg=>{
+    const m=MAP[tg.h]||null;
+    const opts='<option value="">— not mapped —</option>'+
+      (tg.fixed?'<option value="__fixed__"'+(m&&m.fixed?' selected':'')+'>fixed value: '+esc(tg.fixed)+'</option>':'')+
+      REPORTS.map(r=>'<option value="'+r.id+'"'+(m&&m.rid===r.id?' selected':'')+'>'+
+        esc(r.name)+(r.id===BASE?' (base)':'')+'</option>').join("");
+    let colSel='<span class="small">—</span>';
+    if(m&&m.rid){
+      const r=REPORTS.find(x=>x.id===m.rid);
+      if(r)colSel='<select onchange="setCol(this.getAttribute(\'data-t\'),this.value)" data-t="'+esc(tg.h)+'">'+
+        '<option value="">— choose —</option>'+optIdx(r.headers,m.col)+'</select>';
+    }
+    h+='<tr><td><code>'+esc(tg.h)+'</code></td>'+
+      '<td>'+(tg.req?'<span class="pill p-bad">required</span>':'<span class="pill p-none">optional</span>')+'</td>'+
+      '<td><select onchange="setSrc(this.getAttribute(\'data-t\'),this.value)" data-t="'+esc(tg.h)+'">'+opts+'</select></td>'+
+      '<td>'+colSel+'</td><td class="small">'+esc(tg.why)+'</td></tr>';
+  });
+  t.innerHTML=h;
+}
+function setSrc(target,val){
+  if(!val)delete MAP[target];
+  else if(val==="__fixed__")MAP[target]={fixed:true};
+  else MAP[target]={rid:val,col:""};
+  renderAll();
+}
+function setCol(target,idx){
+  const m=MAP[target];if(!m)return;
+  const r=REPORTS.find(x=>x.id===m.rid);if(!r)return;
+  m.col=pick(r.headers,idx);renderAll();
+}
+function analyseJoin(baseRep,otherRep,baseCol,otherCol){
+  const baseKeys=baseRep.rows.map(r=>keyOf(r[baseCol]));
+  const otherKeys=otherRep.rows.map(r=>keyOf(r[otherCol]));
+  const baseNonEmpty=baseKeys.filter(k=>k!=="");
+  const counts=new Map();
+  otherKeys.forEach(k=>{if(k!=="")counts.set(k,(counts.get(k)||0)+1);});
+  let dupKeys=0,maxDup=1;
+  counts.forEach(v=>{if(v>1){dupKeys++;if(v>maxDup)maxDup=v;}});
+  const otherSet=new Set(counts.keys());
+  let matched=0;const unmatchedSamples=[];
+  baseKeys.forEach((k,i)=>{
+    if(k==="")return;
+    if(otherSet.has(k))matched++;
+    else if(unmatchedSamples.length<5)unmatchedSamples.push(String(baseRep.rows[i][baseCol]));
+  });
+  const stats={baseRows:baseRep.rows.length,baseBlankKeys:baseKeys.length-baseNonEmpty.length,
+    baseDistinct:new Set(baseNonEmpty).size,otherRows:otherRep.rows.length,
+    otherDistinct:otherSet.size,dupKeys,maxDup,matched,
+    unmatched:baseNonEmpty.length-matched,
+    pct:baseNonEmpty.length?Math.round(1000*matched/baseNonEmpty.length)/10:0,unmatchedSamples};
+  let verdict;
+  if(dupKeys>0)verdict="UNSAFE";
+  else if(matched===0)verdict="EMPTY";
+  else if(stats.unmatched>0)verdict="PARTIAL";
+  else verdict="SAFE";
+  return {verdict,stats};
+}
+function joinedReports(){
+  const s=new Set();
+  Object.values(MAP).forEach(m=>{if(m&&m.rid&&m.rid!==BASE)s.add(m.rid);});
+  return [...s];
+}
+function renderJoins(){
+  const area=document.getElementById("joinArea");
+  const rids=MODE==="join"?joinedReports():[];
+  document.getElementById("secJoin").classList.toggle("hidden",MODE!=="join"||!BASE||!rids.length);
+  if(MODE!=="join"||!BASE||!rids.length){area.innerHTML="";return;}
+  const base=REPORTS.find(r=>r.id===BASE);
+  let html="";
+  rids.forEach(rid=>{
+    const other=REPORTS.find(r=>r.id===rid);
+    const j=JOINS[rid]||{baseCol:"",otherCol:""};
+    html+='<div class="card"><h3>'+esc(base.name)+' ⟶ '+esc(other.name)+'</h3>'+
+      '<p class="hint">Pick the key column on each side. The engine measures the join before it is used.</p>'+
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">'+
+      '<div>key in <b>'+esc(base.name)+'</b><br><select onchange="setJoin(\''+rid+'\',\'baseCol\',this.value)">'+
+      '<option value="">— choose —</option>'+
+      optIdx(base.headers,j.baseCol)+'</select></div>'+
+      '<div>key in <b>'+esc(other.name)+'</b><br><select onchange="setJoin(\''+rid+'\',\'otherCol\',this.value)">'+
+      '<option value="">— choose —</option>'+
+      optIdx(other.headers,j.otherCol)+'</select></div>'+
+      '<div><button class="btn small" onclick="testJoin(\''+rid+'\')">Test this join</button></div>'+
+      '</div><div id="jres_'+rid+'" style="margin-top:10px"></div></div>';
+  });
+  area.innerHTML=html;
+  rids.forEach(rid=>{if(JOINS[rid]&&JOINS[rid].verdict)showJoin(rid);});
+}
+function setJoin(rid,which,idx){
+  JOINS[rid]=JOINS[rid]||{baseCol:"",otherCol:""};
+  const rep=which==="baseCol"?REPORTS.find(x=>x.id===BASE):REPORTS.find(x=>x.id===rid);
+  JOINS[rid][which]=rep?pick(rep.headers,idx):"";
+  delete JOINS[rid].verdict;
+  const el=document.getElementById("jres_"+rid);if(el)el.innerHTML="";
+  renderVerdict();
+}
+function testJoin(rid){
+  const j=JOINS[rid];
+  if(!j||!j.baseCol||!j.otherCol){alert("Choose a key column on both sides first.");return;}
+  const base=REPORTS.find(r=>r.id===BASE),other=REPORTS.find(r=>r.id===rid);
+  JOINS[rid]=Object.assign(j,analyseJoin(base,other,j.baseCol,j.otherCol));
+  showJoin(rid);renderVerdict();
+}
+function showJoin(rid){
+  const j=JOINS[rid],s=j.stats;
+  const el=document.getElementById("jres_"+rid);if(!el)return;
+  const pm={SAFE:'p-ok',PARTIAL:'p-warn',UNSAFE:'p-bad',EMPTY:'p-bad'};
+  const msg={SAFE:"Key is unique in the joined report and every base row found a match. Safe to use.",
+    PARTIAL:"Key is unique in the joined report, but some base rows have no match. Those cells stay EMPTY — the engine does not invent values.",
+    UNSAFE:"Key REPEATS in the joined report. Using it would duplicate NCs and inflate every count on the dashboard. Blocked.",
+    EMPTY:"No values matched at all. Wrong key pair, or the two reports do not overlap."}[j.verdict];
+  const box=j.verdict==="SAFE"?"okbox":(j.verdict==="PARTIAL"?"infobox":"warnbox");
+  el.innerHTML='<div class="'+box+'"><span class="pill '+pm[j.verdict]+'">'+j.verdict+'</span> &nbsp;'+msg+'</div>'+
+    '<table><tr><th>base rows</th><th>distinct keys (base)</th><th>blank keys (base)</th>'+
+    '<th>joined rows</th><th>distinct keys (joined)</th><th>repeating keys</th><th>worst repeat</th>'+
+    '<th>matched</th><th>unmatched</th><th>match %</th></tr><tr>'+
+    '<td>'+s.baseRows+'</td><td>'+s.baseDistinct+'</td><td>'+s.baseBlankKeys+'</td>'+
+    '<td>'+s.otherRows+'</td><td>'+s.otherDistinct+'</td>'+
+    '<td>'+(s.dupKeys?'<b style="color:#ffab9c">'+s.dupKeys+'</b>':'0')+'</td>'+
+    '<td>'+(s.maxDup>1?'&times;'+s.maxDup:'—')+'</td>'+
+    '<td>'+s.matched+'</td><td>'+s.unmatched+'</td><td>'+s.pct+'%</td></tr></table>'+
+    (s.unmatchedSamples.length?'<div class="evid">unmatched examples: '+
+      s.unmatchedSamples.map(v=>'<code>'+esc(v)+'</code>').join(" ")+'</div>':'');
+}
+function fieldStateJoin(tg){
+  const m=MAP[tg.h];
+  if(!m)return {state:"MISSING",detail:"not mapped"};
+  if(m.fixed)return {state:"FIXED",detail:'constant "'+tg.fixed+'"'};
+  if(!m.col)return {state:"MISSING",detail:"report chosen, column not chosen"};
+  const r=REPORTS.find(x=>x.id===m.rid);
+  if(!r)return {state:"MISSING",detail:"source report removed"};
+  if(m.rid===BASE)return {state:"PRESENT",detail:r.name+" → "+m.col};
+  const j=JOINS[m.rid];
+  if(!j||!j.verdict)return {state:"UNTESTED",detail:"join to "+r.name+" not tested"};
+  if(j.verdict==="UNSAFE"||j.verdict==="EMPTY")return {state:"BLOCKED",detail:"join "+j.verdict+" — "+r.name};
+  return {state:j.verdict==="PARTIAL"?"JOINABLE_PARTIAL":"JOINABLE",
+    detail:r.name+" → "+m.col+" ("+j.stats.pct+"% matched)"};
+}
+
+/* ---------------- verdict ---------------- */
+function invalidate(){MERGE=null;const b=document.getElementById("buildMsg");if(b)b.textContent="";}
+function runMergeCheck(){MERGE=mergeAll();renderVerdict();}
+function renderVerdict(){
+  const area=document.getElementById("verdictArea");
+  const on=REPORTS.length&&(MODE==="append"||BASE);
+  document.getElementById("secVerdict").classList.toggle("hidden",!on);
+  // Hide old verdict/build when auto-result is showing
+  if(document.getElementById("autoResult")&&!document.getElementById("autoResult").classList.contains("hidden")){
+    document.getElementById("secVerdict").classList.add("hidden");
+    document.getElementById("secBuild").classList.add("hidden");
+  }
+  document.getElementById("secBuild").classList.toggle("hidden",!on);
+  if(!on){area.innerHTML="";return;}
+
+  if(MODE==="append"){
+    let h='<div class="card">';
+    if(!MERGE){
+      h+='<div class="infobox">Nothing is merged until you ask. '+
+        '<b>Run merge check</b> performs the whole merge on your real rows and reports what it '+
+        'found — row count, per-field coverage, and every disagreement between files. '+
+        'The build stays locked until that check passes.</div>'+
+        '<button class="btn primary" onclick="runMergeCheck()">Run merge check</button></div>';
+      area.innerHTML=h;document.getElementById("buildBtn").disabled=true;return;
+    }
+    if(!MERGE.ok){
+      h+='<div class="warnbox"><b>NO — cannot merge yet.</b><ul style="margin:6px 0 0 18px">'+
+        MERGE.blockers.map(b=>'<li>'+esc(b)+'</li>').join("")+'</ul></div>'+
+        '<button class="btn" onclick="runMergeCheck()">Re-run merge check</button></div>';
+      area.innerHTML=h;document.getElementById("buildBtn").disabled=true;return;
+    }
+    const missingReq=TARGET.filter(t=>t.req&&MERGE.cov[t.h].filled===0);
+    const s=MERGE.stats;
+    h+= missingReq.length
+      ? '<div class="warnbox"><b>Merge works, but '+missingReq.length+
+        ' required field(s) are completely empty:</b> '+
+        missingReq.map(t=>'<code>'+esc(t.h)+'</code>').join(", ")+
+        '. Map them or accept empty charts on the dashboard.</div>'
+      : '<div class="okbox"><b>YES — the export can be built.</b> All '+REQ_COUNT+
+        ' required fields carry data.</div>';
+    h+='<div class="kpis">'+
+      '<div class="kpi"><div class="v">'+s.rows+'</div><div class="l">rows out</div></div>'+
+      '<div class="kpi"><div class="v">'+s.rowsRead+'</div><div class="l">rows read (in scope)</div></div>'+
+      '<div class="kpi"><div class="v" style="color:var(--bright)">'+s.mergedRows+'</div><div class="l">rows merged in</div></div>'+
+      '<div class="kpi"><div class="v" style="color:var(--green)">'+s.filled+'</div><div class="l">empty cells filled</div></div>'+
+      '<div class="kpi"><div class="v" style="color:var(--amber)">'+MERGE.conflicts.length+'</div><div class="l">disagreements</div></div>'+
+      '</div>';
+    if(s.skippedBlank)h+='<div class="infobox">'+s.skippedBlank+
+      ' row(s) had a blank NC id and were skipped — they cannot be merged or keyed.</div>';
+    h+='<div class="scroll short" style="margin-bottom:12px"><table>'+
+      '<tr><th>file (priority order)</th><th>rows in scope</th><th>NCs it created</th>'+
+      '<th>rows merged into an NC an earlier file already had</th>'+
+      '<th>empty cells it filled</th><th>skipped (blank id)</th></tr>'+
+      ordered().map(r=>{const q=MERGE.per[r.name]||{read:0,created:0,merged:0,filled:0,skipped:0};
+        return '<tr><td>'+esc(r.name)+'</td><td>'+q.read+'</td><td>'+q.created+'</td>'+
+          '<td>'+q.merged+'</td><td>'+q.filled+'</td><td>'+q.skipped+'</td></tr>';}).join("")+
+      '</table></div>';
+    h+='<div class="scroll"><table><tr><th>Target column</th><th>Need</th><th>Filled</th>'+
+      '<th>Coverage</th><th>Comes from</th></tr>';
+    TARGET.forEach(tg=>{
+      const c=MERGE.cov[tg.h];
+      const from=ordered().filter(r=>RCFG[r.id].map[tg.h])
+        .map(r=>RCFG[r.id].map[tg.h]==="__fixed__"?r.name+" (fixed)":r.name).join(" → ")||"—";
+      const pill=c.filled===0?(tg.req?'p-bad':'p-none'):(c.pct<100?'p-warn':'p-ok');
+      h+='<tr><td><code>'+esc(tg.h)+'</code></td>'+
+        '<td>'+(tg.req?'required':'optional')+'</td><td>'+c.filled+'</td>'+
+        '<td><span class="pill '+pill+'">'+c.pct+'%</span></td>'+
+        '<td class="small">'+esc(from)+'</td></tr>';
+    });
+    h+='</table></div>';
+    if(MERGE.conflicts.length){
+      h+='<div class="infobox" style="margin-top:12px"><b>'+MERGE.conflicts.length+
+        ' disagreement(s).</b> The higher-priority file\'s value was kept. Nothing was overwritten. '+
+        'The full list goes into the <b>Conflicts</b> sheet of the export.</div>'+
+        '<div class="scroll short"><table><tr><th>NC</th><th>Field</th><th>Kept</th><th>From</th>'+
+        '<th>Ignored</th><th>From</th></tr>';
+      MERGE.conflicts.slice(0,50).forEach(c=>{
+        h+='<tr><td class="mono">'+esc(c.nc)+'</td><td>'+esc(c.field)+'</td>'+
+          '<td>'+esc(c.kept)+'</td><td class="small">'+esc(c.keptFrom)+'</td>'+
+          '<td>'+esc(c.ignored)+'</td><td class="small">'+esc(c.ignoredFrom)+'</td></tr>';
+      });
+      h+='</table></div>';
+      if(MERGE.conflicts.length>50)h+='<div class="evid">showing the first 50.</div>';
+    }
+    h+='<div style="margin-top:12px"><button class="btn" onclick="runMergeCheck()">Re-run merge check</button></div></div>';
+    area.innerHTML=h;
+    document.getElementById("buildBtn").disabled=false;
+    return;
+  }
+
+  /* join mode verdict */
+  const states=TARGET.map(t=>({t,...fieldStateJoin(t)}));
+  const reqBad=states.filter(s=>s.t.req&&["MISSING","BLOCKED","UNTESTED"].includes(s.state));
+  const ok=states.filter(s=>["PRESENT","FIXED","JOINABLE"].includes(s.state)).length;
+  const partial=states.filter(s=>s.state==="JOINABLE_PARTIAL").length;
+  const blocked=states.filter(s=>s.state==="BLOCKED").length;
+  const missing=states.filter(s=>s.state==="MISSING").length;
+  const untested=states.filter(s=>s.state==="UNTESTED").length;
+  const base=REPORTS.find(r=>r.id===BASE);
+  let head;
+  if(reqBad.length===0){
+    head='<div class="okbox"><b>YES — the export can be built.</b> All '+REQ_COUNT+
+      ' required fields resolve. Output will have '+base.rows.length+' rows, one per base row.'+
+      (partial?' '+partial+' field(s) come from a partial join and will have some empty cells.':'')+'</div>';
+  }else{
+    head='<div class="warnbox"><b>NO — not yet.</b> '+reqBad.length+
+      ' required field(s) do not resolve: '+reqBad.map(s=>'<code>'+esc(s.t.h)+'</code>').join(", ")+
+      '. Fix the mapping or the join.</div>';
+  }
+  const kpis='<div class="kpis">'+
+    '<div class="kpi"><div class="v">'+ok+'</div><div class="l">resolved</div></div>'+
+    '<div class="kpi"><div class="v" style="color:var(--amber)">'+partial+'</div><div class="l">partial join</div></div>'+
+    '<div class="kpi"><div class="v" style="color:var(--red)">'+blocked+'</div><div class="l">blocked join</div></div>'+
+    '<div class="kpi"><div class="v" style="color:var(--muted)">'+missing+'</div><div class="l">not mapped</div></div>'+
+    '<div class="kpi"><div class="v" style="color:var(--violet)">'+untested+'</div><div class="l">join untested</div></div></div>';
+  const pill={PRESENT:'p-ok',FIXED:'p-ok',JOINABLE:'p-ok',JOINABLE_PARTIAL:'p-warn',
+    BLOCKED:'p-bad',MISSING:'p-none',UNTESTED:'p-info'};
+  let rows='<tr><th>Target column</th><th>Need</th><th>State</th><th>Source</th></tr>';
+  states.forEach(s=>{rows+='<tr><td><code>'+esc(s.t.h)+'</code></td><td>'+(s.t.req?'required':'optional')+
+    '</td><td><span class="pill '+pill[s.state]+'">'+s.state.replace("_"," ")+'</span></td>'+
+    '<td class="small">'+esc(s.detail)+'</td></tr>';});
+  area.innerHTML='<div class="card">'+head+kpis+'<div class="scroll"><table>'+rows+'</table></div></div>';
+  document.getElementById("buildBtn").disabled=reqBad.length>0;
+}
+
+/* ---------------- profile + connection rendering ---------------- */
+function renderProf(){
+  const on=REPORTS.length>0;
+  document.getElementById("secProf").classList.toggle("hidden",!on);
+  if(!on){document.getElementById("profArea").innerHTML="";
+           document.getElementById("connArea").innerHTML="";return;}
+  let h="";
+  REPORTS.forEach(r=>{
+    const pr=r._prof||profileReport(r);
+    const sg=suggestFor(r);
+    const offers=derivedOffers(r).filter(o=>!o.exists);
+    h+='<div class="repcard"><div class="top">'+
+      '<span class="pill p-info">'+esc(pr.system)+'</span><b>'+esc(r.name)+'</b>'+
+      '<span class="small">'+r.rows.length+' rows · '+r.headers.length+' columns · '+
+      esc(fingerprint(r))+'</span>'+
+      '<span class="spacer" style="flex:1"></span>'+
+      '<button class="btn small" onclick="applySuggestion(\''+r.id+'\')">Apply suggestions</button></div>';
+    h+='<div class="small" style="margin-top:7px">evidence for '+esc(pr.system)+': '+
+      (pr.evidence.length? pr.evidence.map(e=>'<code>'+esc(e.col)+'</code> '+esc(e.pat)+' ('+e.frac+'% of values)').join(" · ")
+                         : 'none — no column matched a known pattern')+'</div>';
+    // vocabulary matches found
+    const vocabHits=[];
+    Object.keys(FIELD_VOCAB).forEach(fk=>{
+      const spec=FIELD_VOCAB[fk];
+      Object.entries(pr.cols).forEach(([col,c])=>{
+        if(c.fill===0)return;
+        const vals=sampleRows(r.rows).map(row=>row[col]).filter(v=>!isBlank(v));
+        const sc=vocabScore(vals,fk);
+        const nh=nameHintScore(col,fk)*0.3;
+        const total=sc+nh;
+        if(total>=(spec.minMatch||0.3)&&total>0.2)
+          vocabHits.push({field:fk,col:col,score:Math.round(100*total)});
+      });
+    });
+    vocabHits.sort((a,b)=>b.score-a.score);
+    if(vocabHits.length){
+      h+='<div class="small" style="margin-top:7px"><b>value matches:</b> '+
+        vocabHits.slice(0,8).map(v=>
+          '<code>'+esc(v.col)+'</code> → '+esc(v.field)+' ('+v.score+'%)'
+        ).join(' · ')+'</div>';
+    }
+    h+='<div class="small" style="margin-top:7px">suggested id: '+
+      (sg.idCol?'<code>'+esc(sg.idCol)+'</code>':'<i>none unique enough</i>')+
+      (sg.idNote?' <span class="pill p-warn">'+esc(sg.idNote)+'</span>':'')+
+      ' · suggested scope: '+(sg.scopeCol?'<code>'+esc(sg.scopeCol)+'</code>':'<i>none</i>')+
+      (sg.scopeNote?' <span class="pill p-warn">'+esc(sg.scopeNote)+'</span>':'')+
+      ' · fields matched by name: '+Object.keys(sg.map).length+'/22</div>';
+    if(offers.length){
+      h+='<div class="infobox" style="margin-top:9px;margin-bottom:0"><b>Extractable ids found inside longer text.</b>'+
+        ' Adding one creates a new column by pulling out the value that is already there — nothing is invented.<div style="margin-top:7px">'+
+        offers.map(o=>'<button class="btn small" style="margin:0 6px 6px 0" '+
+          'onclick="addDerived(\''+r.id+'\',this.getAttribute(\'data-c\'),\''+o.pat.id+'\')" '+
+          'data-c="'+esc(o.col)+'">+ '+esc(o.col)+' → '+esc(o.pat.label)+' ('+Math.round(100*o.frac)+'% of rows)</button>').join("")+
+        '</div></div>';
+    }
+    const shown=Object.entries(pr.cols).filter(([c,x])=>x.fill>0);
+    h+='<details style="margin-top:9px"><summary class="small">column profile ('+shown.length+
+      ' columns with data)</summary><div class="scroll short" style="margin-top:7px"><table>'+
+      '<tr><th>column</th><th>filled</th><th>distinct</th><th>unique</th><th>looks like</th></tr>'+
+      shown.map(([c,x])=>'<tr><td><code>'+esc(c)+'</code>'+
+        (x.derived?' <span class="pill p-info">derived</span>':'')+'</td>'+
+        '<td>'+x.fillPct+'%</td><td>'+x.distinct+'</td>'+
+        '<td>'+(x.unique?'<span class="pill p-ok">yes</span>':'—')+'</td>'+
+        '<td class="small">'+(Object.entries(x.full).filter(([,f])=>f>=0.3)
+            .sort((a,b)=>b[1]-a[1])
+            .map(([pid,f])=>esc((PATTERNS.find(y=>y.id===pid)||{}).label||pid)+' '+Math.round(100*f)+'%')
+            .join(" · ")||'—')+'</td></tr>').join("")+
+      '</table></div></details>';
+    h+='</div>';
+  });
+  document.getElementById("profArea").innerHTML=h;
+
+  let ch="";
+  if(REPORTS.length<2){
+    ch='<div class="small">Load a second file to see connections.</div>';
+  }else{
+    ch='<h3 style="margin:0 0 6px">Connections</h3>'+
+       '<div class="hint">A KEY CANDIDATE is unique on both sides — it can decide whether two rows '+
+       'are the same NC. Anything else overlaps without identifying a row.</div>';
+    CONN.forEach(c=>{
+      const best=c.pairs.filter(x=>x.tier===2).slice(0,4);
+      const weak=c.pairs.filter(x=>x.tier<2).slice(0,3);
+      ch+='<div class="'+(best.length?'okbox':'warnbox')+'"><b>'+esc(c.aName)+' ⟷ '+esc(c.bName)+'</b> — '+
+        (best.length? best.length+' key candidate(s)':'no key — these two cannot be merged by id')+
+        '<table style="margin-top:7px"><tr><th>verdict</th><th>column A</th><th>column B</th>'+
+        '<th>overlap</th><th>covers A</th><th>covers B</th></tr>'+
+        best.concat(weak).map(x=>'<tr><td>'+
+          (x.tier===2?'<span class="pill p-ok">KEY CANDIDATE</span>':
+           x.tier===1?'<span class="pill p-warn">one-sided</span>':
+                      '<span class="pill p-bad">not a key</span>')+'</td>'+
+          '<td><code>'+esc(x.ha)+'</code></td><td><code>'+esc(x.hb)+'</code></td>'+
+          '<td><b>'+x.ov+'</b></td><td>'+x.covA+'%</td><td>'+x.covB+'%</td></tr>').join("")+
+        '</table></div>';
+    });
+  }
+  document.getElementById("connArea").innerHTML=ch;
+}
+
+/* ---------------- render all ---------------- */
+function renderAll(){
+  renderFiles();renderMode();renderKeyPickers();renderProf();
+  renderAppend();renderMapTabs();
+  renderBase();renderMapJoin();renderJoins();renderVerdict();
+}
+
+/* ---------------- build ---------------- */
+function buildNow(){ MODE==="append"?buildAppend():buildJoin(); }
+
+function auditCommon(aud){
+  aud.push([]);aud.push(["INPUT FILES"]);
+  aud.push(["file","sheet","rows","columns","sha256"]);
+  REPORTS.forEach(r=>aud.push([r.name,r.sheet,r.rows.length,r.headers.length,r.sha]));
+}
+function writeBook(out,headers,sheets,stamp){
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(out,{header:headers}),"SAS export");
+  sheets.forEach(([name,aoa])=>XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),name));
+  XLSX.writeFile(wb,"SAS_export_"+stamp+".xlsx");
+}
+function stampNow(){
+  const d=new Date();
+  return d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");
+}
+
+function buildAppend(){
+  const m=mergeAll();
+  if(!m.ok){alert("ABORTED:\n"+m.blockers.join("\n"));return;}
+  if(m.out.length!==m.stats.rows){alert("ABORTED: row count mismatch. Nothing was written.");return;}
+  const withSrc=document.getElementById("srcCol").checked;
+  const provMap=new Map(m.provenance.map(p=>[normKey(p.nc),p.sources]));
+  const headers=withSrc?["Source"].concat(TARGET.map(t=>t.h)):TARGET.map(t=>t.h);
+  const out=m.out.map(o=>{
+    if(!withSrc)return o;
+    const row={Source:provMap.get(normKey(o["Notification"]))||""};
+    TARGET.forEach(t=>{row[t.h]=o[t.h];});
+    return row;
+  });
+
+  const aud=[["SAS export builder — audit trail"],["mode","MERGE rows, collapse duplicates by NC id"],
+    ["built",new Date().toISOString()],["output rows",out.length],
+    ["rows read (after each file's scope filter)",m.stats.rowsRead],
+    ["rows merged into an NC an earlier file already had",m.stats.mergedRows],
+    ["empty cells filled by a lower-priority file",m.stats.filled],
+    ["rows skipped (blank NC id)",m.stats.skippedBlank],
+    ["disagreements recorded",m.conflicts.length],
+    ["Source column added",withSrc?"yes":"no"]];
+  auditCommon(aud);
+  aud.push([]);aud.push(["REPORT CONFIGURATION (priority order)"]);
+  aud.push(["priority","file","NC id column","fallback id column","scope column","values kept","rows in scope","distinct ids","keyed by fallback"]);
+  ordered().forEach((r,i)=>{
+    const c=RCFG[r.id],st=idStats(r);
+    aud.push([i+1,r.name,c.idCol,c.idCol2||"(none)",c.scopeCol||"(all rows)",
+      c.scopeVals.size?[...c.scopeVals].join(" | "):"(all values)",
+      st?st.rows:"",st?st.distinct:"",st?st.viaFallback:""]);
+  });
+  aud.push([]);aud.push(["WHAT EACH FILE CONTRIBUTED"]);
+  aud.push(["priority","file","rows in scope","NCs created","rows merged into an existing NC",
+            "empty cells filled","skipped (blank id)"]);
+  ordered().forEach((r,i)=>{const q=m.per[r.name]||{};
+    aud.push([i+1,r.name,q.read||0,q.created||0,q.merged||0,q.filled||0,q.skipped||0]);});
+  aud.push([]);aud.push(["SYSTEM DETECTED PER FILE (from value patterns, not the filename)"]);
+  aud.push(["file","system","evidence"]);
+  REPORTS.forEach(r=>{const pr=r._prof||{};
+    aud.push([r.name,pr.system||"unknown",
+      (pr.evidence||[]).map(e=>e.col+": "+e.pat+" "+e.frac+"%").join(" | ")]);});
+  if(DERIVED_RULES.length){
+    aud.push([]);aud.push(["DERIVED COLUMNS (extraction only — no value invented)"]);
+    aud.push(["file","new column","extracted from","pattern","regex","rows filled","rows"]);
+    DERIVED_RULES.forEach(d=>aud.push([d.file,d.column,d.from,d.pattern,d.rule,d.rowsFilled,d.rows]));
+  }
+  aud.push([]);aud.push(["FIELD COVERAGE IN THE OUTPUT"]);
+  aud.push(["target column","required","rows filled","coverage %","sources in priority order"]);
+  TARGET.forEach(tg=>{
+    const from=ordered().filter(r=>RCFG[r.id].map[tg.h])
+      .map(r=>RCFG[r.id].map[tg.h]==="__fixed__"?r.name+" (fixed)":r.name+" → "+RCFG[r.id].map[tg.h]).join("  →  ");
+    aud.push([tg.h,tg.req?"required":"optional",m.cov[tg.h].filled,m.cov[tg.h].pct,from||"(not mapped)"]);
+  });
+  aud.push([]);aud.push(["RULES APPLIED BY THIS TOOL"]);
+  [["Key comparison","trim, collapse spaces, upper-case, strip trailing .0, drop leading zeros only when both sides are all digits"],
+   ["Merge rule","priority 1 wins; a later file fills ONLY cells that are empty or '-'; a value is never overwritten"],
+   ["Disagreements","recorded in the Conflicts sheet, never silently resolved"],
+   ["Duplicate ids in one file","build blocked"],
+   ["Row key","the id column; the fallback column is used only where the id is blank"],
+   ["Blank ids","row skipped and counted, never merged into another NC"],
+   ["No match","cell left empty; no value is ever invented"],
+   ["Derivations","only the DERIVED COLUMNS listed above, each a substring already present in the source cell; Batch, Origin, Class and cost sign are derived by the dashboard"]
+  ].forEach(x=>aud.push(x));
+
+  const prov=[["NC","source file(s)"]].concat(m.provenance.map(p=>[p.nc,p.sources]));
+  const conf=[["NC","field","value kept","kept from (higher priority)","value ignored","ignored from"]]
+    .concat(m.conflicts.map(c=>[c.nc,c.field,c.kept,c.keptFrom,c.ignored,c.ignoredFrom]));
+
+  writeBook(out,headers,[["Audit",aud],["Provenance",prov],["Conflicts",conf]],stampNow());
+  document.getElementById("buildMsg").textContent=
+    "Built "+out.length+" rows from "+REPORTS.length+" file(s). Load it in the dashboard with 'Load export'.";
+}
+
+function buildJoin(){
+  const base=REPORTS.find(r=>r.id===BASE);
+  const idx={};
+  Object.keys(JOINS).forEach(rid=>{
+    const j=JOINS[rid];
+    if(!j||!j.verdict||j.verdict==="UNSAFE"||j.verdict==="EMPTY")return;
+    const other=REPORTS.find(r=>r.id===rid);
+    const mp=new Map();
+    other.rows.forEach(row=>{const k=keyOf(row[j.otherCol]);if(k!==""&&!mp.has(k))mp.set(k,row);});
+    idx[rid]={map:mp,baseCol:j.baseCol};
+  });
+  const out=[];
+  base.rows.forEach(brow=>{
+    const o={};
+    TARGET.forEach(tg=>{
+      const m=MAP[tg.h];
+      if(!m){o[tg.h]=null;return;}
+      if(m.fixed){o[tg.h]=tg.fixed;return;}
+      if(m.rid===BASE){o[tg.h]=brow[m.col]===undefined?null:brow[m.col];return;}
+      const ix=idx[m.rid];
+      if(!ix){o[tg.h]=null;return;}
+      const hit=ix.map.get(keyOf(brow[ix.baseCol]));
+      o[tg.h]=hit?(hit[m.col]===undefined?null:hit[m.col]):null;
+    });
+    out.push(o);
+  });
+  if(out.length!==base.rows.length){
+    alert("ABORTED: row count changed ("+base.rows.length+" in, "+out.length+" out). Nothing was written.");
+    return;
+  }
+  const aud=[["SAS export builder — audit trail"],["mode","JOIN columns onto a base report"],
+    ["built",new Date().toISOString()],["output rows",out.length],
+    ["base report",base.name,"sheet",base.sheet,"rows",base.rows.length]];
+  auditCommon(aud);
+  aud.push([]);aud.push(["JOINS"]);
+  aud.push(["joined report","key in base","key in joined","verdict","distinct keys (joined)",
+    "repeating keys","matched","unmatched","match %"]);
+  Object.keys(JOINS).forEach(rid=>{
+    const j=JOINS[rid];if(!j||!j.verdict)return;
+    const r=REPORTS.find(x=>x.id===rid),s=j.stats;
+    aud.push([r.name,j.baseCol,j.otherCol,j.verdict,s.otherDistinct,s.dupKeys,s.matched,s.unmatched,s.pct]);
+  });
+  aud.push([]);aud.push(["FIELD MAPPING"]);
+  aud.push(["target column","required","state","source"]);
+  TARGET.forEach(tg=>{const st=fieldStateJoin(tg);
+    aud.push([tg.h,tg.req?"required":"optional",st.state,st.detail]);});
+  aud.push([]);aud.push(["RULES APPLIED BY THIS TOOL"]);
+  [["Key comparison","trim, collapse spaces, upper-case, strip trailing .0, drop leading zeros only when both sides are all digits"],
+   ["Unsafe joins","a key repeating on the joined side is blocked, never used"],
+   ["No match","cell left empty; no value is ever invented"],
+   ["Row conservation","output must have exactly one row per base row or the build aborts"],
+   ["Derivations","none — Batch, Origin, Class and cost sign are derived by the dashboard"]
+  ].forEach(x=>aud.push(x));
+  writeBook(out,TARGET.map(t=>t.h),[["Audit",aud]],stampNow());
+  document.getElementById("buildMsg").textContent=
+    "Built "+out.length+" rows. Load it in the dashboard with 'Load export'.";
+}
+
+renderMode();
+</script>
+</body>
+</html>

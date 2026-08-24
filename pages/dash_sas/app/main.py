@@ -30,99 +30,20 @@ import parse            # noqa: E402
 import build_sas        # noqa: E402
 import charts           # noqa: E402
 import ingest_sas       # noqa: E402
+import validate as val   # noqa: E402
 
 DB = build_sas.DEFAULT_DB
+
+def _version() -> str:
+    """Whatever deploy.sh last stamped, so the page can show what is live."""
+    try:
+        return "v" + (ROOT / "VERSION").read_text().strip()
+    except Exception:
+        return "unversioned"
 app = FastAPI(title="SAS NC Dashboard", root_path="/sas")
 
 
 # ----------------------------- data access -----------------------------------
-def _tracker_only_sas(con, existing: pd.DataFrame) -> pd.DataFrame:
-    """SAS NCs that live only in the NC tracker (later batches, new PSP).
-
-    The SAP export stops around Batch 19; the tracker already has Batch 21
-    (W.IC248.Q.021) and will keep picking up successor WBS elements.
-    """
-    try:
-        tr = pd.read_sql(
-            "SELECT nc_id, sap_notif, nc_type, is_supplier_nc, detection_area, "
-            "status, created_on, closure_date, material, psp_ref, nc_wbs, "
-            "classification, defect_code_text, copq, leadtime, supplier_name, "
-            "notif_year FROM nc WHERE project = 'SAS'", con)
-    except Exception:
-        return pd.DataFrame()
-    if tr.empty:
-        return pd.DataFrame()
-    have = set()
-    if existing is not None and not existing.empty and "notification" in existing.columns:
-        have = set(existing["notification"].astype(str))
-    tr["notification"] = tr["sap_notif"].fillna(tr["nc_id"]).astype(str)
-    tr = tr[~tr["notification"].isin(have)].copy()
-    if tr.empty:
-        return pd.DataFrame()
-
-    is_sup = tr["is_supplier_nc"].fillna(0).astype(int).eq(1) | \
-        tr["nc_type"].astype(str).str.lower().str.startswith("supplier")
-    opened = pd.to_datetime(tr["created_on"], errors="coerce")
-    closed = pd.to_datetime(tr["closure_date"], errors="coerce")
-    wbs = tr["psp_ref"].fillna(tr["nc_wbs"])
-    cause = tr["detection_area"].map(_tracker_cause)
-    rows = pd.DataFrame({
-        "notification": tr["notification"],
-        "notif_type": ["Z2 - Procurem. Complaint" if s else "Z3 - Production NC"
-                       for s in is_sup],
-        "notif_year": pd.to_numeric(tr["notif_year"], errors="coerce")
-                      .fillna(opened.dt.year).astype("Int64"),
-        "status": tr["status"].map(parse.status_label),
-        "wbs": wbs.astype(str),
-        "wbs_text": "",
-        "batch": wbs.map(parse.batch_label),
-        "defect_class": tr["classification"].astype(str),
-        "defect_class_label": tr["classification"].map(_tracker_class),
-        "defect_code": tr["defect_code_text"],
-        "disposition": "Not assigned",
-        "cause": cause,
-        "notif_text": "",
-        "material": tr["material"],
-        "model": "",
-        "vendor": tr["supplier_name"],
-        "vendor_clean": tr["supplier_name"].map(parse.vendor_norm),
-        "opened": opened,
-        "closed": closed,
-        "month": opened.dt.strftime("%Y-%m"),
-        "leadtime": pd.to_numeric(tr["leadtime"], errors="coerce"),
-        "copq": pd.to_numeric(tr["copq"], errors="coerce").fillna(0).abs(),
-        "copq_booked": 0,
-    })
-    return rows.reset_index(drop=True)
-
-
-def _tracker_cause(v) -> str:
-    s = str(v or "").strip()
-    low = s.lower()
-    if low.startswith("s:") or low == "supplier":
-        return "Supplier"
-    if "customer complaint" in low or low.startswith("cc:"):
-        return "Customer complaint"
-    if low.startswith("ii:") or "incoming" in low:
-        return "Incoming inspection"
-    if "manufactur" in low:
-        return "Manufacturing"
-    if low.startswith("fi:") or "inspection" in low:
-        return "Inspection"
-    if "assembl" in low or low.startswith("i:"):
-        return "Assembly"
-    return s or "Not assigned"
-
-
-def _tracker_class(v) -> str:
-    s = str(v or "").strip()
-    if s.lower().startswith("major"):
-        return "Major"
-    if s.lower().startswith("minor"):
-        return "Minor"
-    return parse.class_label(s)
-
-
 def _read_all() -> pd.DataFrame:
     con = build_sas.connect(DB)
     try:
@@ -130,11 +51,8 @@ def _read_all() -> pd.DataFrame:
             df = pd.read_sql("SELECT * FROM sas_nc", con)
         except Exception:
             df = pd.DataFrame()
-        extra = _tracker_only_sas(con, df)
     finally:
         con.close()
-    if extra is not None and not extra.empty:
-        df = pd.concat([df, extra], ignore_index=True) if not df.empty else extra
     if df.empty:
         return df
     return parse.tag_lanes(df)
@@ -181,7 +99,17 @@ def _apply_click(df: pd.DataFrame, click: dict) -> pd.DataFrame:
             d = d[(age >= rng[0]) & (age <= rng[1])]
         return d.drop(columns=["opened_dt"], errors="ignore")
     if col in d.columns:
-        d = d[d[col].astype(str) == str(val)]
+        # Display placeholders (from _clean_cat in charts.py) map to blank/nan
+        # in the real data, not a literal string. Match emptiness for those so
+        # clicking a "(not recorded)" slice returns the blank rows, not zero.
+        PLACEHOLDERS = {"(not recorded)", "(blank)", "(not set)", "(none)",
+                        "Unassigned", "Not recorded", ""}
+        s = d[col].astype(str).str.strip()
+        if str(val).strip() in PLACEHOLDERS:
+            d = d[d[col].isna() | s.isin(["", "nan", "None", "-", "NaT"]) |
+                  s.isin(PLACEHOLDERS)]
+        else:
+            d = d[s == str(val)]
     return d
 
 
@@ -218,7 +146,7 @@ def status():
             last = None
     finally:
         con.close()
-    return {"rows": n, "last_import": (
+    return {"version": _version(), "rows": n, "last_import": (
         {"ts": last[0], "file": last[1], "rows": last[2], "mode": last[3]}
         if last else None)}
 
@@ -261,6 +189,7 @@ async def raw(payload: dict):
         if k in d.columns:
             d = d[d[k].astype(str) == str(v)]
     d = _apply_click(d, payload.get("click", {}))
+    d["opened"] = pd.to_datetime(d["opened"], errors="coerce")
     d = d.sort_values("opened", na_position="last")
     return {"cols": charts.RAW_COLS, "labels": charts.RAW_LABELS,
             "rows": charts._raw_rows(d), "count": int(len(d))}
@@ -268,6 +197,8 @@ async def raw(payload: dict):
 
 @app.post("/api/export")
 async def export(payload: dict):
+    """Per-chart download. Same 22-column ingest format so it can be loaded
+    back with Add/update. Plus a Source system column."""
     df = _read_all()
     d = _apply_filters(df, payload.get("filters", {}))
     scope = payload.get("scope") or {}
@@ -275,14 +206,128 @@ async def export(payload: dict):
         if k in d.columns:
             d = d[d[k].astype(str) == str(v)]
     d = _apply_click(d, payload.get("click", {}))
+    d["opened"] = pd.to_datetime(d["opened"], errors="coerce")
     d = d.sort_values("opened", na_position="last")
-    cols = charts.RAW_COLS
-    out = d[cols].rename(columns=charts.RAW_LABELS)
+
+    # write in the full ingest shape so it round-trips
+    inv = {v: k for k, v in parse.COLS.items()}
+    out = pd.DataFrame()
+    for internal, header in inv.items():
+        if internal == "project":
+            out[header] = parse.PROJECT
+        elif internal == "status_raw":
+            out[header] = d["status"].values if "status" in d.columns else None
+        elif internal == "copq_raw":
+            out[header] = (-pd.to_numeric(d["copq"], errors="coerce").fillna(0)
+                           ).values if "copq" in d.columns else None
+        elif internal == "copq_wbs":
+            out[header] = ["-" if not b else "booked"
+                           for b in pd.to_numeric(
+                               d.get("copq_booked", 0), errors="coerce").fillna(0)] \
+                          if "copq_booked" in d.columns else None
+        elif internal == "batch_sap":
+            out[header] = d["batch_sap"].values if "batch_sap" in d.columns else None
+        elif internal in d.columns:
+            out[header] = d[internal].values
+        else:
+            out[header] = None
+    out["Plant"] = "Emmen"
+    out["Source system"] = d.get("source_system",
+        ["Teamcenter" if str(n).startswith("IR-") else "SAP"
+         for n in d["notification"]]).values
+
+    for c in ("Notification Date", "Closing date"):
+        if c in out.columns:
+            out[c] = pd.to_datetime(out[c], errors="coerce")
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        out.to_excel(w, index=False, sheet_name="SAS NCs")
+        out.to_excel(w, index=False, sheet_name="SAS export")
     buf.seek(0)
-    fn = f"SAS_NCs_{datetime.now():%Y%m%d_%H%M}.xlsx"
+
+    click = payload.get("click") or {}
+    bit = "_" + str(click.get("value", "")).replace(" ", "_")[:30] if click.get("value") else ""
+    fn = f"SAS_NCs{bit}_{datetime.now():%Y%m%d_%H%M}.xlsx"
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument."
+        "spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@app.post("/api/full_export")
+async def full_export(payload: dict):
+    """Everything currently in the dashboard, in the exact 22-column shape the
+    ingest reads. Edit it in Excel (add rows, remove rows, fix values) and load
+    it straight back with 'Load export'. A Data quality sheet lists what is
+    missing per column so the gaps are visible before anyone quotes a number."""
+    df = _read_all()
+    if df.empty:
+        return JSONResponse({"ok": False, "error": "no data loaded"}, status_code=400)
+    d = _apply_filters(df, payload.get("filters", {}))
+    inv = {v: k for k, v in parse.COLS.items()}          # internal -> export header
+    out = pd.DataFrame()
+    for internal, header in inv.items():
+        if internal == "project":
+            out[header] = [parse.PROJECT] * len(d)
+        elif internal == "status_raw":
+            # stored as 'status' after parsing - without this the status column
+            # comes out EMPTY and a re-upload wipes every status
+            out[header] = d["status"].values if "status" in d.columns else None
+        elif internal == "copq_raw":
+            # stored as a positive magnitude; SAP books it negative, so write it
+            # back the way SAP wrote it or the cost is lost on re-upload
+            out[header] = (-pd.to_numeric(d["copq"], errors="coerce").fillna(0)
+                           ).values if "copq" in d.columns else None
+        elif internal == "copq_wbs":
+            # '-' means nothing was booked; anything else means a cost element exists
+            out[header] = ["-" if not b else "booked"
+                           for b in pd.to_numeric(
+                               d.get("copq_booked", 0), errors="coerce").fillna(0)] \
+                          if "copq_booked" in d.columns else None
+        elif internal == "batch_sap":
+            out[header] = d["batch_sap"].values if "batch_sap" in d.columns else None
+        elif internal in d.columns:
+            out[header] = d[internal].values
+        else:
+            out[header] = None
+    for c in ("opened", "closed"):
+        h = inv.get(c)
+        if h:
+            out[h] = pd.to_datetime(d[c], errors="coerce").dt.strftime("%Y-%m-%d")
+    if "source_system" in d.columns:
+        out["Source system"] = d["source_system"].values
+
+    # data quality: what is missing, per column
+    dq = []
+    for c in out.columns:
+        v = out[c]
+        filled = v.notna() & v.astype(str).str.strip().ne("") & \
+            v.astype(str).str.strip().ne("-")
+        dq.append({"Column": c, "Rows": len(out), "Filled": int(filled.sum()),
+                   "Missing": int(len(out) - filled.sum()),
+                   "Filled %": round(100 * filled.sum() / max(1, len(out)), 1)})
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        out.to_excel(w, index=False, sheet_name="SAS export")
+        pd.DataFrame(dq).to_excel(w, index=False, sheet_name="Data quality")
+        pd.DataFrame([
+            ["How to use this file"],
+            ["1. Edit the 'SAS export' sheet - add rows, delete rows, correct values."],
+            ["2. Keep the column headers EXACTLY as they are (note the double space "
+             "in 'Project Text  (Notification)')."],
+            ["3. Load it back with the dashboard's 'Load export' button."],
+            ["4. 'Replace all' overwrites everything; 'Add / update' merges on the "
+             "Notification number."],
+            [],
+            ["Derived by the dashboard, do not add columns for them:"],
+            ["Batch", "from the 3-digit tail of WBS Element (Notification)"],
+            ["Supplier vs Production", "Type Z2, or Cause = Supplier"],
+            ["Minor / Major", "Defect Class 0-3 = Minor, 4-5 = Major"],
+            ["Cost", "CoPQ is negative in SAP; shown as a positive cost"],
+        ]).to_excel(w, index=False, header=False, sheet_name="Read me")
+    buf.seek(0)
+    fn = f"SAS_full_{datetime.now():%Y%m%d_%H%M}.xlsx"
     return StreamingResponse(
         buf, media_type="application/vnd.openxmlformats-officedocument."
         "spreadsheetml.sheet",
@@ -290,16 +335,77 @@ async def export(payload: dict):
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile = File(...), mode: str = Form("rebuild")):
+async def upload(file: UploadFile = File(...), mode: str = Form("append")):
     raw_bytes = await file.read()
     try:
+        # read the right sheet
+        import openpyxl, io as _io
+        wb = openpyxl.load_workbook(_io.BytesIO(raw_bytes), read_only=True)
+        sheet = "SAS export" if "SAS export" in wb.sheetnames else None
+        wb.close()
+
+        df_check = pd.read_excel(
+            io.BytesIO(raw_bytes),
+            sheet_name=sheet if sheet else 0)
+
+        # current count for the partial-file guard
         con = build_sas.connect(DB)
-        n = ingest_sas.ingest(con, io.BytesIO(raw_bytes), file.filename,
-                              rebuild=(mode != "append"))
+        try:
+            current = con.execute("SELECT COUNT(*) FROM sas_nc").fetchone()[0]
+        except Exception:
+            current = 0
+
+        # validate BEFORE writing
+        findings = val.validate(df_check, current_count=current)
+        reds = val.reds(findings)
+
+        # partial file + Start over guard
+        if mode == "rebuild" and current > 0 and len(df_check) < current * 0.5:
+            findings.append(("RED", None, None, None,
+                f"This file has {len(df_check)} rows but the dashboard holds "
+                f"{current}. Use 'Add to what is already here' instead, or "
+                f"load the full report."))
+            reds = val.reds(findings)
+
+        if reds:
+            con.close()
+            return JSONResponse({
+                "ok": False,
+                "blocked": True,
+                "error": val.summary(findings),
+                "findings": [{"sev": s, "row": r, "nc": nc, "field": f, "msg": m}
+                             for s, r, nc, f, m in findings],
+            }, status_code=400)
+
+        # ingest
+        result = ingest_sas.ingest(
+            con, io.BytesIO(raw_bytes), file.filename,
+            rebuild=(mode == "rebuild"),
+            current_count=current)
         con.close()
-    except Exception as e:  # noqa: BLE001
+
+        if not result["ok"]:
+            return JSONResponse({
+                "ok": False,
+                "blocked": True,
+                "error": result["error"],
+                "findings": [{"sev": s, "row": r, "nc": nc, "field": f, "msg": m}
+                             for s, r, nc, f, m in result["findings"]],
+            }, status_code=400)
+
+        return {
+            "ok": True,
+            "rows": result["rows"],
+            "mode": mode,
+            "file": file.filename,
+            "warnings": [{"sev": s, "row": r, "nc": nc, "field": f, "msg": m}
+                         for s, r, nc, f, m in result["findings"]
+                         if s != "INFO"],
+            "new_refs": result.get("new_refs", {}),
+        }
+    except Exception as e:
+        import traceback; traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-    return {"ok": True, "rows": n, "mode": mode, "file": file.filename}
 
 
 @app.post("/api/feedback")

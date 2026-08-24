@@ -15,13 +15,14 @@
 html,body{margin:0;background:var(--bg);color:var(--ink);
   font-family:"Segoe UI",system-ui,-apple-system,sans-serif;font-size:14px}
 a{color:var(--bright);text-decoration:none}
-.wrap{max-width:1320px;margin:0 auto;padding:20px 22px 80px}
+.wrap{width:100%;max-width:1320px;margin:0 auto;padding:20px 22px 80px}
 
 /* header */
 header{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
   border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:8px}
 header h1{font-size:22px;font-weight:600;margin:0;letter-spacing:.3px}
 header .sub{color:var(--muted);font-size:13px}
+.mono{font-family:Consolas,'Courier New',monospace;font-size:11.5px}
 header .spacer{flex:1}
 .btn{background:var(--card2);color:var(--ink);border:1px solid var(--line);
   border-radius:6px;padding:7px 13px;font-size:13px;cursor:pointer}
@@ -59,18 +60,15 @@ section{margin:26px 0}
   border:1px solid var(--line);border-radius:7px;padding:11px 14px;margin-bottom:12px}
 .sec-filters.open{display:flex}
 
-/* grid of chart cards */
-.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
-.grid.one{grid-template-columns:1fr}
+/* grid of chart cards — every card is full page width */
+.grid,.grid.one{display:grid;grid-template-columns:1fr;gap:16px;width:100%}
 .card{background:var(--card);border:1px solid var(--line);border-radius:9px;
-  padding:13px 15px 8px}
-.card h3{margin:0 0 2px;font-size:13.5px;font-weight:600}
-.card .hint{color:var(--muted);font-size:11.5px;margin:0 0 8px}
-.plot{width:100%;height:280px}
-.plot.short{height:200px}
-.card.narrow{max-width:520px}
-.card table.mini{max-height:340px}
-.plot.tall{height:400px}
+  padding:13px 15px 8px;width:100%;min-width:0}
+.card.selected{border-color:var(--accent)}
+.card h3{margin:0 0 3px;font-size:15px;font-weight:600}
+.card .hint{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+.plot{width:100%;min-height:360px}
+.plot .js-plotly-plot,.plot .plot-container,.plot .svg-container{width:100% !important}
 
 /* kpi strip */
 .kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:11px}
@@ -81,13 +79,18 @@ section{margin:26px 0}
   letter-spacing:.4px}
 .kpi.warn .v{color:var(--amber)} .kpi.bad .v{color:var(--red)}
 
-/* raw view */
-.raw{margin-top:6px;border-top:1px solid var(--line);padding-top:8px}
+/* raw view — HIDDEN until you click a bar; click the dark background to close */
+.raw{display:none;margin-top:8px;border-top:1px solid var(--line);padding-top:8px;width:100%}
+.raw.open{display:block}
 .raw .bar{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);
   flex-wrap:wrap}
 .raw .bar b{color:var(--bright)}
-.raw table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11.5px;
-  display:block;max-height:300px;overflow:auto}
+.raw-scroll{margin-top:8px;max-height:340px;overflow:auto;display:block;width:100%;
+  scrollbar-width:thin;scrollbar-color:#1c3b57 #081521}
+.raw-scroll::-webkit-scrollbar{width:8px;height:8px}
+.raw-scroll::-webkit-scrollbar-track{background:#081521}
+.raw-scroll::-webkit-scrollbar-thumb{background:#1c3b57;border-radius:4px}
+.raw table{width:max-content;min-width:100%;border-collapse:collapse;font-size:12.5px}
 .raw th,.raw td{text-align:left;padding:4px 7px;border-bottom:1px solid var(--line);
   white-space:nowrap}
 .raw th{position:sticky;top:0;background:var(--card2);color:var(--muted);
@@ -115,14 +118,36 @@ section{margin:26px 0}
   color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px}
 .sheet textarea{min-height:90px;resize:vertical}
 .sheet .row{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.modeopt{display:flex;gap:10px;align-items:flex-start;background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-bottom:9px;
+  cursor:pointer}
+.modeopt:hover{border-color:var(--accent)}
+.modeopt input{width:auto;margin-top:3px}
+.modedesc{color:var(--muted);font-size:12px;margin-top:5px;line-height:1.45}
+.pill{display:inline-block;padding:1px 8px;border-radius:11px;font-size:10.5px;
+  font-weight:700;text-transform:uppercase;letter-spacing:.3px;vertical-align:middle}
+.p-ok{background:#14432a;color:#7ee2a8;border:1px solid #276b45}
+.p-bad{background:#4d1d17;color:#ffab9c;border:1px solid #7d2e24}
+.warnbox{background:#3a1f1a;border:1px solid #7d2e24;border-radius:8px;
+  padding:11px 13px;font-size:12.5px}
+.warnbox b{color:#ffc4b8}
+.modeopt:has(input:checked){border-color:var(--accent);background:#0d2233}
+.modeopt:has(#mode_rebuild:checked){border-color:#7d2e24;background:#2b1714}
+.hidden{display:none}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
   background:var(--card2);border:1px solid var(--accent);color:var(--ink);
   padding:10px 18px;border-radius:8px;display:none;z-index:60}
 .empty{background:var(--card);border:1px dashed var(--line);border-radius:9px;
   padding:40px;text-align:center;color:var(--muted)}
 .feedback-fab{position:fixed;right:18px;bottom:18px;z-index:40}
-@media(max-width:1000px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(4,1fr)}
+@media(max-width:1000px){.kpis{grid-template-columns:repeat(4,1fr)}
   .dqrow{grid-template-columns:repeat(2,1fr)}}
+
+[data-chart="batch_class"] .plot,[data-chart="batch_copq"] .plot,[data-chart="batch_defect_heat"] .plot{min-height:460px}
+
+.bcchip{display:inline-block;padding:3px 12px;margin-right:6px;font-size:12px;border:1px solid var(--line);border-radius:12px;cursor:pointer;color:var(--muted);user-select:none}
+.bcchip{padding:5px 16px !important;font-size:13px !important;border:1.5px solid var(--bright) !important;color:var(--bright) !important;background:transparent !important}
+.bcchip.on{background:var(--bright) !important;color:#04121e !important;font-weight:700 !important;box-shadow:0 0 10px rgba(79,195,247,0.6) !important}
 </style>
 </head>
 <body>
@@ -131,7 +156,9 @@ section{margin:26px 0}
 <header>
   <h1>SAS · NC Dashboard</h1>
   <span class="sub" id="scopeline">KDS SAS Emmen</span>
+  <span class="sub mono" id="verline" style="opacity:.65"></span>
   <span class="spacer"></span>
+  <button class="btn primary" onclick="downloadFull()">Download full report</button>
   <button class="btn" onclick="openUpload()">Load export</button>
   <button class="btn" onclick="location.reload()">Refresh</button>
 </header>
@@ -156,25 +183,55 @@ section{margin:26px 0}
 
 </div><!-- /wrap -->
 
-<!-- feedback FAB -->
 <button class="btn primary feedback-fab" onclick="openFeedback()">Feedback</button>
 
 <!-- upload modal -->
 <div class="modal" id="uploadModal">
   <div class="sheet">
-    <h3>Load NC export</h3>
-    <p class="hint" style="color:var(--muted)">Drop the NC's Overview export (.xlsx).
-      It replaces the current data. Only KDS SAS Emmen rows are kept.</p>
-    <label>Export file</label>
+    <h3>Load a report</h3>
+    <p class="hint" style="color:var(--muted)">Excel file (.xlsx, .xlsm, .xls).
+      Only <b>KDS SAS Emmen</b> rows are kept — anything else in the file is ignored.</p>
+
+    <label>1 · Choose the file</label>
     <input type="file" id="up_file" accept=".xlsx,.xlsm,.xls">
-    <label>Mode</label>
-    <select id="up_mode">
-      <option value="rebuild">Replace all (rebuild)</option>
-      <option value="append">Add / update (append)</option>
-    </select>
+    <div id="up_filename" class="small" style="margin-top:6px;color:var(--green)"></div>
+
+    <label style="margin-top:16px">2 · What should happen to the data already here?</label>
+    <div id="up_current" class="small" style="margin:2px 0 10px">…</div>
+
+    <label class="modeopt" for="mode_append">
+      <input type="radio" name="upmode" id="mode_append" value="append" checked>
+      <span>
+        <b>Add to what is already here</b> &nbsp;<span class="pill p-ok">safe</span>
+        <div class="modedesc">Keeps every NC you already have. New NCs in the file are
+        added; NCs that already exist are updated with the values from the file.
+        Nothing is lost. Loading the same file twice changes nothing.
+        <br><b>Use this</b> to add a new month, or a report from another system.</div>
+      </span>
+    </label>
+
+    <label class="modeopt" for="mode_rebuild">
+      <input type="radio" name="upmode" id="mode_rebuild" value="rebuild">
+      <span>
+        <b>Start over — empty everything first</b> &nbsp;<span class="pill p-bad">erases</span>
+        <div class="modedesc">Deletes all NCs currently in the dashboard, then loads
+        only this file. Anything not in this file is gone.
+        <br><b>Use this</b> only when this one file is meant to be the whole truth,
+        or to clean up after a bad load.</div>
+      </span>
+    </label>
+
+    <div id="up_warn" class="warnbox hidden" style="margin-top:12px">
+      <b>This will erase the NCs currently in the dashboard.</b>
+      <div class="small" id="up_warn_detail"></div>
+      <label style="margin-top:8px;display:block">
+        <input type="checkbox" id="up_confirm"> I understand, empty it and load only this file
+      </label>
+    </div>
+
     <div class="row">
       <button class="btn" onclick="closeModal('uploadModal')">Cancel</button>
-      <button class="btn primary" onclick="doUpload()">Load</button>
+      <button class="btn primary" id="up_btn" onclick="doUpload()">Load</button>
     </div>
   </div>
 </div>
@@ -201,40 +258,90 @@ section{margin:26px 0}
 <div class="toast" id="toast"></div>
 
 <script>
+let includeLager=false;
+function toggleLager(){
+  includeLager=!includeLager;
+  const b=document.getElementById('lagerBtn');
+  if(b){b.textContent=includeLager?'Lager: shown':'Lager: hidden';b.classList.toggle('primary',includeLager);}
+  if(window.LAST_DATA)render(window.LAST_DATA);
+}
+function _dropStack(d){if(includeLager||!d||!d.rows)return d;
+  const k=d.rows.map(r=>r!=='Lager');const s={};
+  Object.keys(d.series||{}).forEach(x=>{s[x]=d.series[x].filter((v,i)=>k[i]);});
+  return {...d,rows:d.rows.filter((r,i)=>k[i]),series:s};}
+function _dropBar(d){if(includeLager||!d||!d.labels)return d;
+  const k=d.labels.map(l=>l!=='Lager');
+  return {...d,labels:d.labels.filter((l,i)=>k[i]),values:d.values.filter((v,i)=>k[i])};}
+function _dropHeat(d){if(includeLager||!d||!d.rows)return d;
+  const k=d.rows.map(r=>r!=='Lager');
+  return {...d,rows:d.rows.filter((r,i)=>k[i]),z:d.z.filter((r,i)=>k[i])};}
+let bcOrigin='all';  // all|supplier|production exclusive
+function setBcOrigin(v){
+  bcOrigin=(bcOrigin===v?'all':v);
+  if(window.LAST_DATA)render(window.LAST_DATA);
+  applyBcChips();
+}
+function applyBcChips(){
+  document.querySelectorAll('#bcLaneChips .bcchip').forEach(c=>{
+    c.classList.toggle('on',c.dataset.v===bcOrigin);});
+}
+// Build the stacked payload from the lanes that are toggled on.
+function bcBuild(d){
+  if(bcOrigin==='all')return d.batch_class;
+  const src=d.batch_class_lanes;
+  if(!src)return d.batch_class;
+  const rows=src.rows;
+  const lane=bcOrigin==='supplier'?src.supplier:src.production;
+  const series={};
+  ['Minor','Major','Unclassified'].forEach(c=>{
+    series[c]=rows.map((_,i)=>(lane[c]?lane[c][i]||0:0));});
+  return {rows,series,click:'batch'};
+}
 const PALETTE={Closed:'#3fb56b',Open:'#e0a63e',Deleted:'#e5533e',
   'Z3 - Production NC':'#1E9BE0','Z2 - Procurem. Complaint':'#8b6fd6',
   Minor:'#4FC3F7',Major:'#e5533e',Unclassified:'#5b7590'};
 const PLOT_BG='rgba(0,0,0,0)';
 const LAYOUT={autosize:true,paper_bgcolor:PLOT_BG,plot_bgcolor:PLOT_BG,
-  font:{color:'#c9dcee',size:11},margin:{l:56,r:18,t:52,b:44,autoexpand:true},
-  legend:{orientation:'h',y:1.12,yanchor:'bottom',x:0,font:{size:10}},
+  font:{color:'#d5e6f5',size:13},margin:{l:56,r:18,t:40,b:44,autoexpand:true},
+  legend:{orientation:'h',y:1.10,yanchor:'bottom',x:0,font:{size:12}},
   modebar:{bgcolor:'rgba(0,0,0,0)',color:'#6d8ba6',activecolor:'#4FC3F7',
     orientation:'h'},
   xaxis:{gridcolor:'#173247',zerolinecolor:'#173247',automargin:true},
   yaxis:{gridcolor:'#173247',zerolinecolor:'#173247',automargin:true}};
-// toolbar on every chart: save image, zoom in / out, pan, autoscale, reset
 const CONF={responsive:true,displaylogo:false,displayModeBar:true,
   modeBarButtonsToRemove:['select2d','lasso2d','toggleSpikelines',
     'hoverClosestCartesian','hoverCompareCartesian'],
   toImageButtonOptions:{format:'png',scale:2}};
-// distinct colour per month, used by the "over time" stacked charts
 const MONTH_COLS=['#1E9BE0','#4FC3F7','#3fb56b','#e0a63e','#e5533e','#8b6fd6',
   '#2dd4bf','#f472b6','#a3e635','#fb923c','#60a5fa','#c084fc'];
 function monthColor(i){return MONTH_COLS[i%MONTH_COLS.length];}
-// shorten long axis labels; full value stays in the hover and in the click
 function shortLabel(s,n){s=String(s);return s.length>n?s.slice(0,n-1)+'…':s;}
+// Keep FULL values as the axis categories (they are unique) and only shorten
+// what is drawn. Truncating the values themselves merged two different defect
+// codes into one category and made the Pareto line double back on itself.
+function tickShort(labels,n){
+  return {tickmode:'array',tickvals:labels,
+          ticktext:labels.map(l=>shortLabel(l,n))};
+}
+
+// Friendly names for the columns a click can filter on. Used only for the
+// label above the raw table — the filter itself always uses the column name.
+const FLAB={batch:'Batch',defect_class_label:'Class',status:'Status',
+  month:'Month',vendor_clean:'Vendor',material:'Material',
+  defect_code:'Defect code',disposition:'Disposition',cause:'Cause',
+  notification:'NC',age_bucket:'Age',lane:'Lane',origin:'Origin',
+  notif_type:'Type'};
+function flab(c){return FLAB[c]||c;}
 
 let STATE={global:{types:[],statuses:[],date_from:'',date_to:''},
            section:{}, options:null};
 
-// ---- filter model ----
 function globalFilters(){
   const g=STATE.global;
   return {types:g.types,statuses:g.statuses,
     date_from:g.date_from||null,date_to:g.date_to||null};
 }
 function sectionFilters(sec){
-  // merge global with this section's own selections
   const base=globalFilters();
   const s=STATE.section[sec]||{};
   return Object.assign({},base,s);
@@ -246,8 +353,15 @@ async function api(path,body){
   return r.json();
 }
 
-// ---- boot ----
+async function showVersion(){
+  try{const st=await (await fetch('api/status')).json();
+    document.getElementById('verline').textContent=
+      st.version+' · '+st.rows+' NCs'+
+      (st.last_import? ' · loaded '+st.last_import.ts.slice(0,16).replace('T',' '):'');
+  }catch(e){}
+}
 async function boot(){
+  showVersion();
   const d=await api('data',{filters:globalFilters()});
   if(d.empty){document.getElementById('board').innerHTML=
     '<div class="empty">No data loaded yet.<br>Click <b>Load export</b> to add the NC export.</div>';
@@ -268,7 +382,7 @@ function buildGlobalChips(){
 }
 
 function chipSet(elid,values,key,scope,labelFn){
-  const el=document.getElementById(elid);el.innerHTML='';
+  const el=document.getElementById(elid);if(!el)return;el.innerHTML='';
   values.forEach(v=>{
     const c=document.createElement('span');c.className='chip';
     c.textContent=labelFn?labelFn(v):v;
@@ -300,49 +414,49 @@ const CAP={
   status_prod:"Production NCs only — everything that is not a supplier problem. Customer complaints have their own chart.",
   status_supp:"Supplier NCs only (Z2 procurement complaints, and any NC whose cause is Supplier).",
   by_part:"Which parts get the most production NCs. Longest bar = most problems.",
-  batch_z3_status:"Production NCs per batch, and how many are still open. Supplier and customer complaints are not in this chart.",
+  batch_z3_status:"Production NCs per batch, and how many are still open. Click a coloured piece to see that batch and that status only.",
   batch_cc:"Customer complaints per batch.",
-  batch_class:"Minor vs Major per batch. Major = the serious ones (class 4-5).",
+  batch_class:"Minor vs Major per batch. Major = the serious ones (class 4-5). Click a coloured piece to see that batch and that class only.",
   batch_copq:"What each batch cost us in poor-quality money (CHF).",
-  batch_defect_heat:"Which batch had which kind of defect. Darker = more.",
-  z2_month_status:"Supplier complaints opened each month, and how many are still open.",
+  batch_defect_heat:"Which batch had which kind of defect. Darker = more. Click a square to see that batch and that defect code only.",
+  z2_month_status:"Supplier complaints opened each month, and how many are still open. Click a coloured piece to see that month and that status only.",
   vendor_pareto:"Which suppliers cause the most NCs (bars) and cost the most (line).",
-  z2_vendor_month:"Supplier NCs over time, one colour per month.",
+  z2_vendor_month:"Supplier NCs over time, one colour per month. Click a coloured piece to see that vendor in that month only.",
   springs:"Production NCs on the spring assemblies, by status.",
-  backlog_age:"How long the still-open production NCs have been waiting (supplier and customer complaints excluded).",
+  backlog_age:"How long the still-open production NCs have been waiting.",
   defect_pareto:"Which problems happen most. The yellow line shows that a few types cause most NCs.",
   disposition:"What we decided to do with the NC parts. Scrap is the costly one (red).",
   top_copq:"The 10 single NCs that cost us the most (CHF).",
   copq_month:"Poor-quality cost per month (CHF).",
-  cause_month_heat:"When each kind of problem showed up. Darker = more that month."
+  cause_month_heat:"When each kind of problem showed up. Darker = more that month. Click a square to see that cause in that month only."
 };
-// ---- render all sections ----
-function render(d){
+
+function render(d){window.LAST_DATA=d;setTimeout(applyBcChips,0);
   const b=document.getElementById('board');b.innerHTML='';
   b.appendChild(kpiStrip(d.kpi));
   b.appendChild(sec('2','Status',['types','statuses'],[
     card('status_prod','Production NCs by status',CAP['status_prod'],mkBar(d.status_prod,'#1E9BE0')),
     card('status_supp','Supplier NCs by status',CAP['status_supp'],mkBar(d.status_supp,'#8b6fd6')),
-    card('by_part','NCs per part',CAP['by_part'],mkBar(d.by_part,'#1E9BE0','h'),true),
-  ]));
-  b.appendChild(sec('3','Batches',['batches','types','classes'],[
-    card('batch_z3_status','Production NCs per batch',CAP['batch_z3_status'],mkStacked(d.batch_z3_status,['Closed','Open','Deleted'])),
-    card('batch_cc','Customer complaints per batch',CAP['batch_cc'],mkBar(d.batch_cc,'#8b6fd6')),
-    card('batch_class','Minor / Major per batch',CAP['batch_class'],mkStacked(d.batch_class,['Minor','Major','Unclassified'])),
-    card('batch_copq','Cost of poor quality per batch',CAP['batch_copq'],mkBar(d.batch_copq,'#e0a63e')),
-    card('batch_defect_heat','Batch × defect code',CAP['batch_defect_heat'],mkHeat(d.batch_defect_heat),true),
+    card('by_part','NCs per part',CAP['by_part'],mkBar(d.by_part,'#1E9BE0','h')),
   ],'one'));
-  b.appendChild(sec('4','Suppliers (Z2)',['vendors','statuses'],[
-    card('z2_month_status','Z2 supplier NCs per month',CAP['z2_month_status'],mkStacked(d.z2_month_status,['Closed','Open','Deleted'])),
+  b.appendChild(sec('3','Batches',['batches','types','classes'],[
+    card('batch_z3_status','Production NCs per batch',CAP['batch_z3_status'],mkStacked(d.batch_z3_status,['Closed','Open','Deleted'],'status')),
+    card('batch_cc','Customer complaints per batch',CAP['batch_cc'],mkBar(d.batch_cc,'#8b6fd6')),
+    card('batch_class','Minor / Major per batch',CAP['batch_class'],mkStacked(_dropStack(bcBuild(d)),['Minor','Major','Unclassified'],'defect_class_label')),
+    card('batch_copq','Cost of poor quality per batch',CAP['batch_copq'],mkBar(_dropBar(d.batch_copq),'#e0a63e')),
+    card('batch_defect_heat','Batch × defect code',CAP['batch_defect_heat'],mkHeat(_dropHeat(d.batch_defect_heat))),
+  ],'one'));
+  b.appendChild(sec('4','Suppliers',['vendors','statuses'],[
+    card('z2_month_status','Supplier NCs per month',CAP['z2_month_status'],mkStacked(d.z2_month_status,['Closed','Open','Deleted'],'status')),
     card('vendor_pareto','Vendor Pareto',CAP['vendor_pareto'],mkPareto2(d.vendor_pareto)),
-    card('z2_vendor_month','Z2 NCs by supplier over time',CAP['z2_vendor_month'],mkStacked(d.z2_vendor_month,d.months),true),
+    card('z2_vendor_month','Supplier NCs over time',CAP['z2_vendor_month'],mkStacked(d.z2_vendor_month,d.months,'month')),
   ],'one'));
   b.appendChild(sec('5','Springs',['statuses'],[
     card('springs','Springs NCs by status',CAP['springs'],mkBar(d.springs,'#1E9BE0')),
-  ]));
+  ],'one'));
   b.appendChild(sec('6','Open backlog',[],[
     card('backlog_age','Open NCs by age',CAP['backlog_age'],mkBar(d.backlog_age,'#e0a63e')),
-  ]));
+  ],'one'));
   b.appendChild(sec('6b','',[],[
     cardTable('backlog_oldest','10 oldest open production NCs',d.backlog_oldest),
   ],'one'));
@@ -351,13 +465,14 @@ function render(d){
     card('disposition','Disposition mix',CAP['disposition'],mkDisposition(d.disposition)),
     card('top_copq','Top 10 NCs by cost',CAP['top_copq'],mkBar(d.top_copq,'#e5533e','h')),
     card('copq_month','CoPQ per month',CAP['copq_month'],mkBar(d.copq_month,'#e0a63e')),
-    card('cause_month_heat','Month × defect cause',CAP['cause_month_heat'],mkHeat(d.cause_month_heat),true),
+    card('cause_month_heat','Month × defect cause',CAP['cause_month_heat'],mkHeat(d.cause_month_heat)),
   ],'one'));
-  b.appendChild(dqPanel(d.dq));
-  reattachRaw();
+  b.appendChild(dqPanel(d.dq,d.dq_by_source));
+  requestAnimationFrame(()=>{resizeAllPlots();
+    setTimeout(resizeAllPlots,250);
+    setTimeout(resizeAllPlots,800);});
 }
 
-// ---- KPI strip ----
 function kpiStrip(k){
   const s=document.createElement('section');
   s.innerHTML='<div class="kpis">'+[
@@ -372,15 +487,12 @@ function kpi(v,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="v">'+v+
   '</div><div class="l">'+l+'</div></div>';}
 function chf(v){return (v/1000).toFixed(0)+'k';}
 
-// ---- section wrapper (collapsible filters + raw view) ----
 function sec(idx,title,filterKeys,cards,gridCls){
   const s=document.createElement('section');s.dataset.sec=idx;
   const fid='sf_'+idx;
   let filterHtml='';
-  if(filterKeys.length){
-    filterHtml='<div class="sec-filters" id="'+fid+'"></div>';
-  }
-  s.innerHTML=(title?'<div class="sec-head"><span class="idx">'+idx+'</span><h2>'+title+'</h2>'+
+  if(filterKeys.length){filterHtml='<div class="sec-filters" id="'+fid+'"></div>';}
+  s.innerHTML=(title?'<div class="sec-head"><span class="idx">'+idx+'</span><h2>'+title+'</h2>'+(idx==='3'?'<button id="lagerBtn" class="btn small" style="margin-left:12px" onclick="toggleLager()">Lager: hidden</button>':'')+
     (filterKeys.length?'<button class="btn small fbtn" onclick="toggleSec(\''+fid+'\')">Filters</button>':'')+
     '</div>':'')+filterHtml+'<div class="grid '+(gridCls||'')+'"></div>';
   const grid=s.querySelector('.grid');
@@ -399,6 +511,8 @@ function buildSecFilters(idx,fid,keys){
     defect_codes:['Defect code',STATE.options.defect_codes]};
   keys.forEach(k=>{
     const [lab,vals,fn]=map[k];
+    STATE.section[idx]=STATE.section[idx]||{};
+    if(!STATE.section[idx][k])STATE.section[idx][k]=vals.slice();
     const g=document.createElement('div');g.className='fgrp';
     g.innerHTML='<label>'+lab+'</label>';
     const chips=document.createElement('div');chips.className='chips';
@@ -409,106 +523,231 @@ function buildSecFilters(idx,fid,keys){
 function toggleSec(fid){document.getElementById(fid).classList.toggle('open');}
 
 async function refreshSection(idx){
-  // re-fetch full payload with this section's merged filters, redraw only its plots
   const d=await api('data',{filters:sectionFilters(idx)});
   const s=document.querySelector('section[data-sec="'+idx+'"]');
   if(!s)return;
-  // rebuild just the cards region
   const map=SECDEF[idx];
   const grid=s.querySelector('.grid');grid.innerHTML='';
   map.cards(d).forEach(c=>grid.appendChild(c));
-  reattachRaw();
+  requestAnimationFrame(resizeAllPlots);
 }
 
-// section card definitions reused by refreshSection
 const SECDEF={
   '2':{cards:d=>[card('status_prod','Production NCs by status',CAP['status_prod'],mkBar(d.status_prod,'#1E9BE0')),
     card('status_supp','Supplier NCs by status',CAP['status_supp'],mkBar(d.status_supp,'#8b6fd6')),
-    card('by_part','NCs per part',CAP['by_part'],mkBar(d.by_part,'#1E9BE0','h'),true)]},
-  '3':{cards:d=>[card('batch_z3_status','Production NCs per batch',CAP['batch_z3_status'],mkStacked(d.batch_z3_status,['Closed','Open','Deleted'])),
+    card('by_part','NCs per part',CAP['by_part'],mkBar(d.by_part,'#1E9BE0','h'))]},
+  '3':{cards:d=>[card('batch_z3_status','Production NCs per batch',CAP['batch_z3_status'],mkStacked(d.batch_z3_status,['Closed','Open','Deleted'],'status')),
     card('batch_cc','Customer complaints per batch',CAP['batch_cc'],mkBar(d.batch_cc,'#8b6fd6')),
-    card('batch_class','Minor / Major per batch',CAP['batch_class'],mkStacked(d.batch_class,['Minor','Major','Unclassified'])),
+    card('batch_class','Minor / Major per batch',CAP['batch_class'],mkStacked(_dropStack(bcBuild(d)),['Minor','Major','Unclassified'],'defect_class_label')),
     card('batch_copq','CoPQ per batch',CAP['batch_copq'],mkBar(d.batch_copq,'#e0a63e')),
-    card('batch_defect_heat','Batch × defect code',CAP['batch_defect_heat'],mkHeat(d.batch_defect_heat),true)]},
-  '4':{cards:d=>[card('z2_month_status','Z2 supplier NCs per month',CAP['z2_month_status'],mkStacked(d.z2_month_status,['Closed','Open','Deleted'])),
+    card('batch_defect_heat','Batch × defect code',CAP['batch_defect_heat'],mkHeat(d.batch_defect_heat))]},
+  '4':{cards:d=>[card('z2_month_status','Supplier NCs per month',CAP['z2_month_status'],mkStacked(d.z2_month_status,['Closed','Open','Deleted'],'status')),
     card('vendor_pareto','Vendor Pareto',CAP['vendor_pareto'],mkPareto2(d.vendor_pareto)),
-    card('z2_vendor_month','Z2 NCs by supplier over time',CAP['z2_vendor_month'],mkStacked(d.z2_vendor_month,d.months),true)]},
+    card('z2_vendor_month','Supplier NCs over time',CAP['z2_vendor_month'],mkStacked(d.z2_vendor_month,d.months,'month'))]},
   '5':{cards:d=>[card('springs','Springs NCs by status',CAP['springs'],mkBar(d.springs,'#1E9BE0'))]},
   '7':{cards:d=>[card('defect_pareto','Defect code Pareto',CAP['defect_pareto'],mkPareto(d.defect_pareto)),
     card('disposition','Disposition mix',CAP['disposition'],mkDisposition(d.disposition)),
     card('top_copq','Top 10 NCs by cost',CAP['top_copq'],mkBar(d.top_copq,'#e5533e','h')),
     card('copq_month','CoPQ per month',CAP['copq_month'],mkBar(d.copq_month,'#e0a63e')),
-    card('cause_month_heat','Month × defect cause',CAP['cause_month_heat'],mkHeat(d.cause_month_heat),true)]},
+    card('cause_month_heat','Month × defect cause',CAP['cause_month_heat'],mkHeat(d.cause_month_heat))]},
 };
 
-// ---- chart card + raw view ----
-function card(id,title,hint,plotSpec,tall){
-  const c=document.createElement('div');c.className='card';c.dataset.chart=id;
-  c.innerHTML='<h3>'+title+'</h3><p class="hint">'+hint+'</p>'+
-    '<div class="plot'+(tall?' tall':'')+'" id="p_'+id+'"></div>'+
-    '<div class="raw" id="raw_'+id+'" style="display:none"></div>';
-  c._spec=plotSpec; c._click=plotSpec.click; c._scope=plotSpec.scope||null;
+// ---- chart card. The table under it stays CLOSED until a bar is clicked. ----
+function card(id,title,hint,plotSpec,size){
+  const c=document.createElement('div');
+  c.className='card';
+  c.dataset.chart=id;
+  c._baseScope=plotSpec.scope||null;
+  c._scope=plotSpec.scope||null;
+  c._clickFilter=null;
+  c.innerHTML='<h3>'+title+'</h3><p class="hint">'+hint+'</p>'+(id==='batch_class'?'<div id="bcLaneChips" style="margin:6px 0 10px">'+'<span class="bcchip" data-v="supplier" onclick="setBcOrigin(\'supplier\')">Supplier</span>'+'<span class="bcchip" data-v="production" onclick="setBcOrigin(\'production\')">Production</span>'+'</div>':'')+
+    '<div class="plot" id="p_'+id+'"></div>'+
+    '<div class="raw" id="raw_'+id+'">'+
+      '<div class="bar"><span class="raw-label"></span>'+
+        '<button class="btn small" data-xls>Download Excel</button>'+
+        '<button class="btn small" data-clr>Close</button></div>'+
+      '<div class="raw-scroll"></div></div>';
+  c.querySelector('[data-xls]').onclick=(e)=>{
+    e.stopPropagation();
+    const sec=c.closest('section');
+    const filters=sec&&sec.dataset.sec?sectionFilters(sec.dataset.sec):globalFilters();
+    downloadRaw(filters,c._clickFilter,c._scope,id);
+  };
+  c.querySelector('[data-clr]').onclick=(e)=>{e.stopPropagation();closeRaw(id);};
   setTimeout(()=>drawPlot(id,plotSpec),0);
   return c;
 }
 function cardTable(id,title,rows){
   const c=document.createElement('div');c.className='card';
-  c.innerHTML='<h3>'+title+'</h3><p class="hint">The open production NCs waiting longest. Supplier NCs and customer complaints are listed on their own charts. Scroll sideways for all columns.</p>';
-  const box=document.createElement('div');box.className='raw';
+  c.innerHTML='<h3>'+title+'</h3><p class="hint">The open production NCs waiting longest. Scroll sideways for all columns.</p>';
+  const box=document.createElement('div');box.className='raw open';
   box.style.borderTop='none';box.style.paddingTop='0';
-  box.appendChild(rawTable({cols:RAWDEF.cols,labels:RAWDEF.labels,rows:rows}));
+  const bar=document.createElement('div');bar.className='bar';
+  bar.innerHTML='<span class="raw-label">'+(rows||[]).length+' NCs</span>';
+  const xls=document.createElement('button');xls.className='btn small';
+  xls.textContent='Download Excel';
+  xls.onclick=()=>{
+    const sec=c.closest('section');
+    const filters=sec&&sec.dataset.sec?sectionFilters(sec.dataset.sec):globalFilters();
+    downloadRaw(filters,null,{lane:'Production',status:'Open'},id);
+  };
+  bar.appendChild(xls);box.appendChild(bar);
+  const sc=document.createElement('div');sc.className='raw-scroll';
+  sc.appendChild(rawTable({cols:RAWDEF.cols,labels:RAWDEF.labels,rows:rows}));
+  box.appendChild(sc);
   c.appendChild(box);
   return c;
 }
-let RAWDEF={cols:['notification','notif_type','origin','status','opened','closed','leadtime',
+let RAWDEF={cols:['notification','notif_text','notif_type','origin','status','opened','closed','leadtime',
   'batch','material','defect_class_label','defect_code','cause','disposition',
   'vendor_clean','copq'],
-  labels:{notification:'NC',notif_type:'Type',origin:'Origin',status:'Status',opened:'Opened',
+  labels:{notification:'NC',notif_text:'Title',notif_type:'Type',origin:'Origin',status:'Status',opened:'Opened',
   closed:'Closed',leadtime:'Leadtime',batch:'Batch',material:'Material',
   defect_class_label:'Class',defect_code:'Defect code',cause:'Cause',
   disposition:'Disposition',vendor_clean:'Vendor',copq:'CoPQ'}};
 
 function drawPlot(id,spec){
   const el=document.getElementById('p_'+id);if(!el)return;
-  Plotly.newPlot(el,spec.data,Object.assign({},LAYOUT,spec.layout||{}),CONF);
-  el._isplot=true;
-  if(spec.clickField){
-    el.on('plotly_click',ev=>{
-      const pt=ev.points[0];
-      let val=spec.clickValue?spec.clickValue(pt):(pt.label||pt.x||pt.y);
-      openRaw(id,{col:spec.clickField,value:val},spec.scope||null);
+  const H=spec.height||360;
+  el.style.height=H+'px';
+  const layout=Object.assign({},LAYOUT,spec.layout||{},{autosize:true,height:H});
+  const paint=()=>{
+    if(el.clientWidth<80){requestAnimationFrame(paint);return;}
+    Plotly.newPlot(el,spec.data,layout,CONF).then(()=>{
+      if(!el.offsetParent||el.clientWidth<10)return;
+      try{Plotly.Plots.resize(el);}catch(e){}
     });
-  }
+    el._isplot=true;
+    el._spec=spec;
+    if(spec.clickField && !el._clickBound){
+      el._clickBound=true;
+      // Reset only on a TRUE empty-area click. plotly_click sets _pointClicked;
+      // this listener runs just after and resets only when no point was hit.
+      el.addEventListener('click',function(e){
+        setTimeout(function(){
+          if(el._pointClicked){el._pointClicked=false;return;}
+          try{closeRaw(id);}catch(_){}
+          try{clearHighlight(id);}catch(_){}
+          if(id==='batch_class'&&typeof bcOrigin!=='undefined'&&bcOrigin!=='all'){
+            bcOrigin='all';
+            if(window.LAST_DATA)render(window.LAST_DATA);
+          }
+        },20);
+      });
+      el.on('plotly_click',ev=>{
+        el._pointClicked=true;
+        const pt=ev.points[0];
+        let val=spec.clickValue?spec.clickValue(pt):(pt.label||pt.x||pt.y);
+        // Every dimension the click carries is applied, not just the axis one.
+        // The card's own scope (e.g. lane: Production) stays underneath;
+        // the clicked dimension is merged on top and also shown in the label.
+        const extra=spec.clickScope?spec.clickScope(pt):null;
+        const merged=Object.assign({},spec.scope||{},extra||{});
+        openRaw(id,{col:spec.clickField,value:val},merged,pt,extra);
+      });
+    }
+    if(!el._ro && window.ResizeObserver){
+      el._ro=new ResizeObserver(()=>{
+        if(!el.offsetParent||el.clientWidth<10)return;
+        try{Plotly.Plots.resize(el);}catch(e){}});
+      el._ro.observe(el);
+    }
+  };
+  paint();
 }
 
-// re-fit every plot to its card on resize / browser zoom
 let _rzT;
 function resizeAllPlots(){
   document.querySelectorAll('.plot').forEach(el=>{
-    if(el._isplot){try{Plotly.Plots.resize(el);}catch(e){}}
+    // skip anything not actually on screen (hidden card, closed modal) —
+    // Plotly throws on a plot div with no layout box
+    if(!el._isplot)return;
+    if(!el.offsetParent||el.clientWidth<10)return;
+    try{Plotly.Plots.resize(el);}catch(e){}
   });
 }
 window.addEventListener('resize',()=>{clearTimeout(_rzT);_rzT=setTimeout(resizeAllPlots,150);});
 
-async function openRaw(chartId,click,scope){
-  const card=document.querySelector('.card[data-chart="'+chartId+'"]');
-  const sec=card.closest('section').dataset.sec;
-  const filters=sec?sectionFilters(sec):globalFilters();
-  const body={filters:filters,click:click,scope:scope||card._scope||null};
-  const r=await api('raw',body);
-  const box=document.getElementById('raw_'+chartId);
-  box.style.display='block';box.innerHTML='';
-  const bar=document.createElement('div');bar.className='bar';
-  bar.innerHTML='Filtered by <b>'+click.value+'</b> · '+r.count+' NCs ';
-  const clr=document.createElement('button');clr.className='btn small';
-  clr.textContent='Clear';clr.onclick=()=>{box.style.display='none';box.innerHTML='';};
-  const xls=document.createElement('button');xls.className='btn small';
-  xls.textContent='Download Excel';
-  xls.onclick=()=>downloadRaw(filters,click,scope||card._scope||null);
-  bar.appendChild(clr);bar.appendChild(xls);box.appendChild(bar);
-  box.appendChild(rawTable(r));
-  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+// highlight the clicked bar / slice, dim the rest
+function highlight(chartId,pt){
+  const el=document.getElementById('p_'+chartId);
+  if(!el||!el._isplot||!pt)return;
+  const spec=el._spec||{};
+  if(spec.data&&spec.data[0]&&spec.data[0].type==='heatmap')return;
+  el.data.forEach((tr,ti)=>{
+    const n=(tr.x&&tr.x.length)||(tr.labels&&tr.labels.length)||0;
+    if(!n)return;
+    const base=tr._baseColor||(tr.marker&&(Array.isArray(tr.marker.color)?null:tr.marker.color));
+    const ops=[];
+    for(let i=0;i<n;i++){
+      const hit=(ti===pt.curveNumber&&i===pt.pointNumber);
+      ops.push(hit?1:0.28);
+    }
+    try{Plotly.restyle(el,{'marker.opacity':[ops]},[ti]);}catch(e){}
+  });
 }
+function clearHighlight(chartId){
+  const el=document.getElementById('p_'+chartId);
+  if(!el||!el._isplot)return;
+  el.data.forEach((tr,ti)=>{
+    try{Plotly.restyle(el,{'marker.opacity':[null]},[ti]);}catch(e){}
+  });
+}
+
+async function openRaw(chartId,click,scope,pt,clicked){
+  const card=document.querySelector('.card[data-chart="'+chartId+'"]');
+  if(!card)return;
+  // one open table at a time
+  closeAllRaw(chartId);
+  card._clickFilter=click||null;
+  card._scope=scope||card._baseScope||null;
+  const sec=card.closest('section');
+  const filters=sec&&sec.dataset.sec?sectionFilters(sec.dataset.sec):globalFilters();
+  const r=await api('raw',{filters:filters,click:click||null,scope:card._scope});
+  const box=card.querySelector('.raw');
+  const label=card.querySelector('.raw-label');
+  const tbl=card.querySelector('.raw-scroll');
+  // one "Field: value" per dimension the click carried, then the count
+  const bits=[];
+  if(click&&click.value!=null)
+    bits.push(flab(click.col)+': <b>'+click.value+'</b>');
+  if(clicked)Object.keys(clicked).forEach(k=>{
+    if(clicked[k]!=null&&clicked[k]!=='')
+      bits.push(flab(k)+': <b>'+clicked[k]+'</b>');});
+  label.innerHTML=(bits.length?bits.join(' · ')+' · ':'')+r.count+' NCs';
+  tbl.innerHTML='';
+  tbl.appendChild(rawTable(r));
+  box.classList.add('open');
+  card.classList.add('selected');
+  highlight(chartId,pt);
+}
+function closeRaw(chartId){
+  const card=document.querySelector('.card[data-chart="'+chartId+'"]');
+  if(!card)return;
+  const box=card.querySelector('.raw');
+  if(box)box.classList.remove('open');
+  card.classList.remove('selected');
+  card._clickFilter=null;
+  // drop the clicked dimension so the next Excel download is not filtered by it
+  card._scope=card._baseScope||null;
+  clearHighlight(chartId);
+}
+function closeAllRaw(exceptId){
+  document.querySelectorAll('.card[data-chart]').forEach(c=>{
+    const id=c.dataset.chart;
+    if(exceptId&&id===exceptId)return;
+    closeRaw(id);
+  });
+}
+// click on the dark background (outside any card) closes the open table
+document.addEventListener('click',ev=>{
+  if(ev.target.closest('.card'))return;
+  if(ev.target.closest('.modal'))return;
+  if(ev.target.closest('.gbar'))return;
+  if(ev.target.closest('header'))return;
+  closeAllRaw(null);
+});
+
 function rawTable(r){
   const t=document.createElement('table');
   const num=new Set(['leadtime','copq']);
@@ -521,22 +760,23 @@ function rawTable(r){
     body+='</tr>';});
   t.innerHTML=h+body;return t;
 }
-async function downloadRaw(filters,click,scope){
+async function downloadRaw(filters,click,scope,chartId){
   const r=await fetch('api/export',{method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({filters:filters,click:click,scope:scope||null})});
+    body:JSON.stringify({filters:filters,click:click||null,scope:scope||null})});
   const blob=await r.blob();const u=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=u;a.download='SAS_NCs.xlsx';a.click();
+  const a=document.createElement('a');a.href=u;
+  const bit=(click&&click.value)?('_'+String(click.value).replace(/[^\w-]+/g,'_')):'';
+  a.download='SAS_'+(chartId||'NCs')+bit+'.xlsx';a.click();
   URL.revokeObjectURL(u);
 }
-function reattachRaw(){/* plots redraw with their own click handlers via drawPlot */}
 
 // ---- plotly spec builders ----
 function mkBar(d,color,orient){
   const h=orient==='h';
-  const shortL=d.labels.map(l=>shortLabel(l,h?34:20));
-  const labs=h?shortL.slice().reverse():shortL;
   const full=h?d.labels.slice().reverse():d.labels;
+  const labs=full;
+  const tk=tickShort(full,h?34:20);
   const vals=h?d.values.slice().reverse():d.values;
   let cols=color;
   if(d.colors&&d.colors.length===d.labels.length)cols=d.colors;
@@ -547,125 +787,244 @@ function mkBar(d,color,orient){
     x:h?vals:labs,y:h?labs:vals,
     customdata:full,marker:{color:cols},
     hovertemplate:'%{customdata}<br>%{'+(h?'x':'y')+'} NCs<extra></extra>'}];
-  if(d.labels.length<=4)data[0].width=d.labels.length<=2?0.35:0.5;
+  if(!h && d.labels.length<=4)data[0].width=d.labels.length<=2?0.22:0.32;
+  else if(h && d.labels.length<=4)data[0].width=d.labels.length<=2?0.35:0.5;
   const head=vmax>0?vmax*1.18:1;
   return {data:data,click:d.click,clickField:d.click,scope:d.scope,
+    height:h?Math.max(360,34*d.labels.length+150):360,
     clickValue:pt=>pt.customdata||(h?pt.y:pt.x),
-    layout:h?{showlegend:false,margin:{l:170,r:28,t:56,b:36},
-      yaxis:{automargin:true},xaxis:{range:[0,head],rangemode:'tozero'}}:
-      {showlegend:false,margin:{l:56,r:18,t:56,b:44},
+    layout:h?{showlegend:false,margin:{l:210,r:34,t:54,b:44},
+      yaxis:{automargin:true,range:[-0.7,d.labels.length-0.3]},
+      xaxis:{range:[0,head],rangemode:'tozero'}}:
+      {showlegend:false,margin:{l:56,r:18,t:40,b:52},bargap:0.45,
        yaxis:{range:[0,head],rangemode:'tozero'}}};
 }
-function mkStacked(d,order){
+// stackCol = the COLUMN the coloured pieces represent (status, class, month…).
+// Without it a click only ever filtered by the axis value and every segment of
+// a bar returned the same rows.
+function mkStacked(d,order,stackCol){
   const keys=(order||Object.keys(d.series)).filter(s=>d.series[s]);
-  // a month-stacked chart (keys look like 2026-05) gets one colour per month
   const isMonths=keys.length>0&&/^\d{4}-\d{2}$/.test(keys[0]);
-  const short=d.rows.map(r=>shortLabel(r,20));
+  const tk=tickShort(d.rows,20);
   const data=keys.map((s,i)=>({
-    type:'bar',name:legName(s),x:short,y:d.series[s],
+    type:'bar',name:legName(s),x:d.rows,y:d.series[s],
     customdata:d.rows,
     marker:{color:isMonths?monthColor(i):(PALETTE[s]||'#5b7590')},
     hovertemplate:'%{customdata}<br>'+legName(s)+': %{y} NCs<extra></extra>'}));
-  // few categories -> keep bars a sane width instead of giant slabs
   if(d.rows.length<=4)data.forEach(t=>t.width=d.rows.length<=2?0.35:0.5);
   return {data:data,click:d.click,clickField:d.click,scope:d.scope,
     clickValue:pt=>pt.customdata||pt.x,
-    layout:{barmode:'stack',margin:{l:56,r:18,t:56,b:44}}};
+    // curveNumber indexes keys[], so the RAW value goes to the filter.
+    // Reading the trace name instead would send "Z2 Supplier", which
+    // legName() invented for the legend and which no row actually holds.
+    clickScope:stackCol?function(pt){
+      const k=keys[pt.curveNumber];
+      if(k==null)return null;
+      const o={};o[stackCol]=k;return o;
+    }:null,
+    height:380,
+    layout:{barmode:'stack',margin:{l:60,r:20,t:64,b:64}}};
 }
 function legName(s){return s.startsWith('Z2')?'Z2 Supplier':
   s.startsWith('Z3')?'Z3 Production':s;}
 function mkPareto(d){
-  const short=d.labels.map(l=>shortLabel(l,22));
+  const tk=tickShort(d.labels,22);
   return {data:[
-    {type:'bar',x:short,y:d.values,marker:{color:'#1E9BE0'},name:'Count',
+    {type:'bar',x:d.labels,y:d.values,marker:{color:'#1E9BE0'},name:'Count',
      customdata:d.labels,
      hovertemplate:'%{customdata}<br>%{y} NCs<extra></extra>'},
-    {type:'scatter',x:short,y:d.cum,yaxis:'y2',mode:'lines+markers',
+    {type:'scatter',x:d.labels,y:d.cum,yaxis:'y2',mode:'lines+markers',
      line:{color:'#e0a63e'},name:'Running total',
      customdata:d.labels.map((l,i)=>[l,d.values[i]]),
      hovertemplate:'%{customdata[0]}<br>Running total: %{y}% of all NCs'+
        '<br>this type: %{customdata[1]} NCs<extra></extra>'}],
-    click:d.click,clickField:d.click,scope:d.scope,
+    click:d.click,clickField:d.click,scope:d.scope,height:440,
     clickValue:pt=>(Array.isArray(pt.customdata)?pt.customdata[0]:pt.customdata)||pt.x,
     layout:{yaxis2:{overlaying:'y',side:'right',range:[0,100],
-      gridcolor:'transparent',ticksuffix:'%'},margin:{l:44,r:44,t:56,b:95},
+      gridcolor:'transparent',ticksuffix:'%'},margin:{l:56,r:56,t:64,b:150},
       xaxis:{tickangle:-40,automargin:true}}};
 }
 function mkPareto2(d){
-  const short=d.labels.map(l=>shortLabel(l,20));
+  const tk=tickShort(d.labels,20);
   return {data:[
-    {type:'bar',x:short,y:d.count,marker:{color:'#8b6fd6'},name:'NC count',
+    {type:'bar',x:d.labels,y:d.count,marker:{color:'#8b6fd6'},name:'NC count',
      customdata:d.labels,
      hovertemplate:'%{customdata}<br>%{y} NCs<extra></extra>'},
-    {type:'scatter',x:short,y:d.copq,yaxis:'y2',mode:'lines+markers',
+    {type:'scatter',x:d.labels,y:d.copq,yaxis:'y2',mode:'lines+markers',
      line:{color:'#e0a63e'},name:'Cost (CHF)',customdata:d.labels,
      hovertemplate:'%{customdata}<br>Cost: %{y:,} CHF<extra></extra>'}],
-    click:d.click,clickField:d.click,scope:d.scope,
+    click:d.click,clickField:d.click,scope:d.scope,height:460,
     clickValue:pt=>pt.customdata||pt.x,
     layout:{yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent'},
-      margin:{l:44,r:52,t:56,b:105},xaxis:{tickangle:-40,automargin:true}}};
+      margin:{l:56,r:64,t:64,b:170},xaxis:{tickangle:-40,automargin:true}}};
 }
 function mkDisposition(d){
-  const colors=d.labels.map(l=>l===d.highlight?'#e5533e':'#3a6a8f');
+  // Distinct colour per disposition so every slice is separable — including
+  // small ones like (not recorded). Scrap stays red (the costly one).
+  const DCOL={'Use as is':'#4FC3F7','Rework':'#3fb56b','Repair':'#8b6fd6',
+    'Return to Supplier':'#e0a63e','Scrap':'#e5533e','Not assigned':'#5b7590',
+    '(not recorded)':'#c77dff','Approved':'#2dd4bf','Redesign':'#f472b6'};
+  const fallback=['#4FC3F7','#3fb56b','#8b6fd6','#e0a63e','#e5533e','#5b7590','#c77dff','#2dd4bf','#f472b6'];
+  const colors=d.labels.map((l,i)=>l===d.highlight?'#e5533e':(DCOL[l]||fallback[i%fallback.length]));
   return {data:[{type:'pie',labels:d.labels,values:d.values,hole:.5,
-    marker:{colors:colors},textinfo:'label+value',textfont:{size:10},
+    marker:{colors:colors,line:{color:'#081521',width:2}},
+    textinfo:'label+value',textposition:'inside',insidetextorientation:'horizontal',
+    textfont:{size:12,color:'#ffffff'},automargin:true,
     hovertemplate:'%{label}<br>%{value} NCs (%{percent})<extra></extra>'}],
     click:d.click,clickField:d.click,scope:d.scope,clickValue:pt=>pt.label,
-    layout:{margin:{l:8,r:8,t:8,b:8},showlegend:false}};
+    height:440,
+    layout:{margin:{l:20,r:20,t:34,b:24},showlegend:true,
+      legend:{orientation:'h',y:-0.06,x:0,font:{size:12}}}};
 }
+// A heatmap square is two values, not one. customdata carries [row, col];
+// the row drives the click filter and the column now rides in the scope.
 function mkHeat(d){
-  const rowsShort=d.rows.map(r=>shortLabel(r,18));
-  const colsShort=d.cols.map(c=>shortLabel(c,18));
+  const tkx=tickShort(d.cols,18), tky=tickShort(d.rows,18);
   const cd=d.rows.map(r=>d.cols.map(c=>[r,c]));
-  return {data:[{type:'heatmap',z:d.z,x:colsShort,y:rowsShort,customdata:cd,
+  return {data:[{type:'heatmap',z:d.z,x:d.cols,y:d.rows,customdata:cd,
     colorscale:[[0,'#0d2033'],[0.5,'#1E9BE0'],[1,'#4FC3F7']],
     hovertemplate:'%{customdata[0]} · %{customdata[1]}<br>%{z} NCs<extra></extra>',
     showscale:true}],
     click:'heat',clickField:d.row_col,scope:d.scope,
+    height:Math.max(380,30*d.rows.length+190),
     clickValue:pt=>(pt.customdata?pt.customdata[0]:pt.y),
-    layout:{margin:{l:140,r:48,t:56,b:110},xaxis:{tickangle:-40,automargin:true},
-      yaxis:{automargin:true}}};
+    clickScope:d.col_col?function(pt){
+      const c=pt.customdata?pt.customdata[1]:pt.x;
+      if(c==null||c==='')return null;
+      const o={};o[d.col_col]=c;return o;
+    }:null,
+    layout:{margin:{l:170,r:58,t:64,b:150},
+      xaxis:Object.assign({tickangle:-40,automargin:true,type:'category'},tkx),
+      yaxis:Object.assign({automargin:true,type:'category'},tky)}};
 }
 
-// ---- data quality ----
-function dqPanel(dq){
+const DQ_FIELDS=[
+  ['defect_class_blank','Defect class blank'],
+  ['disposition_missing','Disposition not assigned'],
+  ['copq_unbooked','Cost not booked'],
+  ['vendor_missing','Vendor not recorded'],
+  ['batch_missing','Batch not identified'],
+  ['model_missing','Model missing'],
+  ['closed_no_date','Closed without a date']
+];
+function dqPanel(dq,bySource){
   const s=document.createElement('section');
-  const cells=[
-    ['Defect class blank',dq.defect_class_blank],
-    ['Disposition not assigned',dq.disposition_missing],
-    ['CoPQ unbooked',dq.copq_unbooked],
-    ['Model missing',dq.model_missing],
-  ];
-  s.innerHTML='<div class="sec-head"><span class="idx">8</span><h2>Data quality</h2>'+
+  const cells=DQ_FIELDS.slice(0,4).map(([k,l])=>[l,dq[k]||0]);
+  let html='<div class="sec-head"><span class="idx">8</span><h2>Data quality — what is missing</h2>'+
     '<span class="cnt">of '+dq.total+' NCs</span></div><div class="dqrow">'+
     cells.map(([l,v])=>{const pct=Math.round(100*v/dq.total);
       return '<div class="dqcell'+(v>0?' flag':'')+'"><div class="v">'+v+
         '</div><div class="l">'+l+'</div><div class="bar"><i style="width:'+
         pct+'%"></i></div></div>';}).join('')+'</div>';
+  // per source system: which system is not filling what
+  if(bySource&&Object.keys(bySource).length){
+    const srcs=Object.keys(bySource).sort();
+    html+='<div class="card" style="margin-top:12px"><h3>By source system</h3>'+
+      '<p class="hint">Blank cells are not errors — they are fields the system does '+
+      'not carry, or that nobody has filled in yet.</p><table><tr><th>Gap</th>'+
+      srcs.map(x=>'<th>'+x+'</th>').join('')+'</tr>'+
+      DQ_FIELDS.map(([k,l])=>'<tr><td>'+l+'</td>'+
+        srcs.map(x=>{const g=bySource[x];const v=g[k]||0;
+          const pct=g.rows?Math.round(100*v/g.rows):0;
+          const col=pct>=80?'var(--red)':(pct>=30?'var(--amber)':'var(--muted)');
+          return '<td style="color:'+col+'">'+v+' of '+g.rows+
+                 ' <span class="small">('+pct+'%)</span></td>';}).join('')+
+        '</tr>').join('')+'</table></div>';
+  }
+  s.innerHTML=html;
   return s;
 }
 
-// ---- modals / feedback / upload ----
 function toggle(id){document.getElementById(id).classList.toggle('open');}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
-function openUpload(){openModal('uploadModal');}
+async function openUpload(){
+  // reset the dialog every time so a previous choice never leaks
+  document.getElementById('mode_append').checked=true;
+  document.getElementById('up_confirm').checked=false;
+  document.getElementById('up_warn').classList.add('hidden');
+  document.getElementById('up_filename').textContent='';
+  document.getElementById('up_file').value='';
+  openModal('uploadModal');
+  let n='—';
+  try{const st=await (await fetch('api/status')).json();n=st.rows;}catch(e){}
+  UPCOUNT=(typeof n==='number')?n:0;
+  document.getElementById('up_current').innerHTML=
+    'The dashboard currently holds <b>'+n+' NCs</b>.';
+  document.getElementById('up_warn_detail').textContent=
+    'All '+n+' NCs now in the dashboard will be deleted before the file is loaded.';
+}
+let UPCOUNT=0;
+function onModeChange(){
+  const erase=document.getElementById('mode_rebuild').checked;
+  document.getElementById('up_warn').classList.toggle('hidden',!erase);
+  if(!erase)document.getElementById('up_confirm').checked=false;
+}
 function openFeedback(){openModal('feedbackModal');}
 function resetGlobal(){STATE.global={types:[],statuses:[],date_from:'',date_to:''};
   document.getElementById('g_from').value='';document.getElementById('g_to').value='';
   buildGlobalChips();refreshAll();}
 
+async function downloadFull(){
+  toast('Building the full report…');
+  const r=await fetch('api/full_export',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({filters:globalFilters()})});
+  if(!r.ok){const j=await r.json().catch(()=>({}));toast('Error: '+(j.error||r.status));return;}
+  const blob=await r.blob();const u=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=u;
+  a.download='SAS_full_report.xlsx';a.click();URL.revokeObjectURL(u);
+  toast('Downloaded. Edit it, then use Load export to feed it back.');
+}
 async function doUpload(){
   const f=document.getElementById('up_file').files[0];
   if(!f){toast('Choose a file first');return;}
+  const erase=document.getElementById('mode_rebuild').checked;
+  if(erase && !document.getElementById('up_confirm').checked){
+    toast('Tick the box to confirm you want to empty the dashboard first');return;}
   const fd=new FormData();fd.append('file',f);
-  fd.append('mode',document.getElementById('up_mode').value);
-  toast('Loading…');
-  const r=await fetch('api/upload',{method:'POST',body:fd});
-  const j=await r.json();
-  if(j.ok){closeModal('uploadModal');toast('Loaded '+j.rows+' NCs');
-    STATE.section={};boot();}
-  else toast('Error: '+j.error);
+  fd.append('mode',erase?'rebuild':'append');
+  const btn=document.getElementById('up_btn');btn.disabled=true;
+  toast(erase?'Validating and loading…':'Validating and adding…');
+  // remove any previous findings
+  const prev=document.getElementById('up_findings');
+  if(prev)prev.remove();
+  try{
+    const r=await fetch('api/upload',{method:'POST',body:fd});
+    const j=await r.json();
+    if(j.ok){
+      closeModal('uploadModal');
+      const st=await (await fetch('api/status')).json();
+      let msg=erase
+        ? ('Loaded '+st.rows+' NCs (started over)')
+        : ('Now '+st.rows+' NCs — was '+UPCOUNT+', file had '+j.rows);
+      if(j.warnings&&j.warnings.length)
+        msg+=' ('+j.warnings.length+' warning(s) — check the console)';
+      if(j.new_refs){
+        const refs=Object.entries(j.new_refs);
+        if(refs.length) msg+='\nNew values: '+refs.map(([t,v])=>
+          t.replace('sas_ref_','')+': '+v.slice(0,4).join(', ')+
+          (v.length>4?' +'+String(v.length-4)+' more':'')).join('; ');
+      }
+      toast(msg);
+      STATE.section={};boot();showVersion();
+    } else {
+      // BLOCKED — show findings in the dialog
+      let html='<div id="up_findings" class="warnbox" style="margin-top:12px;max-height:260px;overflow:auto">'+
+        '<b>'+(j.error||'Load blocked')+'</b><table style="margin-top:8px;font-size:12px;width:100%">';
+      (j.findings||[]).forEach(f=>{
+        const sev=f.sev==='RED'?'🔴':'🟡';
+        html+='<tr><td>'+sev+'</td><td style="white-space:nowrap">'+(f.nc||'')+'</td>'+
+          '<td>'+(f.msg||'')+'</td></tr>';
+      });
+      html+='</table></div>';
+      const sheet=document.querySelector('#uploadModal .sheet');
+      const ex=document.getElementById('up_findings');if(ex)ex.remove();
+      sheet.querySelector('.row').insertAdjacentHTML('beforebegin',html);
+      toast('Load blocked — see the details above');
+    }
+  }catch(e){toast('Upload failed: '+e);}
+  btn.disabled=false;
 }
 async function sendFeedback(){
   const fd=new FormData();
@@ -679,6 +1038,13 @@ async function sendFeedback(){
 }
 function toast(m){const t=document.getElementById('toast');t.textContent=m;
   t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',2600);}
+
+document.getElementById('mode_append').addEventListener('change',onModeChange);
+document.getElementById('mode_rebuild').addEventListener('change',onModeChange);
+document.getElementById('up_file').addEventListener('change',e=>{
+  const f=e.target.files[0];
+  document.getElementById('up_filename').textContent=f?('Selected: '+f.name):'';
+});
 
 boot();
 </script>

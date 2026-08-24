@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Filter bar — mockup</title>
+<style>
+:root{
+  --bg:#081521; --card:#0F2536; --card2:#123049; --line:#1c3b57;
+  --ink:#e8f1fa; --muted:#8ba7c2; --accent:#1E9BE0; --bright:#4FC3F7;
+  --green:#3fb56b; --amber:#e0a63e; --red:#e5533e;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{padding:18px 22px;max-width:1500px;margin:0 auto}
+.note{font-size:12.5px;color:var(--muted);margin-bottom:14px;
+  border-left:2px solid var(--accent);padding-left:10px}
+.btn{background:var(--card2);color:var(--ink);border:1px solid var(--line);
+  border-radius:7px;padding:7px 14px;font-size:13px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.small{padding:4px 10px;font-size:12px}
+.btn:focus-visible,.fbtn:focus-visible,.opt:focus-visible{outline:2px solid var(--bright);outline-offset:2px}
+
+/* ---------- filter bar ---------- */
+.filters{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;margin-bottom:16px}
+.frow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.frow .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.5px;margin-right:4px}
+.frow .sp{flex:1}
+.fcount{font-size:12.5px;color:var(--muted);font-family:ui-monospace,monospace}
+.fcount b{color:var(--bright)}
+
+.fwrap{position:relative}
+.fbtn{display:flex;align-items:center;gap:7px;background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:6px 11px;
+  font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap}
+.fbtn:hover{border-color:var(--accent)}
+.fbtn.active{border-color:var(--accent);background:var(--card2)}
+.fbtn .n{background:var(--accent);color:#04121e;font-weight:700;font-size:11px;
+  border-radius:9px;padding:1px 7px;min-width:18px;text-align:center}
+.fbtn .n.off{background:transparent;color:var(--muted);font-weight:400}
+.fbtn .car{color:var(--muted);font-size:10px}
+
+/* dropdown panel */
+.panel{position:absolute;top:calc(100% + 6px);left:0;z-index:50;width:290px;
+  background:var(--card);border:1px solid var(--accent);border-radius:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.5);padding:10px;display:none}
+.panel.open{display:block}
+.panel input.search{width:100%;background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:13px}
+.panel input.search::placeholder{color:var(--muted)}
+.panel .acts{display:flex;gap:8px;margin:8px 0 6px;font-size:11.5px}
+.panel .acts a{color:var(--bright);cursor:pointer;text-decoration:none}
+.panel .acts a:hover{text-decoration:underline}
+.panel .acts .sp{flex:1}
+.panel .acts span{color:var(--muted)}
+.list{max-height:270px;overflow:auto;scrollbar-width:thin;
+  border-top:1px solid var(--line);padding-top:4px}
+.opt{display:flex;align-items:center;gap:9px;padding:5px 6px;border-radius:6px;
+  cursor:pointer;font-size:13px;line-height:1.25}
+.opt:hover{background:var(--card2)}
+.opt .box{width:14px;height:14px;flex:0 0 14px;border:1px solid var(--line);
+  border-radius:4px;background:var(--bg);position:relative}
+.opt.on .box{background:var(--accent);border-color:var(--accent)}
+.opt.on .box:after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;
+  border:solid #04121e;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.opt .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opt .c{color:var(--muted);font-size:11.5px;font-family:ui-monospace,monospace}
+.opt.hide{display:none}
+.none{padding:14px 6px;color:var(--muted);font-size:12.5px;text-align:center}
+
+/* year panel */
+.years{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+.years input{width:80px;background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:13px}
+
+/* active chip bar */
+.active{display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+  margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.active.empty{display:none}
+.active .k{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.5px;margin-right:2px}
+.achip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);
+  border:1px solid var(--accent);border-radius:12px;padding:3px 6px 3px 10px;
+  font-size:12px;color:var(--ink)}
+.achip .g{color:var(--muted)}
+.achip .x{cursor:pointer;color:var(--muted);font-size:14px;line-height:1;
+  padding:0 3px;border-radius:6px}
+.achip .x:hover{color:var(--red);background:var(--bg)}
+.clearall{margin-left:auto;color:var(--bright);font-size:12px;cursor:pointer}
+.clearall:hover{text-decoration:underline}
+
+/* fake KPI row so the mockup reads in context */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .v{font-size:26px;font-weight:700}
+.kpi .l{color:var(--muted);font-size:11px;margin-top:5px;text-transform:uppercase;letter-spacing:.5px}
+.kpi.warn .v{color:var(--amber)}
+@media (prefers-reduced-motion:no-preference){.panel.open{animation:pop .12s ease-out}}
+@keyframes pop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note">MOCKUP · fake option lists, fake counts. Nothing is wired to the API.
+    Click the buttons, search, tick, remove chips.</div>
+
+  <div class="filters">
+    <div class="frow" id="frow">
+      <span class="lbl">Filters</span>
+      <!-- buttons injected -->
+      <div class="sp"></div>
+      <span class="fcount" id="fcount"></span>
+    </div>
+    <div class="active empty" id="activeBar"></div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v" id="k_total">193</div><div class="l">Total NCs</div></div>
+    <div class="kpi warn"><div class="v">35</div><div class="l">Open</div></div>
+    <div class="kpi"><div class="v">158</div><div class="l">Closed</div></div>
+    <div class="kpi"><div class="v">699k</div><div class="l">CoPQ (CHF)</div></div>
+    <div class="kpi"><div class="v">50</div><div class="l">Median lead (d)</div></div>
+    <div class="kpi warn"><div class="v">39%</div><div class="l">Rework %</div></div>
+  </div>
+</div>
+
+<script>
+// ---------- fake options (shape = what /api/data returns today) ----------
+const OPTS={
+  area:['I','M','B','CC','A','T','P'],
+  notif_type:['Z2 Procurem. Complaint','Z3 Production NC'],
+  rc1:['Machining','Bonding','Documentation','People','Supplier','Design',
+       'Handling','Tooling','Process','Measurement','Material','(not coded)'],
+  rc2:['Wrong dimension','Surface finish','Missing operation','Wrong revision',
+       'Adhesive voids','Cure time','Operator error','Training gap','Instruction unclear',
+       'Drawing error','Tolerance stack','Damaged in transport','Wrong material lot',
+       'Calibration overdue','Fixture wear','Programme error','Missing signature',
+       'Late delivery','Incoming inspection miss','(not coded)'],
+  project:['ARIANE 6 AVUM','ARIANE 6 LLV C6001L','ARIANE 6 LLV C6008L','ARIANE 6 MLV',
+    'ARIANE 6 SLV','ARIANE 6 PLF','VEGA-C AVUM+','VEGA-C P120C','VEGA-C Z40',
+    'VEGA-E M10','SAS P-3011-00004','SAS STRUCTURE','SAS THERMAL','HERACLES DEMO',
+    'JUICE MLI','METOP-SG PANEL','SENTINEL 1D BRACKET','SENTINEL 6B','EUCLID SUPPORT',
+    'PLATO BENCH','ARIEL CRYO','SMILE HARNESS','BIOMASS REFLECTOR','FLEX PAYLOAD',
+    'ALTIUS OPTICS','PROBA-3 COR','EARTHCARE ATLID','CIMR FEED','LSTM MIRROR',
+    'ROSE-L PANEL','CO2M BENCH','MTG-S IRS','MSG SPARE','GALILEO G2','IRIS2 NODE',
+    'EXOMARS RFA','MMX ROVER','COMET-I','ESPRIT MODULE','ORION ESM-7'],
+};
+const COUNTS={};           // fake NC counts per option
+Object.entries(OPTS).forEach(([k,vs])=>vs.forEach((v,i)=>
+  COUNTS[k+'|'+v]=Math.max(1,Math.round(140/(i+1.4))+((i*7)%11))));
+
+const LABELS={area:'Area',notif_type:'Type',rc1:'Root cause L1',rc2:'Root cause L2',
+  project:'Project',opened:'Opened',closed:'Closed'};
+const AREA_NAME={I:'Integration',M:'Matching',B:'Bonding',CC:'Customer complaint',
+  A:'Assembly',T:'Test',P:'Post delivery'};
+function optLabel(key,v){return key==='area'?(AREA_NAME[v]||v):v;}
+
+// active selection
+const SEL={area:['I','M']};      // default scope, same as today
+const YEARS={opened:[null,null],closed:[null,null]};
+
+// ---------- build ----------
+const frow=document.getElementById('frow');
+const sp=frow.querySelector('.sp');
+['area','notif_type','rc1','rc2','project'].forEach(key=>frow.insertBefore(mkList(key),sp));
+['opened','closed'].forEach(key=>frow.insertBefore(mkYears(key),sp));
+
+function mkList(key){
+  const w=document.createElement('div');w.className='fwrap';
+  w.innerHTML=
+    '<button class="fbtn" type="button"><span class="tx"></span>'+
+      '<span class="n off">all</span><span class="car">▾</span></button>'+
+    '<div class="panel">'+
+      '<input class="search" type="text" placeholder="Search '+LABELS[key].toLowerCase()+'…">'+
+      '<div class="acts"><a data-all>Select all</a><span>·</span><a data-none>Clear</a>'+
+        '<span class="sp"></span><span class="shown"></span></div>'+
+      '<div class="list"></div></div>';
+  const btn=w.querySelector('.fbtn'), panel=w.querySelector('.panel'),
+        list=w.querySelector('.list'), search=w.querySelector('.search');
+  btn.querySelector('.tx').textContent=LABELS[key];
+
+  OPTS[key].forEach(v=>{
+    const o=document.createElement('div');
+    o.className='opt';o.tabIndex=0;o.dataset.v=v;
+    o.innerHTML='<span class="box"></span><span class="t">'+optLabel(key,v)+
+      '</span><span class="c">'+COUNTS[key+'|'+v]+'</span>';
+    const toggle=()=>{
+      const a=SEL[key]||(SEL[key]=[]);const i=a.indexOf(v);
+      if(i>=0)a.splice(i,1);else a.push(v);
+      if(!a.length)delete SEL[key];
+      paint();
+    };
+    o.onclick=toggle;
+    o.onkeydown=e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();toggle();}};
+    list.appendChild(o);
+  });
+
+  search.oninput=()=>{
+    const q=search.value.trim().toLowerCase();let n=0;
+    list.querySelectorAll('.opt').forEach(o=>{
+      const hit=o.querySelector('.t').textContent.toLowerCase().includes(q);
+      o.classList.toggle('hide',!hit);if(hit)n++;});
+    w.querySelector('.shown').textContent=q?n+' of '+OPTS[key].length:'';
+    let none=list.querySelector('.none');
+    if(!n){if(!none){none=document.createElement('div');none.className='none';
+      none.textContent='Nothing matches “'+search.value+'”.';list.appendChild(none);}}
+    else if(none)none.remove();
+  };
+  w.querySelector('[data-all]').onclick=()=>{
+    SEL[key]=OPTS[key].filter(v=>!list.querySelector('.opt[data-v="'+CSS.escape(v)+'"]').classList.contains('hide'));
+    paint();};
+  w.querySelector('[data-none]').onclick=()=>{delete SEL[key];paint();};
+
+  btn.onclick=e=>{e.stopPropagation();
+    const wasOpen=panel.classList.contains('open');closeAll();
+    if(!wasOpen){panel.classList.add('open');search.focus();}};
+  panel.onclick=e=>e.stopPropagation();
+  w._key=key;w._paint=()=>{
+    const a=SEL[key]||[];
+    btn.classList.toggle('active',a.length>0);
+    const n=btn.querySelector('.n');
+    n.textContent=a.length?a.length:'all';
+    n.classList.toggle('off',!a.length);
+    list.querySelectorAll('.opt').forEach(o=>
+      o.classList.toggle('on',a.includes(o.dataset.v)));
+  };
+  return w;
+}
+
+function mkYears(key){
+  const w=document.createElement('div');w.className='fwrap';
+  w.innerHTML=
+    '<button class="fbtn" type="button"><span>'+LABELS[key]+'</span>'+
+      '<span class="n off">all</span><span class="car">▾</span></button>'+
+    '<div class="panel" style="width:230px">'+
+      '<div class="years"><input type="number" placeholder="2015" data-lo>'+
+      '<span>to</span><input type="number" placeholder="2026" data-hi></div>'+
+      '<div class="acts" style="margin-bottom:0"><span class="sp"></span>'+
+        '<a data-none>Clear</a></div></div>';
+  const btn=w.querySelector('.fbtn'),panel=w.querySelector('.panel');
+  const lo=panel.querySelector('[data-lo]'),hi=panel.querySelector('[data-hi]');
+  const set=()=>{YEARS[key]=[lo.value?+lo.value:null,hi.value?+hi.value:null];paint();};
+  lo.onchange=set;hi.onchange=set;
+  panel.querySelector('[data-none]').onclick=()=>{lo.value='';hi.value='';set();};
+  btn.onclick=e=>{e.stopPropagation();
+    const wasOpen=panel.classList.contains('open');closeAll();
+    if(!wasOpen){panel.classList.add('open');lo.focus();}};
+  panel.onclick=e=>e.stopPropagation();
+  w._key=key;w._paint=()=>{
+    const [a,b]=YEARS[key];const on=a||b;
+    btn.classList.toggle('active',!!on);
+    const n=btn.querySelector('.n');
+    n.textContent=on?(a||'…')+'–'+(b||'…'):'all';
+    n.classList.toggle('off',!on);
+  };
+  return w;
+}
+
+function closeAll(){document.querySelectorAll('.panel.open').forEach(p=>p.classList.remove('open'));}
+document.addEventListener('click',closeAll);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAll();});
+
+// ---------- active chips + count ----------
+function paint(){
+  document.querySelectorAll('.fwrap').forEach(w=>w._paint());
+  const bar=document.getElementById('activeBar');bar.innerHTML='';
+  let any=false;
+  Object.keys(LABELS).forEach(key=>{
+    if(YEARS[key]){
+      const [a,b]=YEARS[key];if(!a&&!b)return;any=true;
+      bar.appendChild(chip(LABELS[key],(a||'…')+'–'+(b||'…'),()=>{
+        YEARS[key]=[null,null];
+        document.querySelectorAll('.fwrap').forEach(w=>{if(w._key===key){
+          w.querySelector('[data-lo]').value='';w.querySelector('[data-hi]').value='';}});
+        paint();}));
+      return;
+    }
+    (SEL[key]||[]).forEach(v=>{any=true;
+      bar.appendChild(chip(LABELS[key],optLabel(key,v),()=>{
+        SEL[key]=SEL[key].filter(x=>x!==v);
+        if(!SEL[key].length)delete SEL[key];paint();}));});
+  });
+  if(any){
+    const c=document.createElement('span');c.className='clearall';c.textContent='Clear all';
+    c.onclick=()=>{Object.keys(SEL).forEach(k=>delete SEL[k]);
+      Object.keys(YEARS).forEach(k=>{YEARS[k]=[null,null];});
+      document.querySelectorAll('input[type=number]').forEach(i=>i.value='');
+      paint();};
+    bar.appendChild(c);
+    bar.insertBefore(Object.assign(document.createElement('span'),
+      {className:'k',textContent:'Showing only'}),bar.firstChild);
+  }
+  bar.classList.toggle('empty',!any);
+
+  // fake filtered count
+  let n=4412;Object.entries(SEL).forEach(([k,a])=>{
+    n=Math.round(a.reduce((s,v)=>s+COUNTS[k+'|'+v],0)*0.9);});
+  if(!Object.keys(SEL).length)n=4412;
+  document.getElementById('fcount').innerHTML='<b>'+n+'</b> of 4412 NCs';
+  document.getElementById('k_total').textContent=n;
+}
+function chip(group,val,onx){
+  const s=document.createElement('span');s.className='achip';
+  s.innerHTML='<span class="g">'+group+':</span><span>'+val+'</span><span class="x">×</span>';
+  s.querySelector('.x').onclick=onx;return s;
+}
+paint();
+</script>
+</body>
+</html>

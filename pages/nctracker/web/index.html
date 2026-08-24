@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NC Tracker</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --navy:#1F4E79; --navy2:#173F63; --blue:#2E75B6; --band:#DDEBF7; --band2:#EAF3FB;
+  --green:#C6E0B4; --greenline:#00B050; --greentx:#375623;
+  --orange:#ED7D31; --peach:#FCE4D6; --orangetx:#8A3E0B;
+  --red:#C00000; --amberwash:#FDEDE0; --beige:#FCE4D6; --needfill:#FFF2CC; --donegreen:#E2EFDA;
+  --ink:#1B2733; --muted:#5A6C7D; --line:#C9D8E6; --white:#fff;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:#F4F8FC;font-size:14px}
+h1,h2,h3{margin:0;font-weight:700}
+button,select,input{font-family:inherit;font-size:14px}
+
+/* header */
+.top{background:var(--navy);color:#fff;padding:10px 16px 0}
+.top h1{font-size:21px;letter-spacing:.2px}
+.srcline{background:var(--band);color:var(--navy2);font-style:italic;padding:5px 16px;font-size:12px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;gap:3px;margin-top:12px;flex-wrap:wrap;align-items:flex-end}
+.tab{background:var(--navy2);color:#CFE2F3;border:0;padding:9px 18px;font-size:14px;cursor:pointer;border-radius:4px 4px 0 0;font-weight:700}
+.tab.on{background:#F4F8FC;color:var(--navy);box-shadow:0 -2px 0 var(--blue) inset}
+.tab.sys{border-top:3px solid var(--blue)}
+
+/* toolbar */
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:#fff;border-bottom:1px solid var(--line)}
+.bar>*{flex:0 0 auto}
+.btn{background:var(--blue);color:#fff;border:0;padding:7px 12px;border-radius:3px;cursor:pointer;font-weight:700}
+.btn:hover{background:var(--navy)}
+.btn.ghost{background:#fff;color:var(--navy);border:1px solid var(--blue)}
+.btn.ghost:hover{background:var(--band)}
+.btn.warn{background:var(--orange)}
+.btn.warn:hover{background:#C85F16}
+.spacer{flex:1}
+
+.wrap{padding:14px 16px 60px;max-width:1720px;margin:0 auto}
+.card{background:#fff;border:1px solid var(--line);border-radius:4px;margin-bottom:14px}
+.card>h3{background:var(--navy);color:#fff;font-size:13px;padding:7px 12px;border-radius:3px 3px 0 0;display:flex;align-items:center;gap:10px}
+.card>h3 .sub{font-weight:400;opacity:.85;font-size:12px}
+.card .body{padding:12px}
+
+/* kpi */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:#fff;border:1px solid var(--line);border-left:5px solid var(--blue);border-radius:3px;padding:9px 12px}
+  .kpi .n{font-size:26px;font-weight:700;line-height:1.1}
+.kpi .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.kpi.k-open{border-left-color:var(--orange)} .kpi.k-open .n{color:var(--orangetx)}
+.kpi.k-closed{border-left-color:var(--greenline)} .kpi.k-closed .n{color:var(--greentx)}
+.kpi.k-red{border-left-color:var(--red)} .kpi.k-red .n{color:var(--red)}
+.kpi.k-all{border-left-color:var(--navy)} .kpi.k-all .n{color:var(--navy)}
+.kpi{cursor:pointer} .kpi:hover{background:var(--band2)}
+
+/* header filters — Excel-style, one popup per column */
+/* keep the sticky behaviour from the base th rule — position:relative here
+   would cancel it and the header would scroll away with the rows */
+th.hf{padding:0;user-select:none}
+th.hf .hh{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;white-space:nowrap}
+th.hf .hh:hover{background:rgba(255,255,255,.14)}
+th.hf .fn{margin-left:auto;opacity:.45;font-size:10px}
+th.hf.on .fn,th.hf.srt .fn{opacity:1;color:#FFD68A}
+th.hf.on{background:#2E5F8A}
+.hfp{position:absolute;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 8px 28px rgba(20,45,80,.22);width:252px;display:none;color:var(--ink);
+  font-weight:400;font-size:13px;text-transform:none;letter-spacing:0}
+.hfp.on{display:block}
+.hfp .sc{padding:5px 4px;border-bottom:1px solid var(--line2)}
+.hfp .it{padding:7px 12px;cursor:pointer;display:flex;gap:9px;align-items:center;border-radius:5px}
+.hfp .it:hover{background:var(--band)}
+.hfp .it .ic{width:14px;text-align:center;opacity:.6}
+.hfp .sr{padding:8px 10px;border-bottom:1px solid var(--line2)}
+.hfp .sr input{width:100%;padding:6px 9px;border:1px solid var(--line);border-radius:6px;
+  font-family:inherit;font-size:13px}
+.hfp .ls{max-height:190px;overflow:auto;padding:4px}
+.hfp .ls label{display:flex;gap:9px;align-items:center;padding:5px 9px;cursor:pointer;border-radius:5px}
+.hfp .ls label:hover{background:var(--band)}
+.hfp .ls .cn{margin-left:auto;color:var(--dim);font-size:11.5px}
+.hfp .ft{display:flex;gap:8px;padding:9px 10px;border-top:1px solid var(--line2)}
+.hfp .ft button{flex:1;padding:6px 0;border-radius:6px;font-size:12.5px;cursor:pointer;
+  font-family:inherit;border:1px solid var(--line);background:#fff;color:var(--muted)}
+.hfp .ft button.p{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:600}
+.hfbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:7px 12px;
+  border-bottom:1px solid var(--line2);font-size:12px}
+.hfbar .hc{border:1px solid var(--line);background:var(--band);border-radius:14px;
+  padding:2px 9px;font-size:11.5px}
+.hfbar .hc b{color:var(--navy2)}
+.hfbar .hc .x{cursor:pointer;opacity:.6;font-weight:700;margin-left:5px}
+.hfbar .hc .x:hover{opacity:1;color:var(--red)}
+.hfbar .ca{margin-left:auto;border:1px solid var(--line);background:#fff;border-radius:14px;
+  padding:3px 11px;cursor:pointer;font-family:inherit;font-size:12px;color:var(--muted)}
+
+/* filters */
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.f{display:flex;flex-direction:column;gap:2px}
+.f label{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+.f select,.f input{border:1px solid var(--line);border-radius:3px;padding:5px 6px;
+  min-width:130px;background:#fff;
+  /* a long option value must not stretch the control across the whole row —
+     the box keeps its size and the text is clipped instead */
+  max-width:230px;text-overflow:ellipsis}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{background:var(--band);border:1px solid var(--blue);color:var(--navy2);border-radius:12px;padding:3px 9px;font-size:11px;cursor:pointer}
+.chip b{font-weight:700}
+.chip:hover{background:var(--peach);border-color:var(--orange)}
+
+/* charts */
+.charts{display:grid;grid-template-columns:1fr;gap:14px;max-width:1220px}
+.rep2{display:grid;grid-template-columns:repeat(2,minmax(0,max-content));gap:14px;align-items:start}
+@media(max-width:900px){.rep2{grid-template-columns:1fr}}
+@media(max-width:1000px){.charts{grid-template-columns:1fr}}
+svg{display:block;width:100%;height:auto}
+.chartrow{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;padding:10px 12px 2px;align-items:start}
+@media(max-width:1100px){.chartrow{grid-template-columns:1fr}}
+.cnt-t{width:100%;border-collapse:collapse;font-size:11px}
+.cnt-t th{position:static;background:var(--band);color:var(--navy2);padding:3px 6px;font-size:10px;
+  text-transform:uppercase;letter-spacing:.3px;border:1px solid var(--line);text-align:left}
+.cnt-t td{padding:4px 7px;border:1px solid #E6EEF6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cnt-t td:first-child{max-width:130px}
+.cnt-t td.n{width:52px}
+.cnt-t td.n{text-align:right;font-variant-numeric:tabular-nums}
+.cnt-t tr.tot td{background:var(--band2);font-weight:700;border-top:2px solid var(--navy)}
+.cnt-wrap{max-height:250px;overflow:auto;border:1px solid var(--line)}
+.card .chartpad{padding:6px 8px 0}
+.legend{display:flex;gap:14px;font-size:11px;color:var(--muted);padding:4px 12px 10px;flex-wrap:wrap}
+.sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+.hint{font-size:11px;color:var(--muted);padding:0 12px 10px}
+
+/* table */
+.tablewrap{overflow:auto;max-height:560px;border-top:1px solid var(--line)}
+table{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px;white-space:nowrap}
+td.rn{background:var(--band2);color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;
+  position:sticky;left:0;z-index:1;border-right:2px solid var(--line)}
+th.rn{left:0;z-index:3}
+th{position:sticky;top:0;background:var(--navy);color:#fff;text-align:left;padding:5px 7px;font-size:11px;z-index:2;border-right:1px solid var(--navy2);white-space:nowrap;font-size:12px}
+td{padding:3px 7px;border-bottom:1px solid #E6EEF6;border-right:1px solid #F0F5FA;max-width:230px;overflow:hidden;text-overflow:ellipsis}
+tbody tr:nth-child(even){background:var(--band2)}
+tbody tr:hover{background:var(--band)}
+/* the row you are working on — a light blue wash, and the yellow
+   "still to fill" cells inside it go amber so they stay visible */
+tbody tr.rowsel > td{background:#DCEBF7 !important}
+tbody tr.rowsel > td.need{background:#FBD9A5 !important}
+tbody tr.rowsel > td.rn{background:#C6DCEF !important;font-weight:700}
+/* Ctrl-click / Shift-click multi-select. A deeper blue than the single
+   current row, so you can tell a marked set from where the cursor is. */
+tbody tr.multisel > td{background:#C3DDF2 !important}
+tbody tr.multisel > td.need{background:#F6C98A !important}
+tbody tr.multisel > td.rn{background:#A9CCE8 !important;font-weight:700}
+.selbar{display:flex;gap:10px;align-items:center;padding:8px 12px;background:#EAF3FB;
+  border-bottom:1px solid var(--line);font-size:12.5px;color:var(--navy2)}
+.selbar b{font-size:14px}
+.selbar button{border:1px solid var(--line);background:#fff;border-radius:14px;
+  padding:4px 12px;cursor:pointer;font-family:inherit;font-size:12px;color:var(--muted)}
+.selbar button:hover{border-color:var(--blue);color:var(--navy2)}
+td.sel{cursor:pointer;position:relative}
+td.sel:hover{outline:2px solid var(--blue);outline-offset:-2px}
+td.set{background:var(--beige)}
+td.need{background:var(--needfill);color:#7A6000;font-style:italic}
+td.off{background:var(--needfill);box-shadow:inset 3px 0 0 var(--orange);color:var(--orangetx)}
+td.set.closed{background:var(--donegreen)}
+td.flag{color:var(--red);font-weight:700;text-align:center}
+td select{border:1px solid var(--line);border-radius:2px;padding:2px;background:transparent;font-weight:700}
+.rowcount{padding:7px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--line)}
+
+/* setup */
+.lists{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.list{border:1px solid var(--line);border-radius:3px}
+.list h4{margin:0;background:var(--band);color:var(--navy2);padding:6px 9px;font-size:12px;display:flex;justify-content:space-between}
+.list ul{list-style:none;margin:0;padding:0;max-height:190px;overflow:auto}
+.list li{padding:3px 9px;border-bottom:1px solid #EEF4F9;font-size:12px;display:flex;justify-content:space-between;gap:6px}
+.list li span.x{color:var(--muted);cursor:pointer}
+.list li span.x:hover{color:var(--red)}
+.addrow{display:flex;gap:4px;padding:6px}
+.addrow input{flex:1;border:1px solid var(--line);border-radius:3px;padding:4px 6px}
+.addrow button{background:var(--greenline);color:#fff;border:0;border-radius:3px;padding:4px 9px;cursor:pointer;font-weight:700}
+
+/* rules */
+.rule{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #EEF4F9;cursor:pointer}
+.rule:hover{background:var(--band2)}
+.rule .cnt{min-width:46px;text-align:center;font-weight:700;border-radius:3px;padding:2px 6px}
+.cnt.bad{background:var(--amberwash);color:var(--red);border:1px solid var(--red)}
+.cnt.ok{background:var(--green);color:var(--greentx)}
+.rule .rt{flex:1} .rule .rd{font-size:11px;color:var(--muted)}
+
+/* picker */
+.pick{position:absolute;z-index:60;background:#fff;border:1px solid var(--blue);border-radius:4px;
+  box-shadow:0 6px 20px rgba(20,50,80,.25);width:270px;display:none}
+.pick.on{display:block}
+.pick .ph{background:var(--band);color:var(--navy2);font-size:11px;padding:5px 8px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.4px}
+.pick input{width:100%;border:0;border-bottom:1px solid var(--line);padding:6px 8px;outline:none}
+.pick ul{list-style:none;margin:0;padding:0;max-height:230px;overflow:auto}
+.pick li{padding:5px 8px;font-size:12px;cursor:pointer;border-bottom:1px solid #F0F5FA}
+.pick li:hover{background:var(--band2)}
+.pick li.clr{color:var(--muted);font-style:italic}
+.pick li.add{color:#1E7A3C;font-weight:700;background:#F2FAF4}
+
+/* modal */
+.mask{position:fixed;inset:0;background:rgba(12,30,48,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+.mask.on{display:flex}
+.modal{background:#fff;border-radius:5px;max-width:760px;width:100%;max-height:88vh;overflow:auto}
+.modal h3{background:var(--navy);color:#fff;padding:10px 14px;font-size:14px}
+.modal .mb{padding:14px}
+.note{background:var(--amberwash);border-left:4px solid var(--orange);padding:8px 10px;font-size:12px;margin-bottom:12px}
+.diff{width:100%;border-collapse:collapse;font-size:13px;white-space:normal}
+.rep{width:auto;min-width:0}
+.rep th:first-child,.rep td:first-child{max-width:330px}
+.rep th+th,.rep td+td{width:74px;text-align:right;white-space:nowrap}
+.diff th{background:var(--band);color:var(--navy2);position:static}
+.diff td,.diff th{border:1px solid var(--line);padding:6px 8px;text-align:left}
+.big{font-size:20px;font-weight:700}
+.right{text-align:right}
+.mfoot{display:flex;gap:8px;justify-content:flex-end;padding:0 14px 14px}
+.pill{display:inline-block;background:var(--band);border-radius:10px;padding:1px 8px;font-size:11px;color:var(--navy2)}
+.hide{display:none}
+
+.version{position:fixed;bottom:6px;right:10px;font-size:10.5px;color:#8892A3;
+  font-family:Arial,sans-serif;pointer-events:none;letter-spacing:.02em}
+.uploadinfo{font-size:11.5px;font-weight:400;color:rgba(255,255,255,.78);margin-left:14px;letter-spacing:0}
+.uploadinfo b{color:#fff;font-weight:600}
+.uploadinfo .sep{margin:0 8px;opacity:.5}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>NC Tracker <span class="uploadinfo" id="uploadinfo"></span></h1>
+  <div class="tabs" id="tabs"></div>
+</div>
+<div class="srcline" id="srcline"></div>
+
+<div class="bar" id="ncbar">
+  <button class="btn warn" onclick="pickFile('nc_tracker')">Import NC Tracker workbook</button>
+  <button class="btn warn" onclick="pickFile('tc_report')">Import TC report</button>
+  <button class="btn warn" onclick="pickFile('nc_sap_overview')">Import NC SAP overview</button>
+  <input type="file" id="upl" accept=".xlsx,.xlsm,.xls" style="display:none">
+  <span class="spacer"></span>
+  <button class="btn" onclick="openDownload()">Download full report</button>
+  <button class="btn ghost" onclick="lastUploaded('nc_sap_overview','NC SAP overview')">Last uploaded · NC SAP overview</button>
+  <button class="btn ghost" onclick="lastUploaded('tc_report','TC report')">Last uploaded · TC report</button>
+  <button class="btn ghost" onclick="lastUploaded('old_excel','old Excel version')">Old Excel version</button>
+</div>
+
+<div class="wrap">
+  <div id="pane-tracker">
+    <div class="kpis" id="kpis"></div>
+
+    <div class="card">
+      <h3>Filters <span class="sub">every field is filterable · add more with the field picker</span></h3>
+      <div class="body">
+        <div class="filters" id="filters"></div>
+        <div class="filters" style="margin-top:8px">
+          <div class="f"><label>Created from</label><input type="date" id="dFrom" onchange="DFROM=this.value;draw()"></div>
+          <div class="f"><label>Created to</label><input type="date" id="dTo" onchange="DTO=this.value;draw()"></div>
+          <div class="f"><label>&nbsp;</label><button class="btn ghost" onclick="DFROM='';DTO='';draw()">Clear dates</button></div>
+        </div>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 id="tblTitle">Raw data</h3>
+      <div class="legend" style="padding:8px 12px 6px;border-bottom:1px solid var(--line)">
+        <span><i class="sw" style="background:var(--needfill);border:1px solid #E0C46A"></i>still to be selected — click the cell</span>
+        <span><i class="sw" style="background:var(--needfill);box-shadow:inset 3px 0 0 var(--orange)"></i>filled, but not on the set-up list</span>
+        <span><i class="sw" style="background:var(--beige)"></i>selected</span>
+        <span><i class="sw" style="background:var(--donegreen)"></i>closed</span>
+      </div>
+      <div class="tablewrap"><table id="tbl"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+      <div class="rowcount" id="rowcount"></div>
+    </div>
+
+    <div class="charts">
+      <div class="card">
+        <h3>Closed vs open by issue owner <span class="sub" id="nOwner"></span></h3>
+        <div class="chartrow"><div id="chOwner"></div><div class="cnt-wrap"><table class="cnt-t" id="chOwnerT"></table></div></div>
+        <div class="selbar" id="selbar" style="display:none">
+    <span><b class="n">0</b> rows selected</span>
+    <span style="color:var(--muted)">Ctrl-click to add one · Shift-click to extend</span>
+    <button onclick="msExport()">⤓ Download selected</button>
+    <button onclick="msClear()">Clear selection</button>
+  </div>
+  <div class="hfbar" id="hfbar"></div>
+  <div class="legend">
+          <span><i class="sw" style="background:#1F6F8B"></i>Closed</span>
+          <span><i class="sw" style="background:var(--orange)"></i>Open / not closed</span>
+          <span><i class="sw" style="background:var(--greenline)"></i>Target max 5</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Open by classification <span class="sub" id="nClass"></span></h3>
+        <div class="chartrow"><div id="chClass"></div><div class="cnt-wrap"><table class="cnt-t" id="chClassT"></table></div></div>
+      </div>
+      <div class="card">
+        <h3>By NRB disposition <span class="sub" id="nDisp"></span></h3>
+        <div class="chartrow"><div id="chDisp"></div><div class="cnt-wrap"><table class="cnt-t" id="chDispT"></table></div></div>
+      </div>
+      <div class="card">
+        <h3>Open NCs by detection area <span class="sub" id="nDet"></span></h3>
+        <div class="chartrow"><div id="chDet"></div><div class="cnt-wrap"><table class="cnt-t" id="chDetT"></table></div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="pane-report" class="hide"></div>
+  <div id="pane-setup" class="hide"></div>
+  <div id="pane-capa" class="hide"></div>
+</div>
+
+<div class="mask" id="mask"><div class="modal" id="modal"></div></div>
+
+<script>
+let H=[], ROWS=[], SETUP={}, UPLOADS={}, DBCOL={}, C={};
+let CH=[], CROWS=[], CDB={}, CKIND={}, CLIST={}, CL2={};
+const col = n => H.indexOf(n);
+const norm = v => (v==null?'':String(v)).replace(/\s+/g,' ').trim();
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  const ct = r.headers.get('content-type')||'';
+  const body = ct.includes('json') ? await r.json() : null;
+  if(!r.ok) throw new Error((body && body.error) || (r.status+' '+r.statusText));
+  return body;
+}
+
+async function boot(){
+  const b = await api('api/bootstrap');
+  H = b.headers;
+  b.columns.forEach(([h,c])=>DBCOL[h]=c);
+  ROWS = b.rows.map(r=>{ const a = H.map(h=>r[DBCOL[h]]||''); a.id = r.id; return a; });
+  SETUP = b.setup; UPLOADS = b.uploads || {};
+  CH = b.capa_headers; CLIST = b.capa_list_of; CL2 = b.capa_l2_parent;
+  b.capa_columns.forEach(([h,c,k])=>{ CDB[h]=c; CKIND[h]=k; });
+  CROWS = b.capa_rows.map(r=>{ const a=CH.map(h=>r[CDB[h]]||''); a.id=r.id; return a; });
+  SHOW = H.filter(h=>h && h!=='colum');
+  ['Ariane','Vega','MHI H3','Relativity','SAS','Vulcan','Flexline'].forEach(k=>{
+    if(SETUP[k]) SETUP[k]=SETUP[k].filter(v=>!/^n\/?a$/i.test(v));
+  });
+  C = {sys:col('System'), tc:col('TC ID'), mig:col('Migrated to EZ1'), proj:col('Project'),
+       fu:col('Flight Unit'), det:col('Detection'), fail:col('Failure'), mat:col('Material'),
+       batch:col('Batch'), owner:col('Issue Owner (QA/PA)'), created:col('Created On'),
+       disp:col('NRB disposition'), cls:col('Classification'), status:col('Status'),
+       closure:col('Closure date'), type:col('NC Type'), title:col('Title and Problem Description')};
+  draw();
+
+  // small "last uploaded" line under the title
+  try{
+    const u=await api('api/uploads/status');
+    const parts=[];
+    const fmt=iso=>{ if(!iso) return ''; const d=new Date(iso);
+      return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})
+        + ' ' + d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); };
+    for(const k of ['tc_report','nc_sap_overview']){
+      const x=u[k];
+      parts.push(x
+        ? `<b>${esc(x.label)}</b>: ${fmt(x.uploaded_at)} <span style="opacity:.7">· ${esc(x.filename)}</span>`
+        : `<b>${k==='tc_report'?'TC report':'NC SAP overview'}</b>: never uploaded`);
+    }
+    document.getElementById('uploadinfo').innerHTML = parts.join('<span class="sep">|</span>');
+  }catch(e){ /* keep the title clean if anything fails */ }
+
+}
+
+const statusOf = r => { const s=norm(r[C.status]).toLowerCase();
+  return s==='open'?'Open':s==='closed'?'Closed':''; };
+const migOf = r => norm(r[C.mig]);
+const clsOf = r => norm(r[C.cls]) || '(not set)';
+const projOf = r => norm(r[C.proj]) || '(not set)';
+const dispOf = r => norm(r[C.disp]) || 'Not assigned';
+const UNSET_DISP = v => !v || v.toLowerCase()==='not assigned';
+const detOf = r => norm(r[C.det]) || '(not set)';
+const ownerOf = r => norm(r[C.owner]) || '(not set)';
+
+/* ---- which columns are driven by Set-up ---- */
+const LISTKEY={'Project':'Project','Detection':'Detection','Failure':'Failure',
+  'Issue Owner (QA/PA)':'Q_Responsible','NRB disposition':'Disposition',
+  'Classification':'Classification','Migrated to EZ1':'Migrated','Status':'Status',
+  'NC Type':'NC Type','System':'System','Flight Unit':'*flight',
+  'ID-Blackout':'ID-Blackout',
+  // these two read the CAPA board's own vocabularies — one list, both tools
+  'RC Category L1':'capa:L1 Root cause','RC Category L2':'*l2rc','(Real) Origin Area L1':'capa:L1 Origin Area','(Real) Origin Area L2':'*l2origin','Department Responsible':'capa:Department Responsible'};
+const PROJKEY={'Ariane':'Ariane','Vega':'Vega','SAS':'SAS','Vulcan':'Vulcan',
+  'Relativity':'Relativity','MHI_H3':'MHI H3','Flexline PLF':'Flexline',
+  'Flexline ISA 1-2':'Flexline','Flexline ISA 2-3':'Flexline'};
+function optionsFor(field,row){
+  const k=LISTKEY[field]; if(!k) return null;
+  // ID-Blackout is a picker only on EZ1, where you point at the Blackout NC
+  // this one came from. On a Blackout or SAP row the cell holds that row's own
+  // number, so it stays free text.
+  if(field==='ID-Blackout' && norm(row[C.sys])!=='EZ1') return null;
+  if(k==='*flight'){ const lk=PROJKEY[norm(row[C.proj])]; return lk&&SETUP[lk] ? SETUP[lk] : null; }
+  // L2 follows whatever L1 holds — the CAPA board names those lists "L2 <L1 value>"
+  if(k==='*l2rc'){     const p=norm(row[H.indexOf('RC Category L1')]);        return p ? (SETUP['capa:L2 '+p]||[]) : null; }
+  if(k==='*l2origin'){ const p=norm(row[H.indexOf('(Real) Origin Area L1')]); return p ? (SETUP['capa:L2 '+p]||[]) : null; }
+  return SETUP[k]||(SETUP[k]=[]);
+}
+const FREE=['TC ID','Title','Description','Notes','Material','Batch',
+  'PSP ref.','NC WBS (EzyOne)','Supplier name'];
+const DATEF=['Created On','Disposition Implemented Date','Closure date'];
+const dmy = v => { const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(v||''); return m? m[3]+'/'+m[2]+'/'+m[1] : (v||''); };
+function cellState(field,row){
+  const v=norm(row[H.indexOf(field)]);
+  if(DATEF.includes(field)) return {cls:'sel '+(v?'set':'need'), v: v?dmy(v):'— dd/mm/yyyy —', kind:'date'};
+  if(FREE.includes(field))  return {cls:'sel '+(v?'set':'need'), v: v||'— type —', kind:'text'};
+  if(field==='ID-Blackout' && norm(row[C.sys])!=='EZ1')
+    return {cls:'sel '+(v?'set':'need'), v: v||'— type —', kind:'text'};
+  if(field==='Flight Unit'){
+    const opts=optionsFor(field,row);
+    if(!norm(row[C.proj])) return {cls:'sel need', v:'— set the project first —', kind:'list'};
+    if(!v) return {cls:'sel need', v:'— select —', kind:'list'};
+    return (opts||[]).some(x=>x.toLowerCase()===v.toLowerCase())
+      ? {cls:'sel set',v,kind:'list'} : {cls:'sel off',v,kind:'list'};
+  }
+  if(field==='RC Category L2' || field==='(Real) Origin Area L2'){
+    const l1col = field==='RC Category L2' ? 'RC Category L1' : '(Real) Origin Area L1';
+    if(!norm(row[H.indexOf(l1col)])) return {cls:'sel need', v:'— set L1 first —', kind:'none'};
+    const o=optionsFor(field,row);
+    if(!v) return {cls:'sel need', v:'— select —', kind:'list'};
+    return (o||[]).some(x=>x.toLowerCase()===v.toLowerCase())
+      ? {cls:'sel set',v,kind:'list'} : {cls:'sel off',v,kind:'list'};
+  }
+  const opts=optionsFor(field,row);
+  if(!opts) return {cls:'sel '+(v?'set':'need'), v: v||'— type —', kind:'text'};
+  if(field==='NRB disposition' && UNSET_DISP(v)) return {cls:'sel need', v: v||'— select —', kind:'list'};
+  if(!v) return {cls:'sel need',v:'— select —',kind:'list'};
+  return opts.some(x=>x.toLowerCase()===v.toLowerCase())
+    ? {cls:'sel set'+(field==='Status'&&v.toLowerCase()==='closed'?' closed':''),v,kind:'list'}
+    : {cls:'sel off',v,kind:'list'};
+}
+
+/* ---- CAPA cells ---- */
+const cval = (row,h) => norm(row[CH.indexOf(h)]);
+function capaOptions(h,row){
+  const db=CDB[h];
+  if(CL2[db]){                                   // L2 follows the L1 on the row
+    const parentH=CH.find(x=>CDB[x]===CL2[db]);
+    const l1=cval(row,parentH);
+    if(!l1) return null;
+    return SETUP['capa:L2 '+l1] || [];
+  }
+  const list=CLIST[db];
+  return list ? (SETUP['capa:'+list] || (SETUP['capa:'+list]=[])) : null;
+}
+function capaState(h,row){
+  const v=cval(row,h), kind=CKIND[h];
+  if(kind==='calc') return {cls:'calc', v, kind};
+  if(kind==='date') return {cls:'sel '+(v?'set':'need'), v: v?dmy(v):'— dd/mm/yyyy —', kind:'date'};
+  if(kind==='text') return {cls:'sel '+(v?'set':'need'), v: v||'— type —', kind:'text'};
+  const opts=capaOptions(h,row);
+  if(opts===null){
+    const parent=CL2[CDB[h]] ? 'set the level 1 first' : 'type';
+    return {cls:'sel need', v:'— '+parent+' —', kind:'list'};
+  }
+  if(!v) return {cls:'sel need', v:'— select —', kind:'list'};
+  return opts.some(x=>x.toLowerCase()===v.toLowerCase())
+    ? {cls:'sel set', v, kind:'list'} : {cls:'sel off', v, kind:'list'};
+}
+
+/* ---- state ---- */
+let TAB='BURN';
+let F={};              // field -> value
+let RULEFILTER=null;
+const BASEF=['Project','Issue Owner (QA/PA)','Status'];
+let SHOWN=new Set(BASEF);
+let DFROM='', DTO='';
+
+const FIELDS=[['Project',projOf],['Flight Unit',r=>norm(r[C.fu])||'(not set)'],['Detection',detOf],
+  ['Failure',r=>norm(r[C.fail])||'(not set)'],['Issue Owner (QA/PA)',ownerOf],['Classification',clsOf],
+  ['NRB disposition',dispOf],['Migrated to EZ1',r=>migOf(r)||'(not set)'],['Status',r=>statusOf(r)||'(not ticked)'],
+  ['NC Type',r=>norm(r[C.type])||'(not set)'],['Material',r=>norm(r[C.mat])||'(not set)'],
+  ['Batch',r=>norm(r[C.batch])||'(not set)']];
+const getter = n => FIELDS.find(f=>f[0]===n)[1];
+
+const inTab = r => { const d=tabDef(TAB);
+  if(!d.sys) return true;
+  return d.sys.some(x=>x.toLowerCase()===norm(r[C.sys]).toLowerCase()); };
+const ncVal = (col,r) => norm(r[H.indexOf(col)]);
+
+function view(){
+  const rows = ROWS.filter(r=>{
+    if(!inTab(r)) return false;
+    for(const k in F){ if(F[k]!==null && getter(k)(r)!==F[k]) return false; }
+    const d=(norm(r[C.created])||'').slice(0,10);
+    if(DFROM && (!d || d<DFROM)) return false;
+    if(DTO   && (!d || d>DTO))   return false;
+    return hfPass(r, SHOW, ncVal);      // the header filters, on top
+  });
+  return hfSort(rows, SHOW, ncVal);
+}
+
+/* ---- render ---- */
+const TABDEF=[
+  {k:'BURN', label:'\u{1F525} Burndown', sys:['SAP','Blackout'], exp:'Burndown'},
+  {k:'EZ1',  label:'EZ1',                sys:['EZ1'],            exp:'EZ1'},
+  {k:'ALL',  label:'All systems',        sys:null}];
+let CAPASHOWCLOSED=false;
+const tabDef = k => TABDEF.find(t=>t.k===k) || TABDEF[0];
+function renderTabs(){
+  const t=document.getElementById('tabs'); t.innerHTML='';
+  TABDEF.forEach(d=>{
+    const b=document.createElement('button'); b.className='tab sys'+(TAB===d.k&&PANE==='tracker'?' on':'');
+    b.textContent = d.label;
+    b.onclick=()=>{TAB=d.k;PANE='tracker';draw();window.scrollTo(0,0);}; t.appendChild(b);
+  });
+  [['capa','CAPA board'],['report','NC Report'],['setup','Set-up']].forEach(([p,l])=>{
+    const b=document.createElement('button'); b.className='tab'+(PANE===p?' on':'');
+    b.textContent=l; b.onclick=()=>{PANE=p;draw();window.scrollTo(0,0);}; t.appendChild(b);
+  });
+}
+let PANE='tracker';
+let SETUPKIND='nc';
+
+function renderSrc(){
+  const n=ROWS.length, v=view().length;
+  document.getElementById('srcline').innerHTML =
+   `${n} NCs in the tracker &nbsp;|&nbsp; `+
+   `Burndown ${ROWS.filter(r=>['SAP','Blackout'].includes(norm(r[C.sys]))).length} · `+
+   `EZ1 ${ROWS.filter(r=>norm(r[C.sys])==='EZ1').length}`+
+   (ROWS.filter(r=>!norm(r[C.sys])).length ? ` · no system ${ROWS.filter(r=>!norm(r[C.sys])).length}` : '')+`  `+
+   `&nbsp;|&nbsp; showing ${v}`
+   + (UPLOADS.tc_report ? ` &nbsp;|&nbsp; last TC report: ${UPLOADS.tc_report.filename}` : '')
+   + (UPLOADS.nc_sap_overview ? ` &nbsp;|&nbsp; last SAP overview: ${UPLOADS.nc_sap_overview.filename}` : '');
+}
+
+function kpi(n,l,cls,onclick){
+  return `<div class="kpi ${cls||''}" onclick="${onclick||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+}
+function renderKpis(){
+  const v=view();
+  const open=v.filter(r=>statusOf(r)==='Open').length;
+  const closed=v.filter(r=>statusOf(r)==='Closed').length;
+  const none=v.filter(r=>statusOf(r)==='').length;
+  const all=ROWS.length;
+  document.getElementById('kpis').innerHTML =
+    kpi(v.length,'NCs in view')+
+    kpi(open,'Open','k-open',"setF('Status','Open')")+
+    kpi(closed,'Closed','k-closed',"setF('Status','Closed')")+
+    kpi(none,'Status not ticked','k-red',"setF('Status','(not ticked)')")+
+    kpi(all,'All NCs — SAP + EZ1 + Blackout','k-all',"TAB='ALL';draw()");
+}
+
+function renderFilters(){
+  const box=document.getElementById('filters'); box.innerHTML='';
+  const v0=ROWS.filter(inTab);
+  FIELDS.forEach(([name,fn])=>{
+    if(!SHOWN.has(name)) return;
+    const vals=[...new Set(v0.map(fn))].sort();
+    const d=document.createElement('div'); d.className='f';
+    d.innerHTML=`<label>${name}</label><select onchange="setF('${name}',this.value)">
+      <option value="">(all)</option>${vals.map(x=>`<option ${F[name]===x?'selected':''}>${esc(x)}</option>`).join('')}</select>`;
+    box.appendChild(d);
+  });
+  const add=document.createElement('div'); add.className='f';
+  add.innerHTML=`<label>Add filter</label><select onchange="addF(this.value);this.value=''">
+    <option value="">＋ choose a field…</option>
+    ${FIELDS.filter(f=>!SHOWN.has(f[0])).map(f=>`<option>${esc(f[0])}</option>`).join('')}</select>`;
+  box.appendChild(add);
+
+  const ch=document.getElementById('chips'); ch.innerHTML='';
+  Object.keys(F).forEach(k=>{ if(F[k]===null||F[k]==='')return;
+    ch.innerHTML+=`<span class="chip" onclick="setF('${k}','')"><b>${esc(k)}</b>: ${esc(F[k])} ✕</span>`;});
+  if(DFROM||DTO) ch.innerHTML+=`<span class="chip" onclick="DFROM='';DTO='';draw()"><b>created</b>: ${DFROM||'…'} → ${DTO||'…'} ✕</span>`;
+  if(ch.innerHTML) ch.innerHTML+=`<span class="chip" onclick="clearAll()">clear all</span>`;
+}
+function setF(k,v){ if(v==='') delete F[k]; else { F[k]=v; SHOWN.add(k); } draw(); }
+function addF(k){ if(k) SHOWN.add(k); draw(); }
+function clearAll(){ F={}; DFROM=''; DTO=''; SHOWN=new Set(BASEF); document.getElementById('dFrom').value=''; document.getElementById('dTo').value=''; draw(); }
+function setRule(id){ RULEFILTER=id; draw(); }
+
+/* charts (hand-drawn SVG, offline) */
+function groupCount(rows,fn){ const m={}; rows.forEach(r=>{const k=fn(r); m[k]=(m[k]||0)+1;}); return m; }
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+function barsClosedOpen(el,rows){
+  const owners=[...new Set(rows.map(ownerOf))];
+  const d=owners.map(o=>{const rs=rows.filter(r=>ownerOf(r)===o);
+    return {o, c:rs.filter(r=>statusOf(r)==='Closed').length, n:rs.filter(r=>statusOf(r)!=='Closed').length};})
+    .sort((a,b)=>(b.c+b.n)-(a.c+a.n)).slice(0,10);
+  const W=900,H0=290,L=42,B=80,T=16,R=10, max=Math.max(5,...d.map(x=>Math.max(x.c,x.n)))*1.15;
+  const iw=(W-L-R)/Math.max(1,d.length), y=v=>T+(H0-T-B)*(1-v/max);
+  let s=`<svg viewBox="0 0 ${W} ${H0}" role="img">`;
+  for(let g=0;g<=4;g++){const v=max*g/4;s+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#E3ECF4"/>
+    <text x="${L-6}" y="${y(v)+4}" font-size="10" fill="#5A6C7D" text-anchor="end">${Math.round(v)}</text>`;}
+  d.forEach((x,i)=>{const cx=L+i*iw, bw=iw*0.3;
+    s+=`<rect x="${cx+iw*0.12}" y="${y(x.c)}" width="${bw}" height="${y(0)-y(x.c)}" fill="#1F6F8B" style="cursor:pointer" onclick="pick('Issue Owner (QA/PA)','${esc(x.o).replace(/'/g,"")}','Closed')"><title>${esc(x.o)} — closed ${x.c}</title></rect>`;
+    s+=`<rect x="${cx+iw*0.46}" y="${y(x.n)}" width="${bw}" height="${y(0)-y(x.n)}" fill="#ED7D31" style="cursor:pointer" onclick="pick('Issue Owner (QA/PA)','${esc(x.o).replace(/'/g,"")}','Open')"><title>${esc(x.o)} — not closed ${x.n}</title></rect>`;
+    s+=`<text x="${cx+iw*0.27}" y="${y(x.c)-3}" font-size="10" text-anchor="middle" fill="#1F4E79">${x.c}</text>`;
+    s+=`<text x="${cx+iw*0.61}" y="${y(x.n)-3}" font-size="10" text-anchor="middle" fill="#8A3E0B">${x.n}</text>`;
+    s+=`<text transform="translate(${cx+iw*0.5},${H0-B+14}) rotate(35)" font-size="10" fill="#1B2733">${esc(x.o).slice(0,20)}</text>`;});
+  s+=`<line x1="${L}" x2="${W-R}" y1="${y(5)}" y2="${y(5)}" stroke="#00B050" stroke-width="2.5"/>
+      <text x="${W-R}" y="${y(5)-5}" font-size="10" fill="#00B050" text-anchor="end">target max 5</text>`;
+  s+=`<line x1="${L}" x2="${W-R}" y1="${y(0)}" y2="${y(0)}" stroke="#8FA9BF"/></svg>`;
+  el.innerHTML=s;
+  countTable('chOwnerT', d.map(x=>[x.o,[x.c,x.n,x.c+x.n]]), Object.assign(['Closed','Open','Total'],{label:'Issue owner'}), 'Issue Owner (QA/PA)');
+}
+function hbars(el,rows,fn,field,color,tid,label){
+  const m=groupCount(rows,fn);
+  const d=Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const max=Math.max(1,...d.map(x=>x[1]));
+  const rowh=30, W=900, H0=Math.max(140, d.length*rowh+30), L=260;
+  let s=`<svg viewBox="0 0 ${W} ${H0}">`;
+  d.forEach(([k,v],i)=>{const w=(W-L-46)*v/max, y=8+i*rowh;
+    s+=`<text x="${L-8}" y="${y+16}" font-size="12" text-anchor="end" fill="#1B2733">${esc(k).slice(0,32)}</text>`;
+    s+=`<rect x="${L}" y="${y+5}" width="${Math.max(2,w)}" height="19" fill="${color}" style="cursor:pointer" onclick="pick('${field}','${esc(k).replace(/'/g,"")}')"><title>${esc(k)}: ${v}</title></rect>`;
+    s+=`<text x="${L+Math.max(2,w)+7}" y="${y+19}" font-size="12" fill="#1B2733">${v}</text>`;});
+  el.innerHTML=s+'</svg>';
+  if(tid) countTable(tid, d.map(x=>[x[0],[x[1]]]), Object.assign(['Count'],{label:label||field}), field);
+}
+function countTable(id, rowsPairs, cols, field){
+  const el=document.getElementById(id); if(!el) return;
+  const tot=cols.map((_,ci)=>rowsPairs.reduce((n,p)=>n+p[1][ci],0));
+  el.innerHTML=`<thead><tr><th>${esc(cols.label||'Row labels')}</th>${cols.map(c=>`<th style="text-align:right">${esc(c)}</th>`).join('')}</tr></thead><tbody>`
+   + rowsPairs.map(p=>`<tr${field?` style="cursor:pointer" onclick="pick('${field}','${esc(p[0]).replace(/'/g,"&#39;")}')"`:''}>
+       <td title="${esc(p[0])}">${esc(p[0])}</td>${p[1].map(n=>`<td class="n">${n||''}</td>`).join('')}</tr>`).join('')
+   + `<tr class="tot"><td>Grand total</td>${tot.map(n=>`<td class="n">${n}</td>`).join('')}</tr></tbody>`;
+}
+function pick(field,val,status){ F[field]=val; SHOWN.add(field); if(status){F['Status']=status;SHOWN.add('Status');} draw(); }
+
+let SHOW=[];
+function renderTable(){
+  const v=view();
+  const f=hfOf(), srt=hsOf();
+  document.getElementById('thead').innerHTML='<tr><th class="rn">#</th>'+SHOW.map(h=>{
+    const on=f[h]&&f[h].length, sr=srt&&srt.col===h;
+    const ic=sr?(srt.dir==='asc'?'▲':'▼'):(on?'▼':'▽');
+    return `<th class="hf ${on?'on':''} ${sr?'srt':''}" data-hc="${esc(h)}">
+      <div class="hh"><span>${esc(h)}</span><span class="fn">${ic}</span></div></th>`;
+  }).join('')+'</tr>';
+  renderHfBar('hfbar', f, srt);
+  document.getElementById('tbody').innerHTML=v.slice(0,250).map((r,n)=>{
+    const ri=ROWS.indexOf(r);
+    return `<tr data-ri="${ri}"><td class="rn">${n+1}</td>`+SHOW.map(h=>{
+        const st=cellState(h,r);
+        return `<td class="${st.cls}" data-f="${esc(h)}" data-kind="${st.kind||''}" title="click to edit">${esc(st.v)}</td>`;
+      }).join('')+'</tr>';
+  }).join('');
+  paintSel();
+  const todo=v.reduce((n,r)=>n+SHOW.filter(h=>cellState(h,r).cls.includes('need')).length,0);
+  document.getElementById('rowcount').textContent =
+    `${v.length} rows × ${SHOW.length} columns` +
+    (v.length>250 ? ' — showing first 250' : '') +
+    ` · ${todo} cells still to complete`;
+  document.getElementById('tblTitle').innerHTML =
+    'NC Tracker <span class="sub">columns in the order of the tracker sheet · click any cell to edit</span>';
+}
+
+/* ---- cell editor: list · free text · date ---- */
+const pickEl=document.createElement('div'); pickEl.className='pick'; document.body.appendChild(pickEl);
+let PICK=null;
+
+// Rows marked with Ctrl-click / Shift-click. Held as database ids so the set
+// survives a re-render, a sort or a filter change.
+let MSEL=new Set(), MLAST=null;
+function msClear(){ MSEL.clear(); MLAST=null; paintSel(); }
+function paintSel(){
+  document.querySelectorAll('tr[data-ri]').forEach(tr=>{
+    const r=ROWS[+tr.dataset.ri];
+    tr.classList.toggle('multisel', !!(r && MSEL.has(r.id)));
+  });
+  const bar=document.getElementById('selbar');
+  if(!bar) return;
+  bar.style.display = MSEL.size ? 'flex' : 'none';
+  if(MSEL.size) bar.querySelector('.n').textContent = MSEL.size;
+}
+
+// One filter set per tab, kept in the browser so a refresh returns you to the
+// same view. HF[tab][column] = Set of accepted values; HSORT[tab] = {col,dir}.
+let HF={}, HSORT={};
+try{ HF=JSON.parse(localStorage.getItem('nct_hf')||'{}'); }catch(e){ HF={}; }
+try{ HSORT=JSON.parse(localStorage.getItem('nct_hsort')||'{}'); }catch(e){ HSORT={}; }
+function hfSave(){
+  try{
+    localStorage.setItem('nct_hf', JSON.stringify(HF));
+    localStorage.setItem('nct_hsort', JSON.stringify(HSORT));
+  }catch(e){}
+}
+const hfOf  = () => (HF[TAB] = HF[TAB] || {});
+const hsOf  = () => HSORT[TAB] || null;
+function hfPass(r, cols, val){
+  const f=hfOf();
+  for(const c in f){
+    const allowed=f[c];
+    if(!allowed || !allowed.length) continue;
+    if(!allowed.includes(val(c,r))) return false;
+  }
+  return true;
+}
+function hfSort(rows, cols, val){
+  const s=hsOf(); if(!s) return rows;
+  const d = s.dir==='asc' ? 1 : -1;
+  return [...rows].sort((a,b)=>
+    String(val(s.col,a)).localeCompare(String(val(s.col,b)),'en',{numeric:true})*d);
+}
+document.addEventListener('click',e=>{
+  const td=e.target.closest && e.target.closest('td.sel');
+  if(!td){ if(!e.target.closest || !e.target.closest('.pick')) pickEl.classList.remove('on'); return; }
+  const tr=td.closest('tr');
+
+  // Ctrl / Cmd adds one row, Shift extends from the last one. Neither opens
+  // the editor — selecting five rows must not throw five popups at you.
+  if((e.ctrlKey || e.metaKey || e.shiftKey) && tr.dataset.ri!==undefined){
+    e.preventDefault();
+    pickEl.classList.remove('on');
+    const rows=view(), r=ROWS[+tr.dataset.ri], here=rows.indexOf(r);
+    if(e.shiftKey && MLAST!==null){
+      const prev=rows.findIndex(x=>x.id===MLAST);
+      if(prev>=0){
+        const [a,b]=[Math.min(prev,here),Math.max(prev,here)];
+        for(let i=a;i<=b;i++) MSEL.add(rows[i].id);
+      }
+    }else{
+      MSEL.has(r.id) ? MSEL.delete(r.id) : MSEL.add(r.id);
+    }
+    MLAST=r.id;
+    paintSel();
+    return;
+  }
+
+  document.querySelectorAll('tr.rowsel').forEach(x=>x.classList.remove('rowsel'));
+  tr.classList.add('rowsel');
+  if(td.dataset.kind==='none') return;
+  if(tr.dataset.cri!==undefined) openPickCapa(td, +tr.dataset.cri, td.dataset.cf);
+  else openPick(td, +tr.dataset.ri, td.dataset.f);
+});
+
+function openPickCapa(td,ri,field){
+  const row=CROWS[ri]; PICK={ri,field,td,kind:'capa'};
+  const cur=cval(row,field), st=capaState(field,row);
+  if(st.kind==='date'){
+    pickEl.innerHTML=`<div class="ph">${esc(field)} — dd/mm/yyyy</div>
+      <input type="date" value="${esc(cur.slice(0,10))}" onchange="choose(this.value)">
+      <ul><li class="clr" onclick="choose('')">— clear —</li></ul>`;
+    return place(td);
+  }
+  if(st.kind==='text'){
+    pickEl.innerHTML=`<div class="ph">${esc(field)} — free text</div>
+      <textarea style="width:100%;border:0;padding:6px 8px;min-height:80px;outline:none;font-family:inherit;font-size:12px">${esc(cur)}</textarea>
+      <ul><li class="add" onclick="saveText()">Save</li><li class="clr" onclick="choose('')">— clear —</li></ul>`;
+    pickEl.classList.add('on');
+    const r=td.getBoundingClientRect();
+    pickEl.style.left=Math.min(window.scrollX+r.left, window.scrollX+window.innerWidth-290)+'px';
+    pickEl.style.top=(window.scrollY+r.bottom+2)+'px';
+    setTimeout(()=>pickEl.querySelector('textarea').focus(),0);
+    return;
+  }
+  const opts=capaOptions(field,row);
+  if(opts===null){
+    pickEl.innerHTML=`<div class="ph">${esc(field)}</div><ul><li class="clr">Choose the level 1 on this row first</li></ul>`;
+    return place(td);
+  }
+  pickEl.innerHTML=`<div class="ph">${esc(field)}</div>
+    <input placeholder="type to filter, or type a new value…" oninput="filterPick(this.value)">
+    <ul id="pickList"></ul>`;
+  drawPick(opts,cur); place(td);
+}
+function place(td){
+  const r=td.getBoundingClientRect();
+  pickEl.style.left=Math.min(window.scrollX+r.left, window.scrollX+window.innerWidth-290)+'px';
+  pickEl.style.top=(window.scrollY+r.bottom+2)+'px';
+  pickEl.classList.add('on');
+  const i=pickEl.querySelector('input'); if(i) setTimeout(()=>i.focus(),0);
+}
+function openPick(td,ri,field){
+  const row=ROWS[ri]; PICK={ri,field,td};
+  const cur=norm(row[H.indexOf(field)]);
+  const st=cellState(field,row);
+  if(st.kind==='date'){
+    pickEl.innerHTML=`<div class="ph">${esc(field)} — dd/mm/yyyy</div>
+      <input type="date" value="${esc((cur||'').slice(0,10))}" onchange="choose(this.value)">
+      <ul><li class="clr" onclick="choose('')">— clear —</li></ul>`;
+    return place(td);
+  }
+  if(st.kind==='text'){
+    pickEl.innerHTML=`<div class="ph">${esc(field)} — free text</div>
+      <textarea style="width:100%;border:0;padding:6px 8px;min-height:64px;outline:none;font-family:inherit;font-size:12px">${esc(cur)}</textarea>
+      <ul><li class="add" onclick="saveText()">Save</li><li class="clr" onclick="choose('')">— clear —</li></ul>`;
+    pickEl.classList.add('on');
+    const r=td.getBoundingClientRect();
+    pickEl.style.left=Math.min(window.scrollX+r.left, window.scrollX+window.innerWidth-290)+'px';
+    pickEl.style.top=(window.scrollY+r.bottom+2)+'px';
+    setTimeout(()=>pickEl.querySelector('textarea').focus(),0);
+    return;
+  }
+  const opts=optionsFor(field,row)||[];
+  if(field==='Flight Unit' && !opts.length){
+    pickEl.innerHTML=`<div class="ph">Flight unit</div><ul><li class="clr">Set the project first — the list depends on it</li></ul>`;
+    return place(td);
+  }
+  pickEl.innerHTML=`<div class="ph">${esc(field)}</div>
+    <input placeholder="type to filter, or type a new value…" oninput="filterPick(this.value)">
+    <ul id="pickList"></ul>`;
+  drawPick(opts,cur); place(td);
+}
+function drawPick(opts,cur,q){
+  const list=pickEl.querySelector('#pickList'); if(!list) return;
+  const f=(q||'').toLowerCase();
+  list.innerHTML = opts.filter(o=>!f||o.toLowerCase().includes(f))
+      .map(o=>`<li onclick="choose('${esc(o).replace(/'/g,"&#39;")}')">${o===cur?'✓ ':''}${esc(o)}</li>`).join('')
+    + `<li class="clr" onclick="choose('')">— clear —</li>`
+    + (PICK && PICK.field!=='Flight Unit' ? `<li class="add" onclick="addValue()">＋ Add ${esc(PICK.field.toLowerCase())}…</li>` : '');
+}
+function filterPick(q){
+  if(PICK.kind==='capa'){ const row=CROWS[PICK.ri];
+    return drawPick(capaOptions(PICK.field,row)||[], cval(row,PICK.field), q); }
+  const row=ROWS[PICK.ri]; drawPick(optionsFor(PICK.field,row)||[], norm(row[H.indexOf(PICK.field)]), q);
+}
+async function chooseCapa(v){
+  const row=CROWS[PICK.ri], field=PICK.field, i=CH.indexOf(field), before=row[i];
+  row[i]=v; pickEl.classList.remove('on'); draw();
+  try{
+    const saved=await api('api/capa/'+row.id, {method:'PATCH',
+      headers:{'content-type':'application/json'}, body:JSON.stringify({field:CDB[field], value:v})});
+    CH.forEach((h,j)=>row[j]=saved[CDB[h]]||'');
+    draw();
+  }catch(e){ row[i]=before; draw(); alert('Not saved: '+e.message); }
+}
+async function choose(v){
+  if(PICK.kind==='capa') return chooseCapa(v);
+  const row=ROWS[PICK.ri], field=PICK.field, i=H.indexOf(field), before=row[i];
+  row[i]=v; pickEl.classList.remove('on'); draw();
+  try{
+    const saved=await api('api/nc/'+row.id, {method:'PATCH',
+      headers:{'content-type':'application/json'}, body:JSON.stringify({field:DBCOL[field], value:v})});
+    H.forEach((h,j)=>row[j]=saved[DBCOL[h]]||'');
+    draw();
+  }catch(e){ row[i]=before; draw(); alert('Not saved: '+e.message); }
+}
+function saveText(){ choose(pickEl.querySelector('textarea').value.trim()); }
+async function addValue(){
+  const v=(pickEl.querySelector('input').value||'').trim();
+  if(!v){ pickEl.querySelector('input').focus(); return; }
+  let k;
+  if(PICK.kind==='capa'){
+    const db=CDB[PICK.field];
+    k = CL2[db] ? 'capa:L2 '+cval(CROWS[PICK.ri], CH.find(x=>CDB[x]===CL2[db]))
+                : (CLIST[db] ? 'capa:'+CLIST[db] : null);
+  } else {
+    k = PICK.field==='Flight Unit' ? PROJKEY[norm(ROWS[PICK.ri][C.proj])] : LISTKEY[PICK.field];
+  }
+  if(k && k!=='*flight'){
+    try{ SETUP=await api('api/setup',{method:'POST',headers:{'content-type':'application/json'},
+          body:JSON.stringify({list_name:k, value:v})}); }
+    catch(e){ alert('Not added: '+e.message); return; }
+  }
+  choose(v);
+}
+async function setupAdd(list, input){
+  const v=(input.value||'').trim(); if(!v) return;
+  try{ SETUP=await api('api/setup',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({list_name:list, value:v})}); input.value=''; draw(); }
+  catch(e){ alert('Not added: '+e.message); }
+}
+async function setupRemove(list, value){
+  if(!confirm('Remove \u201c'+value+'\u201d from '+list+'?')) return;
+  try{ SETUP=await api('api/setup?list_name='+encodeURIComponent(list)+'&value='+encodeURIComponent(value),
+        {method:'DELETE'}); draw(); }
+  catch(e){ alert('Not removed: '+e.message); }
+}
+
+function renderReport(){
+  const rows=ROWS;
+  const owners=[...new Set(rows.map(ownerOf))].sort();
+  const cell=(rs,st)=>rs.filter(r=>statusOf(r)===st).length;
+  let t1=`<table class="diff rep"><tr><th>Issue owner</th><th class="right">Closed</th><th class="right">Open</th><th class="right">Not ticked</th><th class="right">Total</th></tr>`;
+  owners.forEach(o=>{const rs=rows.filter(r=>ownerOf(r)===o);
+    t1+=`<tr><td>${esc(o)}</td><td class="right" style="background:var(--green)">${cell(rs,'Closed')||''}</td>
+    <td class="right" style="background:var(--peach)">${cell(rs,'Open')||''}</td>
+    <td class="right" style="background:var(--amberwash);color:var(--red)">${cell(rs,'')||''}</td><td class="right"><b>${rs.length}</b></td></tr>`;});
+  t1+=`<tr><td><b>Total</b></td><td class="right"><b>${cell(rows,'Closed')}</b></td><td class="right"><b>${cell(rows,'Open')}</b></td>
+    <td class="right"><b>${cell(rows,'')}</b></td><td class="right"><b>${rows.length}</b></td></tr></table>`;
+
+  const mk=(title,fn)=>{const m=groupCount(rows,fn);
+    let s=`<table class="diff rep"><tr><th>${title}</th><th class="right">Closed</th><th class="right">Open</th><th class="right">Total</th></tr>`;
+    Object.entries(m).sort((a,b)=>b[1]-a[1]).forEach(([k])=>{const rs=rows.filter(r=>fn(r)===k);
+      s+=`<tr><td>${esc(k)}</td><td class="right" style="background:var(--green)">${cell(rs,'Closed')||''}</td>
+      <td class="right" style="background:var(--peach)">${cell(rs,'Open')||''}</td><td class="right"><b>${rs.length}</b></td></tr>`;});
+    return s+'</table>';};
+
+  document.getElementById('pane-report').innerHTML=
+   `<div class="card"><h3>By owner <span class="sub">all systems · ${rows.length} NCs</span></h3><div class="body">${t1}</div></div>
+    <div class="rep2">
+      <div class="card"><h3>By classification</h3><div class="body">${mk('Class',clsOf)}</div></div>
+      <div class="card"><h3>By NRB disposition</h3><div class="body">${mk('Disposition',dispOf)}</div></div>
+      <div class="card"><h3>By system</h3><div class="body">${mk('System',r=>norm(r[C.sys])||'(not set)')}</div></div>
+      <div class="card"><h3>By project</h3><div class="body">${mk('Project',projOf)}</div></div>
+    </div>
+    <div class="card"><h3>Export</h3><div class="body">
+      <button class="btn" onclick="window.location='api/export?scope=all'">Download the report (Excel, all tabs)</button>
+      <span class="pill">the same numbers, one row per NC, follows any filter set on the tracker tabs</span>
+    </div></div>`;
+}
+
+
+/* ---- CAPA board ---- */
+let CF={};
+const CFIELDS=['Affected Project','Responsible','Priority','CAPA Type','Origin',
+  'Department Assigned','(Real) Origin Area L1','RC Category L1','Status'];
+const capaVal = (col,r) => norm(r[CH.indexOf(col)]);
+
+// The unfiltered board — the header popup counts values against this, so the
+// checklist still shows every option once a filter is already on.
+function capaBase(){
+  return CROWS.filter(r=>{
+    const st=cval(r,'Status');
+    if(!CAPASHOWCLOSED && st==='Closed') return false;
+    for(const k in CF){ if(CF[k] && (cval(r,k)||'(not set)')!==CF[k]) return false; }
+    return true;
+  });
+}
+function capaView(){
+  return hfSort(capaBase().filter(r=>hfPass(r, CH, capaVal)), CH, capaVal);
+}
+function setCF(k,v){ if(v==='') delete CF[k]; else CF[k]=v; draw(); }
+async function addCapa(){
+  try{
+    const r=await api('api/capa',{method:'POST'});
+    const a=CH.map(h=>r[CDB[h]]||''); a.id=r.id; CROWS.push(a);
+    draw(); window.scrollTo(0,document.body.scrollHeight);
+  }catch(e){ alert('Not added: '+e.message); }
+}
+function renderCapa(){
+  const all=CROWS, v=capaView();
+  const cnt=st=>all.filter(r=>cval(r,'Status')===st).length;
+  const todo=v.reduce((n,r)=>n+CH.filter(h=>capaState(h,r).cls.includes('need')).length,0);
+  let s=`<div class="kpis">
+    ${kpi(v.length,'CAPAs on the board')}
+    ${kpi(cnt('Open'),'Open','k-open')}
+    ${kpi(cnt('Overdue'),'Overdue','k-red')}
+    ${kpi(all.filter(r=>!cval(r,'Status')).length,'Status not set','k-red')}
+  </div>`;
+
+  s+=`<div class="card"><h3>Filters <span class="sub">the board holds open work · closed CAPAs are kept but hidden</span></h3>
+    <div class="body"><div class="filters">`;
+  CFIELDS.forEach(h=>{
+    const vals=[...new Set(all.map(r=>cval(r,h)||'(not set)'))].sort();
+    s+=`<div class="f"><label>${esc(h)}</label>
+      <select onchange="setCF('${esc(h)}',this.value)">
+        <option value="">(all)</option>
+        ${vals.map(x=>`<option ${CF[h]===x?'selected':''}>${esc(x)}</option>`).join('')}</select></div>`;
+  });
+  s+=`<div class="f"><label>Closed</label>
+        <button class="btn ghost" onclick="CAPASHOWCLOSED=!CAPASHOWCLOSED;draw()">
+          ${CAPASHOWCLOSED?'Hide closed':'Show closed too'}</button></div>
+      <div class="f"><label>&nbsp;</label><button class="btn ghost" onclick="CF={};draw()">Clear filters</button></div>
+    </div></div></div>`;
+
+  s+=`<div class="card"><h3>CAPA board
+        <span class="sub">click any coloured cell to edit · Status, Days Open and Sum of priority are calculated</span></h3>
+    <div class="legend" style="padding:8px 12px 6px;border-bottom:1px solid var(--line)">
+      <span><i class="sw" style="background:var(--needfill);border:1px solid #E0C46A"></i>still to be filled</span>
+      <span><i class="sw" style="background:var(--needfill);box-shadow:inset 3px 0 0 var(--orange)"></i>not on the set-up list</span>
+      <span><i class="sw" style="background:var(--beige)"></i>filled</span>
+      <span><i class="sw" style="background:#EEF2F6"></i>calculated</span>
+    </div>
+    <div class="bar" style="border-top:0">
+      <button class="btn" onclick="addCapa()">＋ Add CAPA line</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" onclick="window.location='api/export?scope=all'">Download (Excel)</button>
+    </div>
+    <div class="hfbar" id="hfbarCapa"></div>
+    <div class="tablewrap"><table id="capaTable"><thead><tr><th class="rn">#</th>${CH.map(h=>{
+        const cf=hfOf(), cs=hsOf();
+        const on=cf[h]&&cf[h].length, sr=cs&&cs.col===h;
+        const ic=sr?(cs.dir==='asc'?'▲':'▼'):(on?'▼':'▽');
+        return `<th class="hf ${on?'on':''} ${sr?'srt':''}" data-hc="${esc(h)}">
+          <div class="hh"><span>${esc(h)}</span><span class="fn">${ic}</span></div></th>`;
+      }).join('')}</tr></thead>
+    <tbody>`;
+  v.slice(0,250).forEach((r,n)=>{
+    s+=`<tr data-cri="${CROWS.indexOf(r)}"><td class="rn">${n+1}</td>`+CH.map(h=>{
+      const st=capaState(h,r);
+      if(st.cls==='calc')
+        return `<td style="background:#EEF2F6;color:var(--muted)" title="calculated">${esc(st.v)}</td>`;
+      return `<td class="${st.cls}" data-cf="${esc(h)}" title="click to edit">${esc(st.v)}</td>`;
+    }).join('')+'</tr>';
+  });
+  s+=`</tbody></table></div>
+      <div class="rowcount">${v.length} rows × ${CH.length} columns${v.length>250?' — showing first 250':''} · ${todo} cells still to fill</div></div>`;
+  document.getElementById('pane-capa').innerHTML=s;
+}
+
+function renderSetup(){
+  const capaKeys=Object.keys(SETUP).filter(k=>k.startsWith('capa:'));
+  const chooser=`<div class="card"><h3>Set-up</h3><div class="body" style="display:flex;gap:8px">
+    <button class="btn${SETUPKIND==='nc'?'':' ghost'}" onclick="SETUPKIND='nc';draw()">NC Set-Up</button>
+    <button class="btn${SETUPKIND==='capa'?'':' ghost'}" onclick="SETUPKIND='capa';draw()">CAPA Set-Up</button>
+    <span class="pill" style="align-self:center">${SETUPKIND==='nc'?'the lists behind the NC Tracker':capaKeys.length+' CAPA lists'}</span>
+  </div></div>`;
+  if(SETUPKIND==='capa'){
+    let c=chooser+`<div class="card"><h3>CAPA Set-Up <span class="sub">loaded from USE_THIS_CAPA_2.csv</span></h3><div class="body">
+      <div class="note">These are the CAPA dropdown lists. The CAPA table itself is not built yet — see the note at the bottom.</div>
+      <div class="lists">`;
+    capaKeys.forEach(k=>{
+      const label=k.slice(5);
+      c+=`<div class="list"><h4>${esc(label)} <span>${SETUP[k].length}</span></h4>
+        <ul>${SETUP[k].map(v=>`<li><span>${esc(v)}</span><span class="x" title="remove"
+            onclick="setupRemove('${esc(k)}','${esc(v).replace(/'/g,"&#39;")}')">✕</span></li>`).join('')}</ul>
+        <div class="addrow"><input placeholder="add a value…"
+            onkeydown="if(event.key==='Enter')setupAdd('${esc(k)}',this)">
+          <button onclick="setupAdd('${esc(k)}',this.previousElementSibling)">＋ Add</button></div></div>`;});
+    c+=`</div></div></div>
+      <div class="card"><h3>Not built yet</h3><div class="body"><div class="note">
+        The CSV gives the vocabularies but not the shape of a CAPA record — which columns one CAPA row has.
+        Send one CAPA export and the CAPA tab gets built exactly like the NC one.</div></div></div>`;
+    document.getElementById('pane-setup').innerHTML=c;
+    return;
+  }
+  const order=['Project','Ariane','Vega','MHI H3','Relativity','SAS','Vulcan','Flexline','Detection','Failure','Q_Responsible','Disposition','Classification','Status','System','NC Type','Migrated','Supplier name'];
+  let s=`<div class="card"><h3>NC Set-Up — the master lists <span class="sub">duplicates removed on migration · adding a value here makes it available to everyone immediately</span></h3><div class="body">
+    <div class="note"><b>Cleaned on load (view only — the original file is untouched and downloadable):</b>
+      classification levels folded into Minor / Major · Migrated spellings NO / no / N0 folded into No ·
+      flight unit “n/a” cleared · Supplier name is free text, not a list.</div>
+    <div class="note"><b>Deduplicated on load:</b> Project lost a second “Ariane”, Disposition lost a second “Use as is”. Nothing else changed. Every original value is kept in the downloadable source file.</div>
+    <div class="lists">`;
+  order.forEach(k=>{ if(!SETUP[k] || k.startsWith('capa:')) return;
+    s+=`<div class="list"><h4>${esc(k)} <span>${SETUP[k].length}</span></h4>
+      <ul>${SETUP[k].map(v=>`<li><span>${esc(v)}</span><span class="x" title="remove"
+          onclick="setupRemove('${esc(k)}','${esc(v).replace(/'/g,"&#39;")}')">✕</span></li>`).join('')}</ul>
+      <div class="addrow"><input placeholder="add a value…"
+          onkeydown="if(event.key==='Enter')setupAdd('${esc(k)}',this)">
+        <button onclick="setupAdd('${esc(k)}',this.previousElementSibling)">＋ Add</button></div></div>`;});
+  s+='</div></div></div>';
+  s = chooser + s;
+  // values used in the tracker that are on no list
+  let off='';
+  Object.keys(LISTKEY).forEach(f=>{
+    const i=H.indexOf(f); if(i<0) return;
+    const bad={};
+    ROWS.forEach(r=>{ const st=cellState(f,r); if(st.cls.includes('off')) { const v=norm(r[i]); bad[v]=(bad[v]||0)+1; } });
+    const ks=Object.keys(bad); if(!ks.length) return;
+    off+=`<tr><td><b>${esc(f)}</b></td><td>${ks.sort((a,b)=>bad[b]-bad[a]).map(k=>`${esc(k)} <span class="pill">${bad[k]}</span>`).join(' · ')}</td></tr>`;
+  });
+  s+=`<div class="card"><h3>Missing set-ups <span class="sub">values used in the tracker that are on no list</span></h3><div class="body">
+    <div class="note">These are the gaps. Each one is either a value to add to the list, or a typo to correct in the row. Nothing was added automatically — except <b>Minor - Level 1</b> and <b>Minor - Level 2</b>, which I put on the Classification list because the tracker uses them 11 times and Set-up only had Minor and Major. Say the word and I take them off again.</div>
+    <table class="diff"><tr><th style="width:180px">Field</th><th>Values with no list entry</th></tr>${off||'<tr><td colspan="2">none</td></tr>'}</table>
+  </div></div>`;
+  s+=`<div class="card"><h3>Where “add” appears in the form</h3><div class="body">
+    <div class="note">On the tracker tabs, click any coloured cell. The picker opens with the list, a type-to-filter box, and <b>＋ Add …</b> at the bottom. It writes straight into the list above — no approval step, as agreed. Try it: yellow means nothing chosen yet, beige means chosen.</div>
+    <div class="f" style="max-width:320px"><label>Failure</label>
+      <select><option>(choose)</option>${SETUP['Failure'].slice(0,6).map(v=>`<option>${esc(v)}</option>`).join('')}
+      <option style="color:#00B050">＋ Add failure…</option></select></div>
+  </div></div>`;
+  document.getElementById('pane-setup').innerHTML=s;
+}
+
+/* ---- import: preview first, commit second ---- */
+let PENDING=null;
+function pickFile(kind){
+  const el=document.getElementById('upl');
+  el.value='';
+  el.onchange=()=>{ if(el.files[0]) runPreview(kind, el.files[0]); };
+  el.click();
+}
+function closeM(){ document.getElementById('mask').classList.remove('on'); }
+document.getElementById('mask').onclick=e=>{ if(e.target.id==='mask') closeM(); };
+async function runPreview(kind, file){
+  const fd=new FormData(); fd.append('file', file);
+  document.getElementById('modal').innerHTML=
+    `<h3>Reading ${esc(file.name)}…</h3><div class="mb">Checking what this file would change. Nothing is written yet.</div>`;
+  document.getElementById('mask').classList.add('on');
+  let d;
+  try{ d=await api('api/import/'+kind+'/preview',{method:'POST',body:fd}); }
+  catch(e){
+    document.getElementById('modal').innerHTML=
+      `<h3>Cannot read ${esc(file.name)}</h3><div class="mb"><div class="note">${esc(e.message)}</div>
+       <p style="font-size:12px;color:var(--muted)">Nothing was written. The sheet needs a header row with columns such as
+       Issue Number, Project, Detection, Owner, Creation Date, Status.</p></div>
+       <div class="mfoot"><button class="btn ghost" onclick="closeM()">Close</button></div>`;
+    return;
+  }
+  PENDING={kind, file};
+  const ez1Now=ROWS.filter(r=>norm(r[C.sys])==='EZ1').length;
+  const newEz1=(d.new_by_system && d.new_by_system.EZ1) || 0;
+  const bySys=Object.entries(d.new_by_system||{})
+    .map(([k,v])=>`<tr><td>&nbsp;&nbsp;→ of which land on ${esc(k)}</td><td class="right">${v}</td></tr>`).join('');
+  document.getElementById('modal').innerHTML=`
+   <h3>Import preview — ${esc(d.label)} · ${esc(d.filename)}</h3>
+   <div class="mb">
+     <div class="note">Nothing has been written yet. This is what the file would do.</div>
+     <table class="diff">
+       <tr><th>What this file would do</th><th class="right">Rows</th></tr>
+       <tr><td>Rows read from the file</td><td class="right">${d.rows_in_file}</td></tr>
+       <tr><td><b>New NCs added</b></td><td class="right big">${d.new}</td></tr>
+       ${bySys}
+       <tr><td>Existing NCs — empty cells will be filled</td><td class="right">${d.filled_blanks||d.updated}</td></tr>
+       <tr><td>Existing NCs — a value in the file differs from what is already typed
+               <span style="color:var(--muted)">(kept as-is, never overwritten)</span></td>
+           <td class="right">${d.kept_existing||0}</td></tr>
+       <tr><td>Identical, nothing to do</td><td class="right">${d.unchanged}</td></tr>
+       <tr style="background:var(--needfill)"><td><b>Arriving with something still to complete</b></td>
+           <td class="right big">${d.flagged}</td></tr>
+     </table>
+     <p style="font-size:12.5px;color:var(--ink);margin-top:8px">
+       <b>Tracker total will go from ${d.tracker_before} to ${d.tracker_after}</b>
+       <span style="color:var(--muted)">&nbsp;·&nbsp; ${d.new} new · ${d.filled_blanks||0} matched
+       (filled empty cells) · ${d.kept_existing||0} matched (values kept as-is)</span></p>
+     <p style="font-size:12px;color:var(--muted)">EZ1 after this import: <b>${ez1Now}</b> → <b>${ez1Now+newEz1}</b>
+       &nbsp;·&nbsp; ${d.columns_recognised.length} columns recognised
+       &nbsp;·&nbsp; the file is stored exactly as uploaded and stays downloadable.</p>
+     ${d.new > d.tracker_before/3 ? `<div class="note" style="background:#FFF7DC;border-color:#E9CC9A">
+        <b>Heads-up:</b> ${d.new} new rows against ${d.tracker_before} in the tracker.
+        That means most rows are being seen for the first time. If this file re-exports notifications
+        you already have (under a different ID shape, e.g. legacy 6-digit vs S/4 <code>IR-…</code>),
+        matching those manually first is safer than importing.</div>` : ''}
+     ${(d.duplicate_keys||[]).length ? `<div class="note"><b>Duplicate NC keys already in the tracker:</b>
+        ${d.duplicate_keys.map(esc).join(', ')} — on import the later row wins.</div>` : ''}
+     ${(d.fills||[]).length ? `<div style="margin-top:14px;font-size:12px;color:var(--muted)">
+        First ${Math.min(15,d.fills.length)} rows where empty cells will be filled:</div>
+        <table class="diff"><tr><th style="width:150px">NC</th><th>Cells that will be filled</th></tr>`
+        + d.fills.slice(0,15).map(ch=>`<tr><td>${esc(ch.key)}</td><td>`
+        + Object.entries(ch.fields).map(([f,v])=>`<b>${esc(f)}</b>: (empty) → ${esc(v[1])}`).join('<br>')
+        + `</td></tr>`).join('') + `</table>` : ''}
+     ${(d.kept_back||[]).length ? `<div style="margin-top:14px;font-size:12px;color:var(--muted)">
+        First ${Math.min(15,d.kept_back.length)} rows where a value in the file was <b>held back</b>
+        because a person had already typed something:</div>
+        <table class="diff"><tr><th style="width:150px">NC</th><th>Held back (tracker value kept)</th></tr>`
+        + d.kept_back.slice(0,15).map(ch=>`<tr><td>${esc(ch.key)}</td><td>`
+        + Object.entries(ch.fields).map(([f,v])=>`<b>${esc(f)}</b>: kept "${esc(v[0])}", file said "${esc(v[1])}"`).join('<br>')
+        + `</td></tr>`).join('') + `</table>` : ''}
+   </div>
+   <div class="mfoot"><button class="btn ghost" onclick="closeM()">Cancel</button>
+     <button class="btn" onclick="commitImport()">Commit import</button></div>`;
+}
+async function commitImport(){
+  if(!PENDING) return;
+  const fd=new FormData(); fd.append('file', PENDING.file);
+  document.getElementById('modal').innerHTML='<h3>Importing…</h3><div class="mb">Writing the rows.</div>';
+  try{
+    const r=await api('api/import/'+PENDING.kind+'/commit',{method:'POST',body:fd});
+    closeM(); PENDING=null; await boot();
+    alert('Imported: '+r.added+' new NCs · '+r.updated+' existing NCs had empty cells filled · nothing was overwritten.');
+  }catch(e){
+    document.getElementById('modal').innerHTML=
+      `<h3>Import failed</h3><div class="mb"><div class="note">${esc(e.message)}</div></div>
+       <div class="mfoot"><button class="btn ghost" onclick="closeM()">Close</button></div>`;
+  }
+}
+
+function lastUploaded(kind, label){
+  if(!UPLOADS[kind]){ alert('No '+label+' has been uploaded yet.'); return; }
+  window.location='api/upload/'+kind+'/latest';
+}
+function openDownload(){
+  document.getElementById('modal').innerHTML=`
+   <h3>Download full report</h3>
+   <div class="mb">
+     <table class="diff">
+       <tr><th style="width:34px"></th><th>What goes in the file</th></tr>
+       <tr><td><input type="radio" name="scope" value="all" checked></td>
+           <td><b>All tabs</b> — SAP, EZ1, Blackout, Set-up and NC Report in one workbook. <span class="pill">default</span></td></tr>
+       <tr><td><input type="radio" name="scope" value="tab"></td>
+           <td>Current tab only — <b id="dlTab"></b>, with the filters that are set right now</td></tr>
+     </table>
+     <p style="font-size:12px;color:var(--muted)">The tracker's own columns, in the tracker's own order. Dates as dd/mm/yyyy.</p>
+   </div>
+   <div class="mfoot"><button class="btn ghost" onclick="closeM()">Cancel</button>
+     <button class="btn" onclick="doDownload()">Download</button></div>`;
+  document.getElementById('dlTab').textContent = tabDef(TAB).label.replace(/^\S+\s/,'');
+  document.getElementById('mask').classList.add('on');
+}
+function doDownload(){
+  const scope=document.querySelector('input[name=scope]:checked').value;
+  closeM();
+  const d=tabDef(TAB);
+  window.location = (scope==='all' || !d.sys) ? 'api/export?scope=all'
+                  : 'api/export?scope=tab&tab='+encodeURIComponent(d.exp);
+}
+function dlCurrent(){
+  const v=view();
+  const rows=[SHOW].concat(v.map(r=>SHOW.map(h=>{const i=H.indexOf(h);
+      return DATEF.includes(h)? dmy(norm(r[i])) : norm(r[i]);})));
+  const csv=rows.map(r=>r.map(c=>`"${(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv'}));
+  a.download='NC_Tracker_'+TAB+'.csv'; a.click();
+}
+
+
+/* ---------- header filters: popup, chip bar, click handling ---------- */
+const hfp=document.createElement('div'); hfp.className='hfp'; document.body.appendChild(hfp);
+
+function renderHfBar(id, f, srt){
+  const el=document.getElementById(id); if(!el) return;
+  const chips=Object.keys(f).filter(c=>f[c]&&f[c].length).map(c=>
+    `<span class="hc">${esc(c)} <b>${f[c].length}</b><span class="x" data-hclr="${esc(c)}">✕</span></span>`).join('');
+  const sc = srt ? `<span class="hc">sorted by <b>${esc(srt.col)}</b> ${srt.dir==='asc'?'▲':'▼'}<span class="x" data-hclr="*sort">✕</span></span>` : '';
+  el.innerHTML = (chips||sc)
+    ? chips+sc+'<button class="ca" data-hclr="*all">Clear all column filters</button>'
+    : '<span style="color:var(--dim)">no column filters — click a column header to sort or filter</span>';
+}
+
+function hfOpen(th, col, rowsFn, valFn){
+  const f=hfOf();
+  const rows=rowsFn();
+  const vals=[...new Set(rows.map(r=>valFn(col,r)))]
+    .sort((a,b)=>String(a).localeCompare(String(b),'en',{numeric:true}));
+  const cnt=v=>rows.filter(r=>valFn(col,r)===v).length;
+  const cur=f[col]||null;
+  const on=v=>!cur||cur.includes(v);
+  hfp.innerHTML=`
+    <div class="sc">
+      <div class="it" data-hs="asc"><span class="ic">▲</span>Sort A → Z</div>
+      <div class="it" data-hs="desc"><span class="ic">▼</span>Sort Z → A</div>
+      <div class="it" data-hs="clear"><span class="ic">✕</span>Clear filter from this column</div>
+    </div>
+    <div class="sr"><input id="hfq" placeholder="Search values…"></div>
+    <div class="ls" id="hfls">
+      <label><input type="checkbox" id="hfall" ${!cur?'checked':''}><b>(Select all)</b></label>
+      ${vals.map(v=>`<label data-v="${esc(v)}"><input type="checkbox" ${on(v)?'checked':''} data-hv="${esc(v)}">
+        <span>${v?esc(v):'<i style="opacity:.6">(blank)</i>'}</span><span class="cn">${cnt(v)}</span></label>`).join('')}
+    </div>
+    <div class="ft"><button data-ha="cancel">Cancel</button><button class="p" data-ha="ok">Apply</button></div>`;
+  const r=th.getBoundingClientRect();
+  hfp.style.left=Math.min(r.left+window.scrollX, innerWidth-268)+'px';
+  hfp.style.top =(r.bottom+window.scrollY+2)+'px';
+  hfp.classList.add('on');
+
+  hfp.querySelector('#hfq').oninput=e=>{const q=e.target.value.toLowerCase();
+    hfp.querySelectorAll('#hfls label[data-v]').forEach(l=>
+      l.style.display=l.dataset.v.toLowerCase().includes(q)?'':'none');};
+  hfp.querySelector('#hfall').onchange=e=>
+    hfp.querySelectorAll('[data-hv]').forEach(c=>c.checked=e.target.checked);
+  hfp.querySelectorAll('[data-hs]').forEach(el=>el.onclick=()=>{
+    const a=el.dataset.hs;
+    if(a==='clear') delete hfOf()[col]; else HSORT[TAB]={col,dir:a};
+    hfp.classList.remove('on'); hfSave(); draw();});
+  hfp.querySelectorAll('[data-ha]').forEach(b=>b.onclick=()=>{
+    if(b.dataset.ha==='ok'){
+      const picked=[...hfp.querySelectorAll('[data-hv]')].filter(c=>c.checked).map(c=>c.dataset.hv);
+      if(picked.length===vals.length) delete hfOf()[col]; else hfOf()[col]=picked;
+    }
+    hfp.classList.remove('on'); hfSave(); draw();});
+}
+
+document.addEventListener('click',e=>{
+  const clr=e.target.closest('[data-hclr]');
+  if(clr){
+    const k=clr.dataset.hclr;
+    if(k==='*all'){ HF[TAB]={}; delete HSORT[TAB]; }
+    else if(k==='*sort'){ delete HSORT[TAB]; }
+    else delete hfOf()[k];
+    hfSave(); draw(); return;
+  }
+  const th=e.target.closest('th[data-hc]');
+  if(!th){ if(!e.target.closest('.hfp')) hfp.classList.remove('on'); return; }
+  const inCapa = !!th.closest('#capaTable');
+  hfOpen(th, th.dataset.hc,
+    inCapa ? capaBase : ()=>ROWS.filter(inTab),
+    inCapa ? capaVal : ncVal);
+}, true);
+
+function msExport(){
+  const rows=ROWS.filter(r=>MSEL.has(r.id));
+  if(!rows.length){ alert('Nothing selected.'); return; }
+  const body=[SHOW].concat(rows.map(r=>SHOW.map(h=>{
+    const i=H.indexOf(h);
+    return DATEF.includes(h) ? dmy(norm(r[i])) : norm(r[i]);
+  })));
+  const csv=body.map(r=>r.map(c=>`"${(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv'}));
+  a.download='NC_Tracker_'+TAB+'_selected.csv'; a.click();
+}
+
+function draw(){
+  renderTabs(); renderSrc();
+  document.getElementById('pane-tracker').className = PANE==='tracker'?'':'hide';
+  document.getElementById('pane-report').className  = PANE==='report'?'':'hide';
+  document.getElementById('pane-setup').className   = PANE==='setup'?'':'hide';
+  document.getElementById('pane-capa').className    = PANE==='capa'?'':'hide';
+  if(PANE==='tracker'){
+    renderKpis(); renderFilters(); renderTable();
+    const v=view();
+    barsClosedOpen(document.getElementById('chOwner'), ROWS.filter(inTab));
+    hbars(document.getElementById('chClass'), v, clsOf, 'Classification', '#2E75B6', 'chClassT', 'Classification');
+    hbars(document.getElementById('chDisp'), v, dispOf, 'NRB disposition', '#ED7D31', 'chDispT', 'Disposition');
+    hbars(document.getElementById('chDet'), v.filter(r=>statusOf(r)!=='Closed'), detOf, 'Detection', '#1F6F8B', 'chDetT', 'Detection area');
+    const vo=ROWS.filter(inTab);
+    document.getElementById('nOwner').textContent = vo.length+' NCs · click a bar or a row to filter';
+    document.getElementById('nClass').textContent = v.length+' NCs';
+    document.getElementById('nDisp').textContent  = v.length+' NCs';
+    document.getElementById('nDet').textContent   = v.filter(r=>statusOf(r)!=='Closed').length+' open NCs';
+  }
+  if(PANE==='report') renderReport();
+  if(PANE==='setup') renderSetup();
+  if(PANE==='capa'){ renderCapa(); renderHfBar('hfbarCapa', hfOf(), hsOf()); }
+  document.getElementById('ncbar').style.display = PANE==='capa' ? 'none' : '';
+}
+boot();
+</script>
+<div class="version" id="version">version 4.1</div>
+</body>
+</html>

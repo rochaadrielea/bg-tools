@@ -40,30 +40,82 @@ COLS = {
     "Project Text  (Notification)": "project",
 }
 
-# Later SAS batches can sit on a different PSP prefix; the batch id is still
-# the .Q.NNN tail (e.g. W.IC248.Q.021 = Batch 21, or a successor WBS with .Q.022).
+# --- how a batch is identified, per system -------------------------------
+# SAP  : the 3-digit tail of the PSP element ...Q.NNN  (900 = Lager, 901 = Springs)
+#        or a successor WBS ending -NNN
+# Teamcenter : the segment AFTER the '-90' level, e.g. R-3011-00045-90-15 = Batch 15
+#        Confirmed by the SAS owner 2026-08 and cross-checked against the NC
+#        titles: WBS and title agree on batches 4, 22 and 23. Where they
+#        disagree the WBS is correct - a title can mention a PREVIOUS batch
+#        (IR-001601 says "batch 13" in the text but sits on -90-15), and
+#        R-3011-00045-90 with nothing after it is the level, NOT batch 90.
 _BATCH_RE = re.compile(r"\.Q\.(\d{3})(?:\b|$)", re.I)
+_BATCH_TAIL_RE = re.compile(r"[-.](\d{3})$")
+_BATCH_TC_RE = re.compile(r"-90-(\d{1,2})(?:-|$)")   # first number after -90-, sub-levels may follow
+_TC_ID_RE = re.compile(r"(IR-\d{4,8})")
+_NC_CODE_RE = re.compile(r"(NC_\d{10,16}_\d{6,12})")
+
+
+def _clean_tc_id(nc: str) -> str:
+    """IR-001579/A;1-NC_178... -> IR-001579. SAP ids pass through unchanged."""
+    m = _TC_ID_RE.match(str(nc))
+    return m.group(1) if m else str(nc)
+
+
+def _extract_nc_code(obj: str) -> str:
+    """Extract the NC_<epoch>_<number> from a TC object string.
+    Returns the full NC code, or empty string if not present."""
+    m = _NC_CODE_RE.search(str(obj))
+    return m.group(1) if m else ""
+
+
+def _extract_s4_notif(obj: str) -> str:
+    """Extract the S/4HANA notification number (trailing digits of the NC code).
+    IR-001660/A;1-NC_1786015699989_170000019477 -> 170000019477"""
+    m = _NC_CODE_RE.search(str(obj))
+    if m:
+        parts = m.group(1).split("_")
+        return parts[-1] if len(parts) >= 3 else ""
+    return ""
 
 
 def batch_label(wbs) -> str:
-    """Any WBS whose tail is .Q.NNN -> 'Batch N'; .900 = Lager; .901 = Springs."""
-    m = _BATCH_RE.search(str(wbs))
-    if not m:
+    """WBS / PSP element -> Batch N / Lager / Springs / Unassigned.
+
+    Nothing is ever read from free text. If the WBS does not carry a batch the
+    answer is 'Unassigned', not a guess.
+    """
+    s = str(wbs).strip()
+    if not s or s.lower() in ("nan", "none", "-"):
         return "Unassigned"
-    n = int(m.group(1))
-    if n == 900:
-        return "Lager"
-    if n == 901:
-        return "Springs"
-    return f"Batch {n}"
+
+    m = _BATCH_RE.search(s)                      # SAP  W.IC248.Q.NNN
+    if m:
+        n = int(m.group(1))
+        if n == 900:
+            return "Lager"
+        if n == 901:
+            return "Springs"
+        return f"Batch {n}"
+
+    m = _BATCH_TC_RE.search(s)                   # Teamcenter  R-...-90-NN
+    if m:
+        return f"Batch {int(m.group(1))}"
+
+    m = _BATCH_TAIL_RE.search(s)                 # successor WBS ending -NNN
+    if m:
+        n = int(m.group(1))
+        if n == 900:
+            return "Lager"
+        if n == 901:
+            return "Springs"
+        return f"Batch {n}"
+
+    return "Unassigned"
 
 
 def origin_label(cause, notif_type) -> str:
-    """Supplier vs Production. Binary: anything that is not supplier is production.
-
-    Supplier = SAP Z2 (procurement complaint) OR cause 'Supplier' (a Z3 can
-    still be a supplier problem). Production = everything else.
-    """
+    """Supplier vs Production. Binary: anything not supplier is production."""
     if str(notif_type).strip().startswith("Z2"):
         return "Supplier"
     if str(cause).strip().lower() == "supplier":
@@ -76,12 +128,6 @@ def is_customer_complaint(cause) -> bool:
 
 
 def tag_lanes(df: pd.DataFrame) -> pd.DataFrame:
-    """Stamp origin / lane on every row. lane is what the charts filter on:
-
-    Supplier            — Z2 or cause Supplier
-    Customer complaint  — cause Customer complaint (own chart)
-    Production          — everything else
-    """
     out = df.copy()
     out["origin"] = [origin_label(c, t)
                      for c, t in zip(out["cause"], out["notif_type"])]
@@ -100,25 +146,77 @@ def batch_sort_key(label: str):
 
 
 def status_label(raw) -> str:
-    """SAP / tracker raw -> Closed / Open / Deleted. Case-insensitive so
-    tracker OPEN/CLOSED land in the same buckets as the SAP export."""
-    v = str(raw or "").strip()
-    if not v or v.lower() in ("nan", "none"):
-        return "Open"
-    key = v.title()
-    if key in ("Closed", "Open", "Deleted"):
-        return key
+    """SAP raw -> display. Open shows as WIP in the batch/supplier charts;
+    here we keep the three real states and let the UI relabel if wanted."""
+    v = str(raw).strip()
+    if v in ("Closed", "Open", "Deleted"):
+        return v
     return "Open"
 
 
 def class_label(v) -> str:
-    """Major = defect class 4 or 5. Minor = 0-3. '-'/blank = Unclassified."""
+    """Major = defect class 4 or 5, or Teamcenter *-Major severity.
+    Minor = 0-3, or TC *-Minor / *-Observation.
+    '-'/blank = Unclassified."""
     s = str(v).strip()
+    # Excel/pandas turns 2 into '2.0' — strip the trailing .0 so it matches
+    if s.endswith(".0"):
+        s = s[:-2]
     if s in ("4", "5"):
         return "Major"
     if s in ("0", "1", "2", "3"):
         return "Minor"
+    # Teamcenter severity text, in case a file arrives unconverted
+    low = s.lower()
+    import re as _re
+    if _re.match(r"^(low|medium|high)-major$", low):
+        return "Major"
+    if _re.match(r"^(low|medium|high)-(minor|observation)$", low):
+        return "Minor"
     return "Unclassified"
+
+
+# ---------------------------------------------------------------------------
+# Defect-code vocabulary: SAP and Teamcenter word the SAME defect differently.
+# Left untranslated they split into two bars on every defect chart. Only
+# unambiguous pairs are merged here; anything needing a judgement call is left
+# alone so a human decides it, not this file.
+#   Adriele confirmed 2026-08: merge the three below.
+#   NOT merged (needs Quality to rule): Teamcenter 'Surface finish and
+#   appearance defects' vs SAP 'Inaccurate surface properties'.
+# ---------------------------------------------------------------------------
+DEFECT_SYNONYMS = {
+    "material not compliant with specification": "Material not compliant with spec.",
+    "manufacturing / assembly execution errors": "Manufacturing / assembly",
+    "function / performance insufficient or incomplete":
+        "Function/performance insuf. or incompl.",
+}
+
+
+def defect_norm(v) -> str:
+    """Collapse known cross-system wordings of the same defect onto one label."""
+    s = str(v or "").strip()
+    if not s or s.lower() in ("nan", "none"):
+        return s
+    return DEFECT_SYNONYMS.get(re.sub(r"\s+", " ", s).lower(), s)
+
+
+# Cause values arrive with inconsistent capitalization from different systems
+# ("Customer Complaint" vs "Customer complaint"). Merge them to one canonical
+# spelling so a single cause does not split into two rows on every chart.
+CAUSE_CANON = {
+    "customer complaint": "Customer Complaint",
+    "incoming inspection": "Incoming Inspection",
+    "final inspection": "Final Inspection",
+    "not assigned": "Not assigned",
+}
+
+
+def cause_norm(v) -> str:
+    s = str(v or "").strip()
+    if not s or s.lower() in ("nan", "none"):
+        return s
+    return CAUSE_CANON.get(s.lower(), s)
 
 
 def vendor_norm(v) -> str:
@@ -163,6 +261,8 @@ def load(path_or_buffer, project: str = PROJECT) -> pd.DataFrame:
     missing = [c for c in COLS if c not in raw.columns]
     if missing:
         raise ValueError(f"export missing columns: {missing}")
+    # extra columns (e.g. Source from the builder) are kept in raw for
+    # later use but not included in the rename — they pass through intact.
 
     df = raw[list(COLS)].rename(columns=COLS).copy()
     df = df[df["project"].astype(str).str.strip() == project].copy()
@@ -174,6 +274,8 @@ def load(path_or_buffer, project: str = PROJECT) -> pd.DataFrame:
     df["status"] = df["status_raw"].map(status_label)
     df["defect_class_label"] = df["defect_class"].map(class_label)
     df["vendor_clean"] = df["vendor"].map(vendor_norm)
+    df["defect_code"] = df["defect_code"].map(defect_norm)
+    df["cause"] = df["cause"].map(cause_norm)
     df["origin"] = [origin_label(c, t) for c, t in zip(df["cause"], df["notif_type"])]
     df["is_cc"] = df["cause"].map(is_customer_complaint)
 
@@ -186,5 +288,28 @@ def load(path_or_buffer, project: str = PROJECT) -> pd.DataFrame:
 
     df["month"] = df["opened"].dt.strftime("%Y-%m")
     df["notification"] = df["notification"].astype(str).str.replace(r"\.0$", "", regex=True)
+    # Clean TC object strings: IR-001579/A;1-NC_178... -> IR-001579
+    df["notification"] = df["notification"].map(_clean_tc_id)
+
+    # If the builder included a Source column, carry it through as source_file
+    # so the original document names survive instead of being overwritten by
+    # the upload filename.
+    if "Source" in raw.columns:
+        df["source_file"] = raw.loc[df.index, "Source"].values
+
+    # Status Note documents special status handling (e.g. TC return-to-work)
+    if "Status Note" in raw.columns:
+        df["status_note"] = raw.loc[df.index, "Status Note"].values
+
+    # Extract the NC code and S/4HANA notification from TC object strings.
+    # These come from the ORIGINAL Notification column (before cleaning),
+    # which is in the raw frame, not df.
+    raw_notif = raw.loc[df.index, "Notification"].astype(str)
+    nc_codes = raw_notif.map(_extract_nc_code)
+    s4_notifs = raw_notif.map(_extract_s4_notif)
+    if nc_codes.any():
+        df["nc_code"] = nc_codes.values
+    if s4_notifs.any():
+        df["s4_notification"] = s4_notifs.values
 
     return df.reset_index(drop=True)

@@ -439,15 +439,23 @@ def _adapt_source(headers, records):
                 return h
         return None
     pn_col = _find_material(headers) or _pattern_material_col(headers, records)
+    # CHARGE / BATCH column. The label-scanner CLEAN file names the charge
+    # 'Char' (the bare batch number, e.g. 887049) and also carries 'CH-Nr'
+    # (the same charge with a CH- prefix, e.g. CH-887049). Neither was in the
+    # old list, so the scanner's charge was dropped — accept both now, 'Char'
+    # first (bare number, matches how ABCL/mb51 print the batch).
     lot_col = next((c for c in ("Charge / Batch", "Charge/Batch", "Batch",
-                                "Lot Number", "Charge") if c in hs), None)
+                                "Lot Number", "Charge", "Char", "Chargennummer",
+                                "CH-Nr") if c in hs), None)
     # DESCRIPTION column — needed for the vectorisation witness to work. These
     # sources rarely have a column literally called 'Description': mb51/SAP call
-    # it 'Materialkurztext', an ABCL export the built desc is 'Bezeichnung'. Map
-    # whichever exists onto 'Description' so the engine has text to compare.
-    desc_col = next((c for c in ("Description", "Bezeichnung", "Materialkurztext",
-                                 "Materialkurztext (Built)", "Kurztext",
-                                 "AuftragsKurztext") if c in hs), None)
+    # it 'Materialkurztext', an ABCL export the built desc is 'Bezeichnung', and
+    # the label-scanner CLEAN file calls it 'Definition'. Map whichever exists
+    # onto 'Description' so the engine has text to compare.
+    desc_col = next((c for c in ("Description", "Definition", "Bezeichnung",
+                                 "Materialkurztext", "Materialkurztext (Built)",
+                                 "Kurztext", "AuftragsKurztext", "Benennung")
+                     if c in hs), None)
     # AS-BUILT revision (prefer the built side on an ABCL export).
     rev_col = None
     for cand in ("RevStand (Built)", "Revision (Built)", "AB Rev", "RevStand",

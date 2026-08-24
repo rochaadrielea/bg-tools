@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quality — Beyond Gravity</title>
+<script src="three.min.js"></script>
+<script src="fflate.min.js"></script>
+<script src="FBXLoader.js"></script>
+<style>
+  :root{--ink:#eef1f6;--body:#c7ccd8;--muted:#8b93a3;--line:rgba(255,255,255,.12);--panel:rgba(255,255,255,.05);--accent:#eef1f6}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%}
+  body{font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;
+    background:linear-gradient(180deg,rgba(38,41,48,.90),rgba(28,31,37,.95)),url('bg.jpg') center/cover no-repeat fixed,
+      linear-gradient(160deg,#33373f 0%,#24272d 60%,#1c1f25 100%);background-color:#24272d}
+  .topbar{border-bottom:1px solid var(--line)}
+  .topbar .inner{max-width:1080px;margin:0 auto;padding:16px 28px;display:flex;align-items:center;gap:13px}
+  .mark{width:32px;height:32px;border-radius:6px;background:#fff;color:#24272d;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;letter-spacing:.5px}
+  .brand{font-size:14.5px;font-weight:600}.brand span{color:var(--muted);font-weight:400}
+  .wrap{max-width:1080px;margin:0 auto;padding:34px 28px 80px}
+  .head{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:26px;min-height:150px}
+  h1{font-size:23px;font-weight:600;letter-spacing:.2px}
+  .lead{color:var(--body);font-size:14px;margin-top:9px}
+  #astro{width:120px;height:165px;flex:none;margin-top:-10px}
+  #astro canvas{display:block;width:120px !important;height:165px !important}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:20px}
+  .card{display:flex;flex-direction:column;text-decoration:none;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;transition:border-color .15s,transform .15s,box-shadow .15s}
+  .card:hover{border-color:rgba(255,255,255,.28);transform:translateY(-3px);box-shadow:0 16px 36px rgba(0,0,0,.4)}
+  .band{height:8px}.b-dash{background:linear-gradient(90deg,#1E2761,#F26E21)}.b-adab{background:linear-gradient(90deg,#123a66,#2b7fc4)}.b-scan{background:linear-gradient(90deg,#0f5132,#22c55e)}
+  .bodyc{padding:18px 20px 20px;display:flex;flex-direction:column;flex:1}
+  .row{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+  .tag{font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#7fd0a6}
+  .card h2{font-size:16px;font-weight:600}
+  .card p{color:var(--body);font-size:13.5px;line-height:1.55;flex:1;margin:0 0 15px}
+  .go{font-size:13px;font-weight:600;color:var(--accent)}
+  footer{max-width:1080px;margin:0 auto;padding:0 28px 40px;color:var(--muted);font-size:12.5px}
+
+  /* ---- row 2: KPI by Area (group panel) + NC Tracker ---- */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}
+  @media (max-width:760px){.grid2{grid-template-columns:1fr}}
+  .panel{display:flex;flex-direction:column;text-decoration:none;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;position:relative;min-height:250px;transition:border-color .15s,transform .15s,box-shadow .15s}
+  a.panel:hover{border-color:rgba(255,255,255,.28);transform:translateY(-3px);box-shadow:0 16px 36px rgba(0,0,0,.4)}
+  .b-kpi{background:linear-gradient(90deg,#2b7fc4,#7fc9f0)}
+  .b-nct{background:linear-gradient(90deg,#8a3a10,#F26E21)}
+  .panelc{padding:18px 20px 20px;display:flex;flex-direction:column;flex:1}
+  .panel h2{font-size:16px;font-weight:600}
+  .panel p{color:var(--body);font-size:13.5px;line-height:1.55;margin:0 0 15px}
+  .entries{display:flex;flex-direction:column;gap:10px;margin-top:auto}
+  .entry{display:block;text-decoration:none;color:inherit;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:13px 15px;transition:border-color .15s,background .15s}
+  .entry:hover{border-color:rgba(255,255,255,.30);background:rgba(255,255,255,.08)}
+  .entry-name{display:block;font-size:14.5px;font-weight:600;margin-bottom:5px}
+  .entry-desc{display:block;color:var(--body);font-size:12.5px;line-height:1.5;margin-bottom:9px}
+  .entry-go{font-size:12.5px;font-weight:600;color:var(--accent)}
+
+  /* KPI by Area — steady blue with a light beam passing across */
+  .kpi{background:#22456b;border-color:rgba(255,255,255,.14)}
+  .kpi .band,.kpi .panelc{position:relative}
+  .kpi p,.kpi .entry-desc{color:#c9d6e6}
+  .kpi .entry{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.18)}
+  .kpi .entry:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.32)}
+  .sweep{position:absolute;top:0;left:0;width:34%;height:100%;pointer-events:none;
+    background:linear-gradient(90deg,transparent,rgba(140,205,245,.30),transparent);
+    animation:kpisweep 5s linear infinite}
+  @keyframes kpisweep{0%{transform:translateX(-130%) skewX(-18deg)}100%{transform:translateX(260%) skewX(-18deg)}}
+  @media (prefers-reduced-motion:reduce){.sweep{animation:none;opacity:0}}
+</style>
+</head>
+<body>
+  <div class="topbar"><div class="inner"><div class="mark">BG</div><div class="brand">Beyond Gravity &nbsp;<span>· Quality</span></div></div></div>
+  <div class="wrap">
+    <div class="head">
+      <div><h1>Quality Tools</h1><div class="lead">BU Launchers Switzerland — select a tool.</div></div>
+      <div id="astro"></div>
+    </div>
+
+    <div class="grid">
+      <a class="card" href="/dashboard/"><div class="band b-dash"></div><div class="bodyc">
+        <div class="row"><h2>NC Quality Dashboard</h2><span class="tag">Live</span></div>
+        <p>Non-conformity business review: open backlog by system, by project and class, burndown, CAPA and customer complaints.</p>
+        <span class="go">Open →</span></div></a>
+      <a class="card" href="/adab/"><div class="band b-adab"></div><div class="bodyc">
+        <div class="row"><h2>ADAB Compare</h2><span class="tag">Live</span></div>
+        <p>As-Design vs As-Built BOM comparison. Upload the two exports and get a reconciliation report of matched, missing and extra items.</p>
+        <span class="go">Open →</span></div></a>
+      <a class="card" href="/labelscanner/"><div class="band b-scan"></div><div class="bodyc">
+        <div class="row"><h2>Label Scanner (WAE)</h2><span class="tag">Live</span></div>
+        <p>Read a part label and cross-check it against the Auftragsstückliste — pass/fail on identifier, quantity and revision.</p>
+        <span class="go">Open →</span></div></a>
+    </div>
+
+    <div class="grid2">
+
+      <a class="panel" href="/nctracker/"><div class="band b-nct"></div><div class="panelc">
+        <div class="row"><h2>NC Tracker</h2><span class="tag">Live</span></div>
+        <p>Non-conformity tracker — follow each NC from raising to closure.</p>
+        <span class="go" style="margin-top:auto">Open →</span>
+      </div></a>
+
+      <!-- KPI by Area — group panel. Add another programme by copying one .entry block. -->
+      <section class="panel kpi"><div class="sweep"></div><div class="band b-kpi"></div><div class="panelc">
+        <div class="row"><h2>KPI by Area</h2><span class="tag">Live</span></div>
+        <p>Quality KPI dashboards per programme area.</p>
+        <div class="entries">
+          <a class="entry" href="/sas/">
+            <span class="entry-name">SAS</span>
+            <span class="entry-desc">Non-conformity KPIs for the SAS programme — status, batches, suppliers, springs, open backlog, defects and cost.</span>
+            <span class="entry-go">Open →</span>
+          </a>
+          <a class="entry" href="/matching-integration/">
+            <span class="entry-name">Matching &amp; Integration</span>
+            <span class="entry-desc">Non-conformity KPIs for Integration and Matching — status, root cause and detection Paretos, cost of poor quality, heat maps and trends.</span>
+            <span class="entry-go">Open →</span>
+          </a>
+        </div>
+      </div></section>
+
+    </div>
+  </div>
+  <footer>Beyond Gravity · Quality · quality.ruaggroup.com</footer>
+
+  <script>
+  (function(){
+    if(!window.THREE||!THREE.FBXLoader){return;}
+
+    /* ==================================================================
+       ASTRONAUT — everything you might want to change is in this block.
+       Edit a number, save, refresh the page.
+       ================================================================== */
+
+    // TROUSERS. These are RADII (half the width). The leg is a smooth tube
+    // built between the real hip, knee and ankle bones, measured every frame.
+    //   12 = thick / baggy     9 = normal     16 = very wide leg
+    var THIGH_TOP=13;    // at the hip
+    var THIGH_BOT=12;    // at the knee
+    var SHIN_TOP =12;    // at the knee
+    var SHIN_BOT =13;    // at the ankle — bigger than SHIN_TOP flares the hem
+
+    // BACKPACK. It sits behind the torso, so it only shows from the front if
+    // it is WIDER than the chest. The chest is 24 wide, so anything under 24
+    // disappears completely. Was 20 — that is why it was invisible.
+    var PACK_W  =34;     // width  — must beat 24 to be seen from the front
+    var PACK_H  =36;     // height
+    var PACK_D  =14;     // depth (front to back)
+    var PACK_BACK=-13;   // how far behind the spine. More negative = further back
+
+    // ANTENNA. The helmet is a sphere of radius HELMET_R centred at head+9,
+    // so its TOP is at head+9+HELMET_R. Anything below that is inside the dome
+    // and invisible — the old value of 20 was buried in there.
+    var HELMET_R  =15;
+    var ANT_LEN   =11;   // length of the rod
+    var ANT_THICK =1.2;  // was 0.5 — under one pixel at this canvas size
+    var ANT_SIDE  =7;    // how far to the side of centre
+    var TIP_R     =2.6;  // the orange ball
+    /* ================================================================== */
+
+    var host=document.getElementById('astro'); var W=host.clientWidth||230, H=host.clientHeight||300;
+    var scene=new THREE.Scene();
+    var cam=new THREE.PerspectiveCamera(42, W/H, 1, 3000);
+    var r=new THREE.WebGLRenderer({antialias:true,alpha:true});
+    r.setSize(W,H); r.setPixelRatio(Math.min(3, Math.max(2.5, window.devicePixelRatio||1)));  // supersample for crisp edges
+    host.appendChild(r.domElement);
+    scene.add(new THREE.AmbientLight(0xffffff,0.85));
+    var key=new THREE.DirectionalLight(0xffffff,1.0); key.position.set(3,6,5); scene.add(key);
+    var rim=new THREE.DirectionalLight(0x88aaff,0.5); rim.position.set(-4,3,-4); scene.add(rim);
+
+    var suit=new THREE.MeshStandardMaterial({color:0xf3f5fa,roughness:0.55,metalness:0.05});
+    var grey=new THREE.MeshStandardMaterial({color:0xb4bcc9,roughness:0.6});
+    var shellMat=new THREE.MeshStandardMaterial({color:0xf3f5fa,roughness:0.4,metalness:0.05});
+    var visorMat=new THREE.MeshStandardMaterial({color:0x121722,roughness:0.12,metalness:0.45});
+    var orange=new THREE.MeshStandardMaterial({color:0xF26E21});
+
+    var mixer,model,hips,head,spine,helmet,pack,ant,tip; var clk=new THREE.Clock(); var V=new THREE.Vector3(); var Q=new THREE.Quaternion();
+    var loader=new THREE.FBXLoader();
+    var bones={}; var parts=[];   // spacesuit accessories that follow bones
+    var limbs=[];                 // tubes stretched BETWEEN two bones (the trousers)
+    function addPart(bone,mesh,ox,oy,oz,keepRot){ scene.add(mesh); parts.push({b:bone,m:mesh,o:new THREE.Vector3(ox,oy,oz),rot:keepRot!==false}); return mesh; }
+    // A tube from boneA to boneB. Height 1 so it can be scaled to the real
+    // bone length each frame — no hard-coded offsets, nothing to mis-guess.
+    function limb(boneA,boneB,rTop,rBot,mat){
+      if(!boneA||!boneB)return null;
+      var m=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,1,22,1,false),mat||suit);
+      scene.add(m); limbs.push({a:boneA,b:boneB,m:m}); return m;
+    }
+    var darkMat=new THREE.MeshStandardMaterial({color:0x2a3244,roughness:0.5,metalness:0.2});
+    var packMat=new THREE.MeshStandardMaterial({color:0xe4e8f0,roughness:0.55});
+
+    /* ---- the show ----
+       Steps 0-3 play once as an intro, then steps 4-6 cycle forever:
+         hello, dance, standing, thanking,  then  hello, texting, standing, ...
+       Change LOOP_FROM to move where the repeat starts. */
+    var CLIPS={dance:'dance.fbx', idle:'Idle.fbx', thank:'Thankful.fbx',
+               text:'Texting_While_Standing.fbx'};
+    var SEQ=['hello','dance','idle','thank',   'hello','text','idle'];
+    var LOOP_FROM=4;
+    var ACT={};                       // clip name -> AnimationAction
+    var step=0, current=null, waiting=false;
+
+    function playStep(i){
+      var act=ACT[SEQ[i]]; if(!act) return;
+      act.reset();
+      act.setLoop(THREE.LoopOnce);
+      act.clampWhenFinished=true;   // hold the end pose so the crossfade blends from it
+      act.enabled=true; act.setEffectiveWeight(1); act.play();
+      if(current&&current!==act) current.crossFadeTo(act,0.5,false);
+      current=act; step=i; waiting=false;
+    }
+    function nextIndex(){ var n=step+1; return n>=SEQ.length?LOOP_FROM:n; }
+    function advance(){
+      var n=nextIndex();
+      if(!ACT[SEQ[n]]){                        // that clip has not downloaded yet
+        waiting=true; current.reset(); current.play(); return;  // hold, do not freeze
+      }
+      playStep(n);
+    }
+
+    loader.load('greeting.fbx',function(g){
+      model=g;
+      g.traverse(function(o){
+        if(o.isMesh){ o.material = /Joint/i.test((o.material&&o.material.name)||'') ? grey : suit; }
+        if(o.isBone){ bones[o.name]=o;
+          if(o.name==='mixamorigHips')hips=o; if(o.name==='mixamorigHead')head=o; if(o.name==='mixamorigSpine2')spine=o; }
+      });
+      // helmet + visor + antenna + backpack
+      helmet=new THREE.Mesh(new THREE.SphereGeometry(HELMET_R,32,32),visorMat); scene.add(helmet);   // dark visor dome
+      var hrim=new THREE.Mesh(new THREE.TorusGeometry(HELMET_R-0.6,1.9,16,40),shellMat); helmet.add(hrim);  // white helmet trim
+      var glint=new THREE.Mesh(new THREE.SphereGeometry(2.6,14,14),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.5})); glint.position.set(-5.5,5.5,10.5); helmet.add(glint);
+      // bigger pack: a main box plus two side tanks so the silhouette reads
+      pack=new THREE.Mesh(new THREE.BoxGeometry(PACK_W,PACK_H,PACK_D),packMat); scene.add(pack);
+      var tankL=new THREE.Mesh(new THREE.CylinderGeometry(PACK_W*0.16,PACK_W*0.16,PACK_H*0.82,16),grey);
+      tankL.position.set(-PACK_W*0.30,0,PACK_D*0.55); pack.add(tankL);
+      var tankR=tankL.clone(); tankR.position.x=PACK_W*0.30; pack.add(tankR);
+      var pstripe=new THREE.Mesh(new THREE.BoxGeometry(PACK_W*0.9,3.2,1.2),orange);
+      pstripe.position.set(0,PACK_H*0.30,-PACK_D*0.52); pack.add(pstripe);
+      // antenna, mounted ABOVE the helmet dome
+      ant=new THREE.Mesh(new THREE.CylinderGeometry(ANT_THICK,ANT_THICK,ANT_LEN,10),grey); scene.add(ant);
+      tip=new THREE.Mesh(new THREE.SphereGeometry(TIP_R,14,14),orange); scene.add(tip);
+      scene.add(g);
+
+      // ---- spacesuit clothing ----
+      // chest control panel with little buttons
+      var chest=new THREE.Mesh(new THREE.BoxGeometry(15,11,3),darkMat);
+      var bcols=[0xF26E21,0x37c871,0x4aa3e0];
+      for(var i=0;i<3;i++){ var btn=new THREE.Mesh(new THREE.BoxGeometry(2.4,2.4,1),new THREE.MeshStandardMaterial({color:bcols[i],emissive:bcols[i],emissiveIntensity:0.4})); btn.position.set(-4+i*4,2.5,1.8); chest.add(btn); }
+      var slot=new THREE.Mesh(new THREE.BoxGeometry(10,2,1),new THREE.MeshStandardMaterial({color:0x8aa0c0})); slot.position.set(0,-2.5,1.7); chest.add(slot);
+      if(bones.mixamorigSpine2) addPart(bones.mixamorigSpine2,chest,0,3,12);
+      // neck collar
+      if(bones.mixamorigNeck) addPart(bones.mixamorigNeck,new THREE.Mesh(new THREE.TorusGeometry(7.5,2.2,10,24),suit),0,2,0,false);
+      // astronaut belt with buckle (at the waist, above the puffy pants)
+      if(bones.mixamorigHips){
+        var belt=new THREE.Mesh(new THREE.TorusGeometry(13,3.1,14,32),orange);
+        var buckle=new THREE.Mesh(new THREE.BoxGeometry(6.5,5,3),new THREE.MeshStandardMaterial({color:0xdfe4ee,roughness:0.5,metalness:0.3})); buckle.position.set(0,0,13.5); belt.add(buckle);
+        var bk=new THREE.Mesh(new THREE.BoxGeometry(3,3,1),new THREE.MeshStandardMaterial({color:0xF26E21})); bk.position.set(0,0,1.9); buckle.add(bk);
+        addPart(bones.mixamorigHips,belt,0,7,0);
+      }
+      // glove cuffs
+      ['mixamorigLeftHand','mixamorigRightHand'].forEach(function(n){ if(bones[n]) addPart(bones[n],new THREE.Mesh(new THREE.TorusGeometry(4,1.7,8,18),orange),0,3,0); });
+      // boots (white with a dark sole)
+      ['mixamorigLeftFoot','mixamorigRightFoot'].forEach(function(n){ if(!bones[n])return;
+        addPart(bones[n],new THREE.Mesh(new THREE.BoxGeometry(9.5,8,15),new THREE.MeshStandardMaterial({color:0xf3f5fa,roughness:0.55})),0,-3.5,3);
+        addPart(bones[n],new THREE.Mesh(new THREE.BoxGeometry(10,2.4,15.5),darkMat),0,-8,3); });
+      // ---- puffy spacesuit bulk: rounded pads over the body so it isn't bare ----
+      function puff(bone,rx,ry,rz,ox,oy,oz){ if(!bone)return; var m=new THREE.Mesh(new THREE.SphereGeometry(1,18,16),suit); m.scale.set(rx,ry,rz); addPart(bone,m,ox||0,oy||0,oz||0,false); }
+      puff(bones.mixamorigSpine1, 12,13,10, 0,1,1);    // chest
+      puff(bones.mixamorigSpine,  11,10,9.5, 0,-1,1);  // belly
+      puff(bones.mixamorigHips,   15,12,13.5, 0,-1,0);  // puffy pants top (wide hips)
+      puff(bones.mixamorigHips,   13,9,12.5, 0,-9,1);   // white shorts across the pelvis (covers the crotch)
+      puff(bones.mixamorigLeftArm, 6.2,6.2,6.2); puff(bones.mixamorigRightArm, 6.2,6.2,6.2);          // shoulders
+      puff(bones.mixamorigLeftForeArm, 5,5,5);   puff(bones.mixamorigRightForeArm, 5,5,5);            // elbows
+
+      // ---- THE TROUSERS ----
+      // One smooth tube hip->knee and another knee->ankle, per leg, stretched
+      // between the actual bones every frame. No gap at the knee, no lumps.
+      ['Left','Right'].forEach(function(s){
+        limb(bones['mixamorig'+s+'UpLeg'], bones['mixamorig'+s+'Leg'],  THIGH_TOP, THIGH_BOT);
+        limb(bones['mixamorig'+s+'Leg'],   bones['mixamorig'+s+'Foot'], SHIN_TOP,  SHIN_BOT);
+        puff(bones['mixamorig'+s+'Leg'], THIGH_BOT, THIGH_BOT, THIGH_BOT, 0,0,0);   // knee cap
+      });
+
+      var box=new THREE.Box3().setFromObject(g), c=box.getCenter(new THREE.Vector3()), s=box.getSize(new THREE.Vector3());
+      cam.position.set(0, c.y+6, s.y*1.78); cam.lookAt(0, c.y-8, 0);  // pulled back for headroom (no clipping on jumps/arms-up)
+
+      mixer=new THREE.AnimationMixer(g);
+      // greeting.fbx carries the model AND the hello clip
+      ACT.hello=mixer.clipAction(g.animations[0]);
+      // the guard ignores an old action finishing after we crossfaded away from it
+      mixer.addEventListener('finished',function(e){
+        if(e.action!==current) return;
+        advance();
+      });
+      playStep(0);
+
+      // the other four files supply CLIPS ONLY — never added to the scene,
+      // so there is no second body. Same trick the old dance.fbx used.
+      Object.keys(CLIPS).forEach(function(name){
+        loader.load(CLIPS[name],function(o){
+          if(!o.animations||!o.animations.length){
+            console.warn('astronaut: no animation inside '+CLIPS[name]); return; }
+          ACT[name]=mixer.clipAction(o.animations[0]);
+          if(waiting && ACT[SEQ[nextIndex()]]) playStep(nextIndex());   // it arrived, carry on
+        },undefined,function(){
+          console.warn('astronaut: could not load '+CLIPS[name]+
+                       ' — check the file is in qualityDNS/ and the capitals match');
+        });
+      });
+
+      animate();
+    });
+
+    var A=new THREE.Vector3(), B=new THREE.Vector3(), D=new THREE.Vector3();
+    var UP=new THREE.Vector3(0,1,0);
+    var HELMET_TOP=9+HELMET_R;      // helmet centre is head+9, so its top is this
+    function follow(){
+      if(hips){ hips.getWorldPosition(V); model.position.x-=V.x; model.position.z-=V.z; } // pin in place
+      if(head){ head.getWorldPosition(V); helmet.position.set(V.x,V.y+9,V.z+1);
+        // antenna starts ABOVE the dome, so it is not swallowed by the helmet
+        ant.position.set(V.x+ANT_SIDE, V.y+HELMET_TOP+ANT_LEN/2, V.z);
+        tip.position.set(V.x+ANT_SIDE, V.y+HELMET_TOP+ANT_LEN+TIP_R*0.7, V.z); }
+      if(spine){ spine.getWorldPosition(V); spine.getWorldQuaternion(Q);
+        var off=new THREE.Vector3(0,4,PACK_BACK).applyQuaternion(Q); pack.position.set(V.x+off.x,V.y+off.y,V.z+off.z); pack.quaternion.copy(Q); }
+      for(var i=0;i<parts.length;i++){ var pt=parts[i]; pt.b.getWorldPosition(V); pt.b.getWorldQuaternion(Q);
+        var o=pt.o.clone().applyQuaternion(Q); pt.m.position.set(V.x+o.x,V.y+o.y,V.z+o.z); if(pt.rot)pt.m.quaternion.copy(Q); }
+      // trouser tubes: sit at the midpoint, point at the child bone, stretch to
+      // the measured distance. Works for any pose, any clip.
+      for(var j=0;j<limbs.length;j++){ var L=limbs[j];
+        L.a.getWorldPosition(A); L.b.getWorldPosition(B);
+        D.subVectors(B,A); var len=D.length(); if(len<0.0001) continue;
+        L.m.position.copy(A).addScaledVector(D,0.5);
+        L.m.quaternion.setFromUnitVectors(UP, D.divideScalar(len));
+        L.m.scale.set(1,len,1);
+      }
+    }
+    function animate(){ requestAnimationFrame(animate); if(mixer)mixer.update(clk.getDelta()); follow(); r.render(scene,cam); }
+  })();
+  </script>
+</body>
+</html> 

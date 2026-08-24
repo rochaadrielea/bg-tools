@@ -6,24 +6,28 @@ a dict of every block's data. The API applies global + section filters, then
 calls this. Each block also declares the exact filter (column + value) a click
 produces, so Rule 1 (click -> raw view) is driven from here, not the frontend.
 
-Raw view columns (Rule 1), same 14 everywhere:
+Raw view columns (Rule 1), the same set everywhere, including the document each
+row came from (source_file, stamped by ingest_sas at load time).
 """
 from __future__ import annotations
 import pandas as pd
 import parse
 
 RAW_COLS = [
-    "notification", "notif_type", "origin", "status", "opened", "closed",
-    "leadtime", "batch", "material", "defect_class_label", "defect_code",
-    "cause", "disposition", "vendor_clean", "copq",
+    "notification", "notif_text", "notif_type", "origin", "status", "opened",
+    "closed", "leadtime", "batch", "material", "defect_class_label",
+    "defect_code", "cause", "disposition", "vendor_clean", "copq",
+    "source_file", "status_note",
 ]
 RAW_LABELS = {
-    "notification": "NC", "notif_type": "Type", "origin": "Origin",
-    "status": "Status", "opened": "Opened", "closed": "Closed",
-    "leadtime": "Leadtime", "batch": "Batch", "material": "Material",
-    "defect_class_label": "Class", "defect_code": "Defect code",
-    "cause": "Cause", "disposition": "Disposition",
-    "vendor_clean": "Vendor", "copq": "CoPQ",
+    "notification": "NC", "notif_text": "Title", "notif_type": "Type",
+    "origin": "Origin", "status": "Status", "opened": "Opened",
+    "closed": "Closed", "leadtime": "Leadtime", "batch": "Batch",
+    "material": "Material", "defect_class_label": "Class",
+    "defect_code": "Defect code", "cause": "Cause",
+    "disposition": "Disposition", "vendor_clean": "Vendor", "copq": "CoPQ",
+    "source_file": "Source",
+    "status_note": "Status Note",
 }
 
 MONTHS_ORDER = None  # chronological from data
@@ -33,8 +37,18 @@ def _months(df):
     return sorted(m for m in df["month"].dropna().unique())
 
 
+def _clean_cat(s):
+    """Turn nan / None / '-' text into a single readable '(not recorded)' label
+    so a missing value never shows up as the literal string 'nan' on a chart."""
+    out = s.astype("string")
+    out = out.str.strip()
+    out = out.mask(out.isna() | out.str.lower().isin(
+        ["nan", "none", "", "-", "null"]), "(not recorded)")
+    return out
+
+
 def _count_by(df, col, order=None):
-    vc = df[col].fillna("(blank)").value_counts()
+    vc = _clean_cat(df[col]).value_counts()
     if order:
         idx = [x for x in order if x in vc.index] + \
               [x for x in vc.index if x not in order]
@@ -43,7 +57,7 @@ def _count_by(df, col, order=None):
 
 
 def _stack_by(df, row_col, stack_col, row_order=None, stack_order=None):
-    ct = pd.crosstab(df[row_col].fillna("(blank)"), df[stack_col].fillna("(blank)"))
+    ct = pd.crosstab(_clean_cat(df[row_col]), _clean_cat(df[stack_col]))
     if row_order:
         ct = ct.reindex([r for r in row_order if r in ct.index])
     rows = list(ct.index)
@@ -98,9 +112,9 @@ def build_payload(df: pd.DataFrame) -> dict:
         **_count_by(supp, "status", order=["Closed", "Open", "Deleted"]),
         "click": "status", "scope": {"lane": "Supplier"},
     }
-    partc = _count_by(prod, "material")
+    # "NCs per part" — every NC has a part, not just production
+    partc = _count_by(df, "material")
     p["by_part"] = {**partc, "click": "material",
-                    "scope": {"lane": "Production"},
                     "labels": partc["labels"][:20], "values": partc["values"][:20]}
 
     # ---- 3 Batches ----
@@ -111,17 +125,45 @@ def build_payload(df: pd.DataFrame) -> dict:
     }
     p["batch_cc"] = {**_count_by(cc, "batch", order=batch_order), "click": "batch",
                      "scope": {"lane": "Customer complaint"}}
+    # Defect class applies to EVERY NC. The chart has an All/Supplier/Production
+    # chip: All keeps Unclassified; Supplier/Production show Minor+Major only.
+    # ORIGIN is the two-value field (Production incl. customer complaints, vs Supplier).
     p["batch_class"] = {
-        **_stack_by(prod, "batch", "defect_class_label", row_order=batch_order,
+        **_stack_by(df, "batch", "defect_class_label", row_order=batch_order,
                     stack_order=["Minor", "Major", "Unclassified"]),
-        "click": "batch", "scope": {"lane": "Production"},
+        "click": "batch",
     }
-    copq_batch = prod.groupby("batch")["copq"].sum().reindex(batch_order).fillna(0)
+    # For the Supplier/Production multi-select on this chart, give the client the
+    # class breakdown per lane so it can include whichever lanes are toggled on.
+    # Both on (default) = the full batch_class above (all 180, incl. Unclassified).
+    df_supp = df[df["origin"] == "Supplier"]
+    df_prod = df[df["origin"] == "Production"]
+    def _class_by_batch(d):
+        # Align counts to the FULL batch_order (pad missing batches with 0), so the
+        # client can index series[i] against rows[i] without misalignment. Without
+        # this, _stack_by drops empty batches and the series is shorter than rows,
+        # which makes Lager's value land on the wrong bar (e.g. Batch 5).
+        st = _stack_by(d, "batch", "defect_class_label", row_order=batch_order,
+                       stack_order=["Minor", "Major", "Unclassified"])
+        idx = {b: i for i, b in enumerate(st["rows"])}
+        series = {}
+        for cls in ["Minor", "Major", "Unclassified"]:
+            src = st["series"].get(cls, [])
+            series[cls] = [src[idx[b]] if b in idx else 0 for b in batch_order]
+        return series
+    p["batch_class_lanes"] = {
+        "rows": batch_order,
+        "supplier": _class_by_batch(df_supp),
+        "production": _class_by_batch(df_prod),
+        "click": "batch",
+    }
+    # CoPQ per batch — cost applies to every NC, supplier or production
+    copq_batch = df.groupby("batch")["copq"].sum().reindex(batch_order).fillna(0)
     p["batch_copq"] = {"labels": list(copq_batch.index),
                        "values": [round(float(v), 0) for v in copq_batch.values],
-                       "click": "batch", "scope": {"lane": "Production"}}
-    p["batch_defect_heat"] = _heatmap(prod, "batch", "defect_code", batch_order)
-    p["batch_defect_heat"]["scope"] = {"lane": "Production"}
+                       "click": "batch"}
+    # Batch x defect code — every NC has a defect code, not just production
+    p["batch_defect_heat"] = _heatmap(df, "batch", "defect_code", batch_order)
 
     # ---- 4 Suppliers (Z2) ----
     p["z2_month_status"] = {
@@ -145,16 +187,20 @@ def build_payload(df: pd.DataFrame) -> dict:
     }
 
     # ---- 5 Springs ----
-    spr = prod[prod["batch"] == "Springs"]
+    # Springs NCs by status — all NCs on the Springs batch, any lane
+    spr = df[df["batch"] == "Springs"]
     p["springs"] = {
         **_count_by(spr, "status", order=["Closed", "Open", "Deleted"]),
         "click": "status",
-        "scope": {"lane": "Production", "batch": "Springs"},
+        "scope": {"batch": "Springs"},
     }
 
-    # ---- 6 Open backlog ----
-    p["backlog_age"] = _age_buckets(openn)
-    oldest = openn.sort_values("opened").head(10)
+    # ---- 6 Open backlog — OPEN production NCs only ----
+    # Open NCs by age — every open NC, any lane
+    openall = df[df["status"] == "Open"]
+    p["backlog_age"] = {**_age_buckets(openall),
+                        "scope": {"status": "Open"}}
+    oldest = openall.sort_values("opened").head(10)
     p["backlog_oldest"] = _raw_rows(oldest)
 
     # ---- 7 Defects & Cost ----
@@ -174,16 +220,41 @@ def build_payload(df: pd.DataFrame) -> dict:
                        "click": "month"}
     p["cause_month_heat"] = _heatmap(df, "cause", "month", None, col_order=months)
 
-    # ---- 8 Data quality ----
-    p["dq"] = {
-        "defect_class_blank": int((df["defect_class_label"] == "Unclassified").sum()),
-        "disposition_missing": int(df["disposition"].isin(
-            ["Not assigned", "", None]).sum() + df["disposition"].isna().sum()),
-        "copq_unbooked": int((~df["copq_booked"].astype(bool)).sum()),
-        "model_missing": int(df["model"].isna().sum() +
-                             df["model"].astype(str).str.strip().isin(["", "nan"]).sum()),
-        "total": int(len(df)),
-    }
+    # ---- 8 Data quality — overall and per source system ----
+    def _blank(s):
+        return s.isna() | s.astype(str).str.strip().isin(
+            ["", "nan", "None", "-", "Not assigned"])
+
+    src = ["Teamcenter" if str(n).startswith("IR-") else "SAP"
+           for n in df["notification"]]
+    df = df.assign(source_system=src)
+
+    def _gaps(d):
+        return {
+            "rows": int(len(d)),
+            "defect_class_blank": int((d["defect_class_label"] == "Unclassified").sum()),
+            "disposition_missing": int(_blank(d["disposition"]).sum()),
+            "copq_unbooked": int((~d["copq_booked"].astype(bool)).sum()),
+            "vendor_missing": int((d["vendor_clean"] == "Not recorded").sum()),
+            "batch_missing": int((d["batch"] == "Unassigned").sum()),
+            "model_missing": int(_blank(d["model"]).sum()),
+            "closed_no_date": int(((d["status"] == "Closed") &
+                                   d["closed"].isna()).sum()),
+        }
+
+    p["dq"] = {**_gaps(df), "total": int(len(df))}
+    p["dq_by_source"] = {s: _gaps(g) for s, g in df.groupby("source_system")}
+
+    # ---- 8b Data quality per DOCUMENT (which file each row came from) ----
+    # Separate from dq_by_source: that one is the SYSTEM (SAP / Teamcenter),
+    # this one is the uploaded file. Only built when the column carries values,
+    # so rows loaded before source_file existed do not create a blank group.
+    if "source_file" in df.columns and df["source_file"].notna().any():
+        byfile = df.assign(
+            source_file=df["source_file"].fillna("(not recorded)").astype(str))
+        p["dq_by_file"] = {f: _gaps(g) for f, g in byfile.groupby("source_file")}
+    else:
+        p["dq_by_file"] = {}
 
     p["months"] = months
     return p
@@ -202,7 +273,7 @@ def _heatmap(df, row_col, col_col, row_order, col_order=None):
 
 
 def _pareto(df, col):
-    vc = df[col].fillna("(blank)").value_counts()
+    vc = _clean_cat(df[col]).value_counts()
     total = int(vc.sum())
     cum, running = [], 0
     for v in vc.values:

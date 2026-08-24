@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matching &amp; Integration · NC Dashboard</title>
+<script src="plotly.min.js"></script>
+<style>
+:root{
+  --bg:#081521; --card:#0F2536; --card2:#123049; --line:#1c3b57;
+  --ink:#e8f1fa; --muted:#8ba7c2; --accent:#1E9BE0; --bright:#4FC3F7;
+  --green:#3fb56b; --amber:#e0a63e; --red:#e5533e; --grey:#5b7590;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  overflow-x:hidden;max-width:100%}
+body>svg{position:absolute!important;visibility:hidden}
+a{color:var(--bright);text-decoration:none}
+
+header{border-bottom:1px solid var(--line);position:sticky;top:0;
+  background:var(--bg);z-index:200}
+header .hin{max-width:1500px;margin:0 auto;padding:16px 22px;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+header h1{font-size:19px;margin:0;font-weight:700}
+header h1 .m{color:var(--bright)}
+header .sub{color:var(--muted);font-size:12.5px;font-family:ui-monospace,monospace}
+header .sp{flex:1}
+.btn{background:var(--card2);color:var(--ink);border:1px solid var(--line);
+  border-radius:7px;padding:7px 14px;font-size:13px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);
+  color:#04121e;font-weight:600}
+.btn.small{padding:4px 10px;font-size:12px}
+.btn:focus-visible,.fbtn:focus-visible,.opt:focus-visible{
+  outline:2px solid var(--bright);outline-offset:2px}
+
+.wrap{padding:18px 22px;max-width:1500px;margin:0 auto;overflow-x:clip}
+
+/* ---------- filter bar ---------- */
+.filters{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;margin-bottom:16px}
+.frow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.frow .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.5px;margin-right:4px}
+.frow .sp{flex:1}
+.fcount{font-size:12.5px;color:var(--muted);font-family:ui-monospace,monospace}
+.fcount b{color:var(--bright)}
+
+.fwrap{position:relative}
+.fbtn{display:flex;align-items:center;gap:7px;background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:6px 11px;
+  font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap}
+.fbtn:hover{border-color:var(--accent)}
+.fbtn.active{border-color:var(--accent);background:var(--card2)}
+.fbtn .n{background:var(--accent);color:#04121e;font-weight:700;font-size:11px;
+  border-radius:9px;padding:1px 7px;min-width:18px;text-align:center}
+.fbtn .n.off{background:transparent;color:var(--muted);font-weight:400}
+.fbtn .car{color:var(--muted);font-size:10px}
+
+.panel{position:absolute;top:calc(100% + 6px);left:0;z-index:150;width:290px;
+  background:var(--card);border:1px solid var(--accent);border-radius:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.5);padding:10px;display:none}
+.panel.open{display:block}
+.panel input.search{width:100%;background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:13px}
+.panel input.search::placeholder{color:var(--muted)}
+.panel .acts{display:flex;gap:8px;margin:8px 0 6px;font-size:11.5px;align-items:center}
+.panel .acts a{color:var(--bright);cursor:pointer;text-decoration:none}
+.panel .acts a:hover{text-decoration:underline}
+.panel .acts .sp{flex:1}
+.panel .acts span{color:var(--muted)}
+.list{max-height:270px;overflow:auto;scrollbar-width:thin;
+  border-top:1px solid var(--line);padding-top:4px}
+.opt{display:flex;align-items:center;gap:9px;padding:5px 6px;border-radius:6px;
+  cursor:pointer;font-size:13px;line-height:1.25}
+.opt:hover{background:var(--card2)}
+.opt .box{width:14px;height:14px;flex:0 0 14px;border:1px solid var(--line);
+  border-radius:4px;background:var(--bg);position:relative}
+.opt.on .box{background:var(--accent);border-color:var(--accent)}
+.opt.on .box:after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;
+  border:solid #04121e;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.opt .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opt .c{color:var(--muted);font-size:11.5px;font-family:ui-monospace,monospace}
+.opt.hide{display:none}
+.none{padding:14px 6px;color:var(--muted);font-size:12.5px;text-align:center}
+
+.years{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+.years input{width:80px;background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:13px}
+
+.active{display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+  margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.active.empty{display:none}
+.active .k{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.5px;margin-right:2px}
+.achip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);
+  border:1px solid var(--accent);border-radius:12px;padding:3px 6px 3px 10px;
+  font-size:12px;color:var(--ink)}
+.achip .g{color:var(--muted)}
+.achip .x{cursor:pointer;color:var(--muted);font-size:14px;line-height:1;
+  padding:0 3px;border-radius:6px}
+.achip .x:hover{color:var(--red);background:var(--bg)}
+.clearall{margin-left:auto;color:var(--bright);font-size:12px;cursor:pointer}
+.clearall:hover{text-decoration:underline}
+@media (prefers-reduced-motion:no-preference){.panel.open{animation:pop .12s ease-out}}
+@keyframes pop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+/* KPI strip */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));
+  gap:12px;margin-bottom:18px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:14px 16px}
+.kpi .v{font-size:24px;font-weight:700}
+.kpi .l{color:var(--muted);font-size:11px;margin-top:5px;
+  text-transform:uppercase;letter-spacing:.5px}
+.kpi.warn .v{color:var(--amber)} .kpi.bad .v{color:var(--red)}
+
+/* sections + cards */
+.sec{margin-bottom:22px}
+.sec-head{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.sec-head .idx{font-size:12px;color:var(--accent);font-weight:700;
+  border:1px solid var(--accent);border-radius:6px;padding:1px 7px}
+.sec-head h2{font-size:16px;margin:0}
+.grid{display:grid;gap:16px;margin-bottom:16px}
+.grid.one{grid-template-columns:1fr}
+.grid.two{grid-template-columns:1fr}
+.grid>*{min-width:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:16px;min-width:0;overflow:hidden}
+.card.selected{border-color:var(--accent)}
+.card .chead{display:flex;align-items:flex-start;gap:10px}
+.card .chead .tt{flex:1;min-width:0}
+.card h3{font-size:15px;margin:0 0 3px}
+.card .hint{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+.plot{width:100%;min-width:0}
+.plot .modebar{background:transparent!important}
+.plot .modebar-btn{opacity:.35}
+.card:hover .plot .modebar-btn{opacity:.9}
+.cam{background:none;border:1px solid var(--line);border-radius:6px;
+  color:var(--muted);cursor:pointer;font-size:12px;padding:3px 8px;white-space:nowrap}
+.cam:hover{border-color:var(--accent);color:var(--ink)}
+
+/* breadcrumb */
+.crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  font-size:12px;margin:0 0 8px}
+.crumb.hide{display:none}
+.crumb a{cursor:pointer;color:var(--bright)}
+.crumb a:hover{text-decoration:underline}
+.crumb .cur{color:var(--ink);background:var(--card2);border:1px solid var(--accent);
+  border-radius:10px;padding:1px 9px}
+.crumb .sep{color:var(--muted)}
+
+/* tables */
+.tbl{max-height:360px;overflow:auto;scrollbar-width:thin}
+.tbl table{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{position:sticky;top:0;background:var(--card2);color:var(--muted);
+  text-align:left;padding:6px 8px;white-space:nowrap}
+.tbl td{padding:5px 8px;border-top:1px solid var(--line);white-space:nowrap}
+.tbl td.num{text-align:right;font-family:ui-monospace,monospace}
+
+/* raw table under a chart */
+.raw{display:none;margin-top:12px;border-top:1px solid var(--line);
+  padding-top:10px;min-width:0}
+.raw.open{display:block}
+.raw .bar{display:flex;align-items:center;gap:10px;font-size:12.5px;
+  color:var(--muted);margin-bottom:8px;flex-wrap:wrap}
+.raw .bar b{color:var(--bright)}
+.raw .bar .sp{flex:1}
+/* a ten-row window, exactly as wide as the chart above it.
+   Wider content scrolls INSIDE this box; it never widens the card. */
+.raw-scroll{height:296px;width:100%;max-width:100%;overflow:auto;
+  scrollbar-width:thin;border:1px solid var(--line);border-radius:8px;
+  resize:vertical}
+.raw table{border-collapse:separate;border-spacing:0;font-size:12px;
+  min-width:100%;width:max-content}
+.raw th{position:sticky;top:0;background:var(--card2);color:var(--muted);
+  text-align:left;padding:7px 10px;white-space:nowrap;z-index:3;
+  border-bottom:1px solid var(--line)}
+.raw td{padding:5px 10px;border-top:1px solid var(--line);white-space:nowrap;
+  max-width:420px;overflow:hidden;text-overflow:ellipsis}
+.raw td.num{text-align:right;font-family:ui-monospace,monospace}
+/* keep the NC number in view while scrolling sideways */
+.raw th:first-child,.raw td:first-child{position:sticky;left:0;z-index:2;
+  background:var(--card);border-right:1px solid var(--line)}
+.raw th:first-child{z-index:4;background:var(--card2)}
+.raw tr:hover td{background:var(--card2)}
+.raw tr:hover td:first-child{background:var(--card2)}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:var(--card2);border:1px solid var(--accent);color:var(--ink);
+  padding:10px 18px;border-radius:8px;display:none;z-index:600;font-size:13px;
+  max-width:80vw;text-align:center}
+.fb-fab{position:fixed;right:18px;bottom:18px;z-index:400}
+.nodata{padding:40px;text-align:center;color:var(--muted);font-size:13px}
+.empty{padding:60px;text-align:center;color:var(--muted);font-size:15px}
+
+/* load dialog */
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;
+  display:none;align-items:center;justify-content:center}
+.sheet.open{display:flex}
+.sheet .box{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:22px 24px;max-width:520px;width:92%}
+.sheet h3{margin:0 0 12px}
+.sheet label{display:block;font-size:12px;color:var(--muted);margin:11px 0 4px}
+.modeopt{border:1px solid var(--line);border-radius:9px;padding:12px;margin:8px 0;
+  cursor:pointer}
+.modeopt:hover{border-color:var(--accent)}
+.modeopt.sel{border-color:var(--accent);background:var(--card2)}
+.modeopt .t{font-weight:600}
+.modeopt .d{color:var(--muted);font-size:12px;margin-top:4px}
+.tag{font-size:10px;padding:1px 7px;border-radius:8px;margin-left:8px}
+.tag.safe{background:#14432a;color:#7ee2a8}
+.tag.erase{background:#4d1d17;color:#ffab9c}
+</style>
+</head>
+<body>
+<header>
+  <div class="hin">
+    <h1>Matching <span class="m">&amp;</span> Integration · NC Dashboard</h1>
+    <div class="sub" id="verline">loading…</div>
+    <div class="sp"></div>
+    <a class="btn" href="api/report">Download full report</a>
+    <button class="btn primary" onclick="openLoad()">Load export</button>
+    <button class="btn" onclick="hardBoot()">Refresh</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="board"><div class="empty">loading…</div></div>
+</div>
+
+<button class="btn primary fb-fab" onclick="openFeedback()">Feedback</button>
+<div class="toast" id="toast"></div>
+
+<!-- feedback dialog -->
+<div class="sheet" id="feedbackSheet">
+  <div class="box">
+    <h3>Send feedback</h3>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:4px">
+      Anything wrong, missing, or worth keeping — it lands with the dashboard,
+      not in an email nobody reads.</div>
+    <label>Your name (optional)</label>
+    <input id="fb_name" style="width:100%;background:var(--bg);color:var(--ink);
+      border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px">
+    <label>Type</label>
+    <select id="fb_cat" style="width:100%;background:var(--bg);color:var(--ink);
+      border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px">
+      <option>Idea</option><option>Bug / wrong result</option>
+      <option>Data question</option><option>Praise / what worked well</option>
+    </select>
+    <label>Message</label>
+    <textarea id="fb_msg" style="width:100%;min-height:96px;resize:vertical;
+      background:var(--bg);color:var(--ink);border:1px solid var(--line);
+      border-radius:6px;padding:8px;font-size:13px"></textarea>
+    <label>Attachment (optional)</label>
+    <input type="file" id="fb_file">
+    <div style="text-align:right;margin-top:16px">
+      <button class="btn" onclick="closeFeedback()">Cancel</button>
+      <button class="btn primary" onclick="sendFeedback()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- load dialog -->
+<div class="sheet" id="loadSheet">
+  <div class="box">
+    <h3>Load a report</h3>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">
+      Excel file (.xlsx, .xlsm). Raw SAP + CAPA sheets are joined automatically;
+      an already-built MI export loads as-is.</div>
+    <label>1 · Choose the file</label>
+    <input type="file" id="loadFile" accept=".xlsx,.xlsm,.xls">
+    <div id="loadName" style="color:var(--green);font-size:13px;margin-top:6px"></div>
+    <label>2 · What to do with the data already loaded</label>
+    <div class="modeopt sel" id="modeAdd" onclick="pickMode('add')">
+      <div class="t">Add to what is here <span class="tag safe">SAFE</span></div>
+      <div class="d">Keeps existing NCs; new ones are added. Use for a new month
+        or a second source.</div>
+    </div>
+    <div class="modeopt" id="modeReplace" onclick="pickMode('replace')">
+      <div class="t">Start over — empty everything first
+        <span class="tag erase">ERASES</span></div>
+      <div class="d">Deletes all NCs, then loads only this file. Use when this file
+        is the whole truth, or to clean up after a bad load.</div>
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="btn" onclick="closeLoad()">Cancel</button>
+      <button class="btn primary" id="loadGo" onclick="doLoad()">Load</button>
+    </div>
+    <div id="loadMsg" style="font-size:12px;color:var(--muted);margin-top:10px"></div>
+  </div>
+</div>
+
+<script>
+// ---------- state ----------
+const STATE={filters:{},options:null,loadMode:'add',loadFileObj:null};
+let LAST=null;
+let FILTERS_BUILT=false;
+const DRILL={rc:[],det:[]};    // per-chart drill paths, local to their card
+let PENDING_RAW=null;          // reopen this table after the body is rebuilt
+let LAST_CLICK={key:null,t:0}; // for telling one click from two
+
+const PALETTE={Closed:'#3fb56b',Open:'#e0a63e',Deleted:'#e5533e'};
+const C_BAR='#1E9BE0', C_LINE='#e0a63e', C_ALT='#4FC3F7', C_WARN='#e5533e';
+const PLOT_BG='rgba(0,0,0,0)';
+const HEAT_SCALE=[[0,'#0d2233'],[0.25,'#14496e'],[0.5,'#1E9BE0'],
+                  [0.75,'#4FC3F7'],[1,'#c9ecff']];
+const LAYOUT={paper_bgcolor:PLOT_BG,plot_bgcolor:PLOT_BG,
+  modebar:{orientation:'h',bgcolor:'rgba(0,0,0,0)',color:'#8ba7c2',
+    activecolor:'#4FC3F7'},
+  font:{color:'#e8f1fa',size:12},margin:{t:10,r:16,b:60,l:48},
+  xaxis:{gridcolor:'#12283b',zerolinecolor:'#1c3b57'},
+  yaxis:{gridcolor:'#12283b',zerolinecolor:'#1c3b57'},
+  legend:{font:{color:'#e8f1fa'}}};
+const CONF={responsive:true,displaylogo:false,displayModeBar:true,doubleClick:false,
+  modeBarButtonsToRemove:['select2d','lasso2d','toggleSpikelines',
+    'hoverClosestCartesian','hoverCompareCartesian'],
+  toImageButtonOptions:{format:'png',scale:2}};
+
+const money=n=>Math.abs(n)>=1000?(n/1000).toFixed(0)+'k':String(n);
+function ym(v){                       // whatever Plotly hands back -> "YYYY-MM"
+  const s=String(v);
+  const m=s.match(/^(\d{4})-(\d{2})/);
+  return m?m[1]+'-'+m[2]:s;
+}
+
+// Keep the FULL value as the axis category (categories must stay unique -
+// truncating the values themselves merges two different codes into one) and
+// only shorten what is drawn.
+function shortLabel(s,n){s=String(s);return s.length>n?s.slice(0,n-1)+'…':s;}
+function tickShort(labels,n){
+  return {tickmode:'array',tickvals:labels,
+          ticktext:labels.map(l=>shortLabel(l,n))};
+}
+
+// ---------- api ----------
+async function api(path,body){
+  const r=await fetch('api/'+path,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  return r.json();
+}
+function payloadFilters(){
+  return Object.assign({},STATE.filters,{_drill:{rc:DRILL.rc,det:DRILL.det}});
+}
+async function showVersion(){
+  try{const st=await(await fetch('api/status')).json();
+    document.getElementById('verline').textContent=
+      st.version+' · '+st.rows+' NCs in Integration + Matching'+
+      (st.last_import?' · loaded '+st.last_import.ts.slice(0,16).replace('T',' '):'');
+  }catch(e){}
+}
+
+// ---------- filters ----------
+const LIST_KEYS=['area','notif_type','rc1','rc2','project'];
+const YEAR_KEYS=['opened','closed'];
+const LABELS={area:'Area',notif_type:'Type',rc1:'Root cause L1',
+  rc2:'Root cause L2',project:'Project',opened:'Opened',closed:'Closed'};
+const AREA_NAME={I:'Integration',M:'Matching'};
+
+function areaLabel(a){return AREA_NAME[a]||a;}
+function typeLabel(t){return String(t).startsWith('Z2')?'Z2 Supplier':
+  String(t).startsWith('Z3')?'Z3 Production':t;}
+function optLabel(key,v){
+  if(key==='area')return areaLabel(v);
+  if(key==='notif_type')return typeLabel(v);
+  return v;
+}
+function optCount(o,key,v){
+  const c=(o.counts||{})[key];
+  return (c && c[v]!=null)?c[v]:'';
+}
+function yearVal(key){return STATE.filters[key+'_range']||[null,null];}
+
+function buildFilters(o){
+  const bar=document.createElement('div');bar.className='filters';
+  bar.innerHTML='<div class="frow" id="frow"><span class="lbl">Filters</span>'+
+      '<div class="sp"></div><span class="fcount" id="fcount"></span></div>'+
+    '<div class="active empty" id="activeBar"></div>';
+  const row=bar.querySelector('#frow');
+  const sp=row.querySelector('.sp');
+  LIST_KEYS.forEach(k=>{if((o[k]||[]).length)row.insertBefore(mkList(k,o),sp);});
+  YEAR_KEYS.forEach(k=>row.insertBefore(mkYears(k,o),sp));
+  return bar;
+}
+
+function mkList(key,o){
+  const w=document.createElement('div');w.className='fwrap';
+  w.innerHTML=
+    '<button class="fbtn" type="button"><span class="tx"></span>'+
+      '<span class="n off">all</span><span class="car">▾</span></button>'+
+    '<div class="panel">'+
+      '<input class="search" type="text" placeholder="Search '+
+        LABELS[key].toLowerCase()+'…">'+
+      '<div class="acts"><a data-all>Select all</a><span>·</span><a data-none>Clear</a>'+
+        '<span class="sp"></span><span class="shown"></span></div>'+
+      '<div class="list"></div></div>';
+  const btn=w.querySelector('.fbtn'),panel=w.querySelector('.panel'),
+        list=w.querySelector('.list'),search=w.querySelector('.search');
+  btn.querySelector('.tx').textContent=LABELS[key];
+
+  const rows=[];
+  (o[key]||[]).forEach(v=>{
+    if(v===''||v==='nan')return;
+    const el=document.createElement('div');
+    el.className='opt';el.tabIndex=0;
+    el.innerHTML='<span class="box"></span><span class="t"></span><span class="c"></span>';
+    el.querySelector('.t').textContent=optLabel(key,v);
+    el.querySelector('.c').textContent=optCount(o,key,v);
+    el._v=v;
+    const toggle=()=>{
+      const a=STATE.filters[key]||(STATE.filters[key]=[]);
+      const i=a.indexOf(v);
+      if(i>=0)a.splice(i,1);else a.push(v);
+      if(!a.length)delete STATE.filters[key];
+      paintFilters();queueRefresh();
+    };
+    el.onclick=toggle;
+    el.onkeydown=e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();toggle();}};
+    rows.push(el);list.appendChild(el);
+  });
+
+  search.oninput=()=>{
+    const q=search.value.trim().toLowerCase();let n=0;
+    rows.forEach(el=>{
+      const hit=el.querySelector('.t').textContent.toLowerCase().includes(q);
+      el.classList.toggle('hide',!hit);if(hit)n++;});
+    w.querySelector('.shown').textContent=q?n+' of '+rows.length:'';
+    let none=list.querySelector('.none');
+    if(!n){if(!none){none=document.createElement('div');none.className='none';
+      none.textContent='Nothing matches that.';list.appendChild(none);}}
+    else if(none)none.remove();
+  };
+  w.querySelector('[data-all]').onclick=()=>{
+    STATE.filters[key]=rows.filter(el=>!el.classList.contains('hide')).map(el=>el._v);
+    if(!STATE.filters[key].length)delete STATE.filters[key];
+    paintFilters();queueRefresh();};
+  w.querySelector('[data-none]').onclick=()=>{
+    delete STATE.filters[key];paintFilters();queueRefresh();};
+
+  btn.onclick=e=>{e.stopPropagation();
+    const wasOpen=panel.classList.contains('open');closeAllPanels();
+    if(!wasOpen){panel.classList.add('open');search.focus();}};
+  panel.onclick=e=>e.stopPropagation();
+
+  w._key=key;
+  w._paint=()=>{
+    const a=STATE.filters[key]||[];
+    btn.classList.toggle('active',a.length>0);
+    const n=btn.querySelector('.n');
+    n.textContent=a.length?a.length:'all';
+    n.classList.toggle('off',!a.length);
+    rows.forEach(el=>el.classList.toggle('on',a.includes(el._v)));
+  };
+  return w;
+}
+
+function mkYears(key,o){
+  const w=document.createElement('div');w.className='fwrap';
+  const lo0=o[key+'_min']||'',hi0=o[key+'_max']||'';
+  w.innerHTML=
+    '<button class="fbtn" type="button"><span>'+LABELS[key]+'</span>'+
+      '<span class="n off">all</span><span class="car">▾</span></button>'+
+    '<div class="panel" style="width:236px">'+
+      '<div class="years"><input type="number" placeholder="'+lo0+'" data-lo>'+
+      '<span>to</span><input type="number" placeholder="'+hi0+'" data-hi></div>'+
+      '<div class="acts" style="margin-bottom:0"><span class="sp"></span>'+
+        '<a data-none>Clear</a></div></div>';
+  const btn=w.querySelector('.fbtn'),panel=w.querySelector('.panel');
+  const lo=panel.querySelector('[data-lo]'),hi=panel.querySelector('[data-hi]');
+  const set=()=>{
+    const r=[lo.value?parseInt(lo.value):null,hi.value?parseInt(hi.value):null];
+    if(r[0]||r[1])STATE.filters[key+'_range']=r;
+    else delete STATE.filters[key+'_range'];
+    paintFilters();queueRefresh();};
+  lo.onchange=set;hi.onchange=set;
+  panel.querySelector('[data-none]').onclick=()=>{lo.value='';hi.value='';set();};
+  btn.onclick=e=>{e.stopPropagation();
+    const wasOpen=panel.classList.contains('open');closeAllPanels();
+    if(!wasOpen){panel.classList.add('open');lo.focus();}};
+  panel.onclick=e=>e.stopPropagation();
+
+  w._key=key;w._year=true;
+  w._clear=()=>{lo.value='';hi.value='';};
+  w._paint=()=>{
+    const p=yearVal(key),a=p[0],b=p[1],on=a||b;
+    if(String(lo.value)!==String(a||''))lo.value=a||'';
+    if(String(hi.value)!==String(b||''))hi.value=b||'';
+    btn.classList.toggle('active',!!on);
+    const n=btn.querySelector('.n');
+    n.textContent=on?(a||'…')+'–'+(b||'…'):'all';
+    n.classList.toggle('off',!on);
+  };
+  return w;
+}
+
+function closeAllPanels(){
+  document.querySelectorAll('.panel.open').forEach(p=>p.classList.remove('open'));}
+document.addEventListener('click',closeAllPanels);
+
+// A click in the margin clears the chart beside it, not the whole page.
+// Charts are independent: several tables can stay open at once.
+document.addEventListener('mousedown',function(e){
+  if(e.target.closest('.card'))return;          // inside a card - leave it alone
+  if(e.target.closest('.filters'))return;
+  if(e.target.closest('header'))return;
+  if(e.target.closest('.sheet'))return;
+  const open=[...document.querySelectorAll('.card.selected')];
+  if(!open.length)return;
+  let best=null,bestGap=Infinity;
+  open.forEach(function(c){
+    const r=c.getBoundingClientRect();
+    // vertical gap to the card; 0 while the click is level with it
+    const gap=(e.clientY<r.top)?(r.top-e.clientY)
+             :(e.clientY>r.bottom)?(e.clientY-r.bottom):0;
+    if(gap<bestGap){bestGap=gap;best=c;}
+  });
+  if(best)closeRaw(best.dataset.chart);
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAllPanels();});
+
+function paintFilters(){
+  document.querySelectorAll('.fwrap').forEach(w=>w._paint&&w._paint());
+  const bar=document.getElementById('activeBar');
+  if(!bar)return;
+  bar.innerHTML='';
+  let any=false;
+  LIST_KEYS.forEach(key=>{
+    (STATE.filters[key]||[]).forEach(v=>{any=true;
+      bar.appendChild(mkChip(LABELS[key],optLabel(key,v),()=>{
+        STATE.filters[key]=STATE.filters[key].filter(x=>x!==v);
+        if(!STATE.filters[key].length)delete STATE.filters[key];
+        paintFilters();queueRefresh();}));});
+  });
+  YEAR_KEYS.forEach(key=>{
+    const p=yearVal(key),a=p[0],b=p[1];if(!a&&!b)return;any=true;
+    bar.appendChild(mkChip(LABELS[key],(a||'…')+'–'+(b||'…'),()=>{
+      delete STATE.filters[key+'_range'];
+      document.querySelectorAll('.fwrap').forEach(w=>{
+        if(w._key===key&&w._clear)w._clear();});
+      paintFilters();queueRefresh();}));
+  });
+  if(any){
+    bar.insertBefore(Object.assign(document.createElement('span'),
+      {className:'k',textContent:'Showing only'}),bar.firstChild);
+    const c=document.createElement('span');
+    c.className='clearall';c.textContent='Clear all';
+    c.onclick=()=>{
+      STATE.filters={};
+      document.querySelectorAll('.fwrap').forEach(w=>{if(w._clear)w._clear();});
+      paintFilters();queueRefresh();};
+    bar.appendChild(c);
+  }
+  bar.classList.toggle('empty',!any);
+}
+function mkChip(group,val,onx){
+  const s=document.createElement('span');s.className='achip';
+  s.innerHTML='<span class="g"></span><span class="v"></span><span class="x">×</span>';
+  s.querySelector('.g').textContent=group+':';
+  s.querySelector('.v').textContent=val;
+  s.querySelector('.x').onclick=onx;
+  return s;
+}
+function setCount(filtered,all){
+  const el=document.getElementById('fcount');
+  if(el)el.innerHTML='<b>'+filtered+'</b> of '+all+' NCs';
+}
+
+// ---------- KPI ----------
+function kpiStrip(k){
+  const el=document.createElement('div');el.className='kpis';
+  const cards=[
+    ['total','TOTAL NCS',''],
+    ['open','OPEN','warn'],
+    ['closed','CLOSED',''],
+    ['copq','COPQ (CHF)','',money],
+    ['med_lead','MEDIAN LEAD (d)',''],
+    ['rework_pct','REWORK %','warn',v=>v+'%'],
+    ['scrap','SCRAP','bad'],
+    ['unclass_pct','UNCLASSIFIED %','',v=>v+'%'],
+    ['oldest_open','OLDEST OPEN (d)','warn'],
+  ];
+  cards.forEach(function(c){
+    const v=k[c[0]];
+    el.innerHTML+='<div class="kpi '+(c[2]||'')+'"><div class="v">'+
+      (c[3]?c[3](v):v)+'</div><div class="l">'+c[1]+'</div></div>';
+  });
+  return el;
+}
+
+// ---------- chart card ----------
+function card(id,title,hint,fig,opts){
+  opts=opts||{};
+  const c=document.createElement('div');c.className='card';c.dataset.chart=id;
+  c._fig=fig;c._title=title;
+  c.innerHTML=
+    '<div class="chead"><div class="tt"><h3></h3><p class="hint"></p></div>'+
+      '<button class="cam" title="Save a PNG on white, for slides">📷 PNG</button></div>'+
+    '<div class="crumb hide"></div>'+
+    '<div class="plot" id="p_'+id+'"></div>'+
+    '<div class="raw" id="raw_'+id+'"><div class="bar">'+
+      '<span class="rawlabel"></span><span class="sp"></span>'+
+      '<button class="btn small" data-xls>Download Excel</button>'+
+      '<button class="btn small" data-clr>Close</button></div>'+
+      '<div class="raw-scroll"></div></div>';
+  c.querySelector('h3').textContent=title;
+  c.querySelector('.hint').textContent=hint;
+  c.querySelector('[data-clr]').onclick=e=>{e.stopPropagation();closeRaw(id);};
+  c.querySelector('[data-xls]').onclick=e=>{e.stopPropagation();exportRaw(id);};
+  c.querySelector('.cam').onclick=e=>{e.stopPropagation();snapWhite(id,title);};
+  if(opts.crumb)buildCrumb(c.querySelector('.crumb'),opts.crumb);
+  if(!fig||!fig.data||!fig.data.length||fig.nodata){
+    c.querySelector('.plot').innerHTML=
+      '<div class="nodata">Nothing to show for this selection.</div>';
+  }else{
+    setTimeout(()=>drawPlot(id,fig),0);
+  }
+  return c;
+}
+function buildCrumb(host,cb){
+  host.classList.remove('hide');
+  const mk=(txt,fn)=>{
+    const a=document.createElement(fn?'a':'span');
+    a.textContent=txt;if(fn)a.onclick=fn;else a.className='cur';
+    return a;};
+  const sep=()=>Object.assign(document.createElement('span'),
+    {className:'sep',textContent:'›'});
+  if(!cb.path.length){
+    host.appendChild(mk(cb.root,null));
+    host.appendChild(Object.assign(document.createElement('span'),
+      {className:'sep',textContent:'double-click a bar to drill in'}));
+    return;
+  }
+  host.appendChild(mk(cb.root,()=>{DRILL[cb.key]=[];queueRefresh();}));
+  cb.path.forEach((p,i)=>{
+    host.appendChild(sep());
+    const last=i===cb.path.length-1;
+    host.appendChild(mk(p,last?null:()=>{
+      DRILL[cb.key]=cb.path.slice(0,i+1);queueRefresh();}));
+  });
+}
+function drawPlot(id,fig){
+  const el=document.getElementById('p_'+id);if(!el)return;
+  const layout=Object.assign({},LAYOUT,fig.layout||{},
+    {autosize:true,height:fig.height||340});
+  Plotly.newPlot(el,fig.data,layout,CONF).then(()=>{
+    el._isplot=true;
+    if(!el._ro && window.ResizeObserver){          // keep charts sized to the card
+      el._ro=new ResizeObserver(()=>{
+        if(!el.offsetParent||el.clientWidth<10)return;
+        try{Plotly.Plots.resize(el);}catch(e){}});
+      el._ro.observe(el);
+    }
+    if(!fig.pick||el._bound)return;
+    el._bound=true;
+    // a click on empty chart space clears the selection; plotly_click fires
+    // first and sets the flag, so only a true miss gets through
+    el.addEventListener('click',function(){
+      setTimeout(function(){
+        if(el._hitPoint){el._hitPoint=false;return;}
+        closeRaw(id);
+      },20);
+    });
+    el.on('plotly_click',ev=>{
+      el._hitPoint=true;
+      const pt=ev.points[0];
+      const req=fig.pick(pt);
+      if(!req)return;
+      // one click reads the NCs behind the bar; two clicks open its sub-level
+      const key=id+'|'+pt.curveNumber+'|'+(pt.x!=null?pt.x:pt.y);
+      const now=Date.now();
+      const dbl=(LAST_CLICK.key===key && now-LAST_CLICK.t<420);
+      LAST_CLICK={key:key,t:now};
+      if(dbl && req.drill){
+        DRILL[req.drill.key]=req.drill.path;
+        PENDING_RAW={id:id,req:req};
+        queueRefresh();
+        return;
+      }
+      highlight(id,pt);
+      openRaw(id,req);
+    });
+  });
+}
+// fade the bars you did not pick, inside the chart you did.
+// A click near the top of a bar can land on the CoPQ line instead, so find
+// the bar trace ourselves and match the category rather than trusting
+// whichever trace happened to be under the cursor.
+function highlight(id,pt){
+  const el=document.getElementById('p_'+id);
+  if(!el||!el.data)return;
+  let ti=-1;
+  for(let i=0;i<el.data.length;i++){if(el.data[i].type==='bar'){ti=i;break;}}
+  if(ti<0)return;
+  const tr=el.data[ti];
+  const cats=(tr.orientation==='h')?(tr.y||[]):(tr.x||[]);
+  const want=(pt.label!=null)?pt.label:((tr.orientation==='h')?pt.y:pt.x);
+  let idx=cats.indexOf(want);
+  if(idx<0 && pt.curveNumber===ti)idx=pt.pointNumber;
+  if(idx<0)return;
+  const op=[];
+  for(let i=0;i<cats.length;i++)op.push(i===idx?1:0.22);
+  Plotly.restyle(el,{'marker.opacity':[op]},[ti]);
+  el._dimmed=ti;
+}
+function unhighlight(id){
+  const el=document.getElementById('p_'+id);
+  if(!el||!el.data||el._dimmed==null)return;
+  Plotly.restyle(el,{'marker.opacity':[null]},[el._dimmed]);
+  el._dimmed=null;
+}
+
+function snapWhite(id,title){
+  const el=document.getElementById('p_'+id);
+  if(!el||!el.data)return;
+  const light={paper_bgcolor:'#ffffff',plot_bgcolor:'#ffffff',
+    font:{color:'#12283b'},'xaxis.gridcolor':'#dde5ec',
+    'yaxis.gridcolor':'#dde5ec','xaxis.linecolor':'#9fb3c6',
+    'yaxis.linecolor':'#9fb3c6'};
+  const dark={paper_bgcolor:PLOT_BG,plot_bgcolor:PLOT_BG,
+    font:{color:'#e8f1fa'},'xaxis.gridcolor':'#12283b',
+    'yaxis.gridcolor':'#12283b','xaxis.linecolor':'#1c3b57',
+    'yaxis.linecolor':'#1c3b57'};
+  Plotly.relayout(el,light)
+    .then(()=>Plotly.downloadImage(el,{format:'png',scale:2,
+      filename:(title||id).replace(/[^\w]+/g,'_')}))
+    .then(()=>Plotly.relayout(el,dark));
+}
+
+// plain table card (no chart)
+function tableCard(title,hint,t,numCols){
+  numCols=numCols||[];
+  const c=document.createElement('div');c.className='card';
+  c.innerHTML='<div class="chead"><div class="tt"><h3></h3><p class="hint"></p></div></div>'+
+    '<div class="tbl"></div>';
+  c.querySelector('h3').textContent=title;
+  c.querySelector('.hint').textContent=hint;
+  const box=c.querySelector('.tbl');
+  if(!t||!t.rows||!t.rows.length){
+    box.innerHTML='<div class="nodata">Nothing to show for this selection.</div>';
+    return c;}
+  const lab=t.labels||{};
+  let h='<table><thead><tr>';
+  t.cols.forEach(col=>h+='<th>'+(lab[col]||col)+'</th>');
+  h+='</tr></thead><tbody>';
+  t.rows.forEach(r=>{h+='<tr>';
+    t.cols.forEach(col=>{
+      const num=numCols.indexOf(col)>=0;
+      const v=r[col]==null?'':(num?Number(r[col]).toLocaleString():r[col]);
+      h+='<td'+(num?' class="num"':'')+'>'+esc(v)+'</td>';});
+    h+='</tr>';});
+  box.innerHTML=h+'</tbody></table>';
+  return c;
+}
+function esc(v){return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;');}
+
+// ---------- raw table ----------
+function rawBody(req){
+  return Object.assign({filters:payloadFilters()},req);
+}
+async function openRaw(id,req){
+  const c=document.querySelector('.card[data-chart="'+id+'"]');
+  if(!c)return;
+  c.classList.add('selected');
+  c._rawReq=req;
+  const box=c.querySelector('.raw');
+  const scroll=box.querySelector('.raw-scroll');
+  box.querySelector('.rawlabel').innerHTML=esc(req.label||'Selection')+' · loading…';
+  scroll.innerHTML='';
+  box.classList.add('open');
+  const d=await api('raw',rawBody(req));
+  box.querySelector('.rawlabel').innerHTML=
+    '<b>'+esc(req.label||'Selection')+'</b> · '+d.count+' NCs'+
+    (d.count>10?' · scroll for the rest, or download them all':'');
+  if(!d.count){
+    scroll.innerHTML='<div class="nodata">No rows behind this one.</div>';
+    return;}
+  const lab=d.labels||{},num=d.numeric||[];
+  let h='<table><thead><tr>';
+  d.cols.forEach(col=>h+='<th>'+(lab[col]||col)+'</th>');
+  h+='</tr></thead><tbody>';
+  d.rows.forEach(r=>{h+='<tr>';
+    d.cols.forEach(col=>{
+      const isnum=num.indexOf(col)>=0;
+      const v=r[col]==null?'':(isnum?Number(r[col]).toLocaleString():r[col]);
+      h+='<td'+(isnum?' class="num"':'')+' title="'+esc(r[col]==null?'':r[col])+'">'+
+        esc(v)+'</td>';});
+    h+='</tr>';});
+  scroll.innerHTML=h+'</tbody></table>';
+  box.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+function closeRaw(id){
+  const c=document.querySelector('.card[data-chart="'+id+'"]');
+  if(!c)return;
+  c.querySelector('.raw').classList.remove('open');
+  c.classList.remove('selected');
+  unhighlight(id);
+  c._rawReq=null;
+}
+async function exportRaw(id){
+  const c=document.querySelector('.card[data-chart="'+id+'"]');
+  if(!c||!c._rawReq)return;
+  const body=rawBody(c._rawReq);
+  body.name=c._rawReq.label||c._title||'selection';
+  toast('Building the Excel…');
+  const r=await fetch('api/raw_export',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const blob=await r.blob();
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='MI_'+String(body.name).replace(/[^\w\-]+/g,'_').slice(0,60)+'.xlsx';
+  document.body.appendChild(a);a.click();
+  toast('Downloaded — check your Downloads folder');
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+}
+
+// ---------- chart builders ----------
+function mkBar(d,palette,clickCol,horizontal){
+  if(!d||!d.labels||!d.labels.length)return {nodata:true};
+  const colors=d.labels.map(l=>(palette&&palette[l])||C_BAR);
+  const t=horizontal
+    ?{type:'bar',orientation:'h',y:d.labels,x:d.values,marker:{color:colors},
+      text:d.values,textposition:'outside',cliponaxis:false,
+      hovertemplate:'%{y}: %{x}<extra></extra>'}
+    :{type:'bar',x:d.labels,y:d.values,marker:{color:colors},
+      text:d.values,textposition:'outside',cliponaxis:false,
+      hovertemplate:'%{x}: %{y} NCs<extra></extra>'};
+  return {data:[t],height:340,
+    layout:horizontal?{margin:{t:10,r:30,b:40,l:170},
+      yaxis:{automargin:true,autorange:'reversed'}}:{},
+    pick:clickCol?function(pt){
+      const v=horizontal?pt.y:pt.x;
+      if(String(v)==='Other')return null;
+      return {click:{col:clickCol,value:v},label:v};}:null};
+}
+
+// Pareto: NC-count bars + CoPQ line, click drills and opens the rows
+function mkPareto(p,key){
+  if(!p||!p.labels||!p.labels.length)return {nodata:true};
+  return {
+    // The line is the running share of NCs, not the money. A CoPQ line sat
+    // flat on the floor here (cost barely varies by cause) and read as a bug.
+    // Cost is still one hover away, and Section 3 charts it properly.
+    data:[
+      {type:'bar',x:p.labels,y:p.counts,name:'NCs',marker:{color:C_BAR},
+       text:p.counts,textposition:'outside',cliponaxis:false,
+       customdata:p.labels.map((l,i)=>[p.cum_pct[i],p.copq[i]]),
+       hovertemplate:'%{x}<br>%{y} NCs · %{customdata[0]}% of the total'+
+         '<br>CoPQ %{customdata[1]:,.0f} CHF<extra></extra>'},
+      {type:'scatter',mode:'lines+markers',x:p.labels,y:p.cum_pct,
+       name:'Running total',yaxis:'y2',line:{color:C_LINE,width:2},
+       marker:{size:6,color:C_LINE},
+       hovertemplate:'%{x}<br>%{y}% of all NCs up to here<extra></extra>'},
+    ],
+    layout:{margin:{t:10,r:64,b:110,l:52},
+      xaxis:Object.assign({tickangle:-35,automargin:true,gridcolor:'#12283b'},
+        tickShort(p.labels,22)),
+      yaxis:{title:'NCs',gridcolor:'#12283b'},
+      yaxis2:{title:'Running total',overlaying:'y',side:'right',
+        range:[0,105],showgrid:false,ticksuffix:'%',color:C_LINE},
+      legend:{orientation:'h',y:1.12,x:0,font:{color:'#e8f1fa'}}},
+    height:460,
+    pick:function(pt){
+      const v=String(pt.x);
+      if(v==='Other')return null;
+      const req={click:{col:p.col,value:v},scope:Object.assign({},p.scope),
+                 label:p.path.concat([v]).join(' › ')};
+      if(!p.last)req.drill={key:key,path:p.path.concat([v])};
+      return req;},
+  };
+}
+
+// CoPQ bars + cumulative % line
+function mkCostPareto(b){
+  if(!b||!b.labels||!b.labels.length)return {nodata:true};
+  return {
+    data:[
+      {type:'bar',x:b.labels,y:b.values,name:'CoPQ (CHF)',marker:{color:C_BAR},
+       customdata:b.counts,
+       hovertemplate:'%{x}<br>%{y:,.0f} CHF · %{customdata} NCs<extra></extra>'},
+      {type:'scatter',mode:'lines+markers',x:b.labels,y:b.cum_pct,
+       name:'Cumulative %',yaxis:'y2',line:{color:C_LINE,width:2},
+       marker:{size:6,color:C_LINE},
+       hovertemplate:'%{x}<br>%{y}% of total CoPQ<extra></extra>'},
+    ],
+    layout:{margin:{t:10,r:60,b:110,l:60},
+      xaxis:Object.assign({tickangle:-35,automargin:true,gridcolor:'#12283b'},
+        tickShort(b.labels,22)),
+      yaxis:{title:'CHF',tickformat:'~s',gridcolor:'#12283b'},
+      yaxis2:{title:'%',overlaying:'y',side:'right',range:[0,105],
+        showgrid:false,color:C_LINE},
+      legend:{orientation:'h',y:1.12,x:0,font:{color:'#e8f1fa'}}},
+    height:460,
+    pick:function(pt){
+      const v=String(pt.x);
+      if(v==='Other')return null;
+      return {click:{col:b.col||'rc1',value:v},label:v};},
+  };
+}
+
+function mkCopqBar(b,col,horizontal){
+  if(!b||!b.labels||!b.labels.length)return {nodata:true};
+  const t=horizontal
+    ?{type:'bar',orientation:'h',y:b.labels,x:b.values,marker:{color:C_BAR},
+      customdata:b.counts,text:b.values.map(money),textposition:'outside',
+      cliponaxis:false,
+      hovertemplate:'%{y}<br>%{x:,.0f} CHF · %{customdata} NCs<extra></extra>'}
+    :{type:'bar',x:b.labels,y:b.values,marker:{color:C_BAR},
+      customdata:b.counts,text:b.values.map(money),textposition:'outside',
+      cliponaxis:false,
+      hovertemplate:'%{x}<br>%{y:,.0f} CHF · %{customdata} NCs<extra></extra>'};
+  return {data:[t],height:380,
+    layout:horizontal
+      ?{margin:{t:10,r:60,b:40,l:200},xaxis:{tickformat:'~s',gridcolor:'#12283b'},
+        yaxis:Object.assign({automargin:true,autorange:'reversed'},
+          tickShort(b.labels,30))}
+      :{margin:{t:10,r:20,b:100,l:60},
+        xaxis:Object.assign({tickangle:-30,automargin:true},tickShort(b.labels,22)),
+        yaxis:{tickformat:'~s',gridcolor:'#12283b'}},
+    pick:function(pt){
+      const v=String(horizontal?pt.y:pt.x);
+      if(v==='Other')return null;
+      return {click:{col:col,value:v},label:v};}};
+}
+
+function mkHeat(h){
+  if(!h||!h.z||!h.z.length||!h.x.length)return {nodata:true};
+  const monthCols=h.col_col==='__month_opened';
+  return {
+    data:[{type:'heatmap',z:h.z,x:h.x,y:h.y,colorscale:HEAT_SCALE,
+      hovertemplate:'%{y} · %{x}<br>%{z} NCs<extra></extra>',
+      colorbar:{title:{text:'NCs',font:{color:'#8ba7c2'}},
+        tickfont:{color:'#8ba7c2'},outlinewidth:0,thickness:12}}],
+    layout:{margin:{t:10,r:10,b:120,l:200},
+      xaxis:Object.assign({tickangle:-35,automargin:true,side:'bottom',
+        showgrid:false,type:'category'},tickShort(h.x,18)),
+      yaxis:Object.assign({automargin:true,autorange:'reversed',showgrid:false,
+        type:'category'},tickShort(h.y,26))},
+    height:Math.max(360,60+32*h.y.length),
+    pick:function(pt){
+      if(!pt.z)return null;
+      const req={click:{col:h.row_col,value:pt.y},
+                 label:pt.y+' · '+pt.x};
+      if(monthCols){req.month={col:'opened',value:ym(pt.x)};
+                    req.label=pt.y+' · '+ym(pt.x);}
+      else{req.scope={};req.scope[h.col_col]=pt.x;}
+      return req;},
+  };
+}
+
+function mkTrend(t){
+  if(!t||!t.months||!t.months.length)return {nodata:true};
+  return {
+    data:[
+      {type:'scatter',mode:'lines+markers',x:t.months,y:t.opened,name:'Opened',
+       line:{color:C_WARN,width:2},marker:{size:5},
+       hovertemplate:'%{x}<br>%{y} opened<extra></extra>'},
+      {type:'scatter',mode:'lines+markers',x:t.months,y:t.closed,name:'Closed',
+       line:{color:'#3fb56b',width:2},marker:{size:5},
+       hovertemplate:'%{x}<br>%{y} closed<extra></extra>'},
+    ],
+    layout:{margin:{t:10,r:20,b:70,l:50},
+      xaxis:{type:'category',tickangle:-45,automargin:true,gridcolor:'#12283b'},
+      yaxis:{title:'NCs',gridcolor:'#12283b'},
+      legend:{orientation:'h',y:1.12,x:0,font:{color:'#e8f1fa'}}},
+    height:380,
+    pick:function(pt){
+      const which=pt.curveNumber===1?'closed':'opened';
+      const m=ym(pt.x);
+      return {month:{col:which,value:m},
+              label:(which==='closed'?'Closed in ':'Opened in ')+m};},
+  };
+}
+
+function mkArea(a){
+  if(!a||!a.months||!a.months.length)return {nodata:true};
+  return {
+    data:[{type:'scatter',mode:'lines',x:a.months,y:a.values,name:'Open backlog',
+      line:{color:C_ALT,width:2},fill:'tozeroy',fillcolor:'rgba(79,195,247,.18)',
+      hovertemplate:'%{x}<br>%{y} open<extra></extra>'}],
+    layout:{margin:{t:10,r:20,b:70,l:50},
+      xaxis:{type:'category',tickangle:-45,automargin:true,gridcolor:'#12283b'},
+      yaxis:{title:'Open NCs',gridcolor:'#12283b'}},
+    height:380,
+  };
+}
+
+function mkLead(h){
+  if(!h||!h.labels||!h.labels.length)return {nodata:true};
+  return {
+    data:[{type:'bar',x:h.labels,y:h.values,marker:{color:C_BAR},
+      text:h.values,textposition:'outside',cliponaxis:false,
+      hovertemplate:'%{x}: %{y} NCs<extra></extra>'}],
+    height:340,
+    pick:function(pt){
+      const i=h.labels.indexOf(String(pt.x));
+      if(i<0)return null;
+      return {lead:h.ranges[i],label:'Closed in '+h.labels[i]};},
+  };
+}
+
+function mkGrouped(s){
+  if(!s||!s.months||!s.months.length)return {nodata:true};
+  return {
+    data:[
+      {type:'bar',x:s.months,y:s.supplier,name:'Supplier (Z2)',
+       marker:{color:C_LINE},hovertemplate:'%{x}<br>%{y} supplier<extra></extra>'},
+      {type:'bar',x:s.months,y:s.production,name:'Production (Z3)',
+       marker:{color:C_BAR},hovertemplate:'%{x}<br>%{y} production<extra></extra>'},
+    ],
+    layout:{barmode:'group',margin:{t:10,r:20,b:70,l:50},
+      xaxis:{type:'category',tickangle:-45,automargin:true,gridcolor:'#12283b'},
+      yaxis:{title:'NCs opened',gridcolor:'#12283b'},
+      legend:{orientation:'h',y:1.12,x:0,font:{color:'#e8f1fa'}}},
+    height:380,
+    pick:function(pt){
+      const side=pt.curveNumber===0?'Supplier':'Production';
+      const m=ym(pt.x);
+      return {side:side,month:{col:'opened',value:m},label:side+' · '+m};},
+  };
+}
+
+function mkCompare(c){
+  if(!c||!c.count||!c.count.length)return {nodata:true};
+  // Four metrics on one shared axis is unreadable: CoPQ is in the hundreds of
+  // thousands and buries a median of 60 days. Each metric gets its own panel
+  // and its own scale; colour carries the side, so no legend is needed.
+  const COL={Supplier:C_LINE,Production:C_BAR};
+  const panels=[
+    ['NCs',            c.count,    v=>String(v)],
+    ['Still open',     c.open,     v=>String(v)],
+    ['CoPQ (CHF)',     c.copq,     money],
+    ['Median lead (d)',c.med_lead, v=>String(v)],
+  ];
+  const data=[],layout={
+    grid:{rows:1,columns:panels.length,pattern:'independent'},
+    showlegend:false,margin:{t:44,r:14,b:52,l:52},
+    annotations:[]};
+  panels.forEach(function(pn,i){
+    const name=pn[0],vals=pn[1],fmt=pn[2];
+    const ax=i?String(i+1):'';
+    data.push({type:'bar',x:c.sides,y:vals,
+      xaxis:'x'+ax,yaxis:'y'+ax,
+      marker:{color:c.sides.map(s=>COL[s]||C_BAR)},
+      text:vals.map(fmt),textposition:'outside',cliponaxis:false,
+      hovertemplate:'%{x}<br>'+name+': %{y:,}<extra></extra>'});
+    const top=Math.max.apply(null,vals.concat([0]))||1;
+    layout['xaxis'+ax]={type:'category',automargin:true,showgrid:false};
+    layout['yaxis'+ax]={range:[0,top*1.28],showgrid:true,gridcolor:'#12283b',
+      tickformat:'~s',nticks:4};
+    layout.annotations.push({text:name,xref:'paper',yref:'paper',
+      x:(i+0.5)/panels.length,y:1.10,showarrow:false,
+      font:{size:12.5,color:'#8ba7c2'},xanchor:'center'});
+  });
+  return {data:data,layout:layout,height:330,
+    pick:function(pt){return {side:String(pt.x),label:String(pt.x)};}};
+}
+
+function resizeAllPlots(){
+  document.querySelectorAll('.plot').forEach(el=>{
+    if(!el._isplot||!el.offsetParent||el.clientWidth<10)return;
+    try{Plotly.Plots.resize(el);}catch(e){}});
+}
+let _rzT;
+window.addEventListener('resize',()=>{clearTimeout(_rzT);
+  _rzT=setTimeout(resizeAllPlots,150);});
+
+// ---------- sections ----------
+function section(idx,title){
+  const s=document.createElement('div');s.className='sec';
+  s.innerHTML='<div class="sec-head"><span class="idx"></span><h2></h2></div>';
+  s.querySelector('.idx').textContent=idx;
+  s.querySelector('h2').textContent=title;
+  return s;
+}
+function grid(cls){
+  const g=document.createElement('div');g.className='grid '+(cls||'one');return g;}
+
+function buildBody(d){
+  const out=document.createDocumentFragment();
+  out.appendChild(kpiStrip(d.kpi));
+
+  // 1 · Status
+  let s=section(1,'Status'),g=grid('one');
+  g.appendChild(card('nc_status','NC status',
+    'Open, closed and deleted NCs in scope. Click a bar to read those NCs.',
+    mkBar(d.nc_status,PALETTE,'status')));
+  s.appendChild(g);out.appendChild(s);
+
+  // 2 · Root cause & detection
+  s=section(2,'Root cause and detection');g=grid('one');
+  g.appendChild(card('pareto_rc','NC root cause',
+    'Ranked by NC count. The line is the running share of all NCs, so you can see how few causes make up most of them. Click a bar to read its NCs, double-click to open its sub-causes.',
+    mkPareto(d.pareto_rc,'rc'),
+    {crumb:{key:'rc',root:'All root causes',path:d.pareto_rc.path||[]}}));
+  g.appendChild(card('pareto_det','Real detection',
+    'Where the problem was actually caught, ranked by count with the running share. Click a bar to read its NCs, double-click to open the detail.',
+    mkPareto(d.pareto_det,'det'),
+    {crumb:{key:'det',root:'All detection points',path:d.pareto_det.path||[]}}));
+  s.appendChild(g);out.appendChild(s);
+
+  // 3 · Cost
+  s=section(3,'Cost of poor quality');g=grid('one');
+  g.appendChild(card('copq_pareto','CoPQ by root cause',
+    'Which causes carry the money. The line shows how much of total CoPQ the bars add up to.',
+    mkCostPareto(d.copq_pareto)));
+  s.appendChild(g);
+  g=grid('one');
+  g.appendChild(card('copq_disposition','CoPQ by disposition',
+    'What the decision on the part cost — scrap, rework, use-as-is.',
+    mkCopqBar(d.copq_disposition,'disposition',false)));
+  g.appendChild(card('copq_project','CoPQ by project',
+    'The most expensive projects in scope.',
+    mkCopqBar(d.copq_project,'project',true)));
+  s.appendChild(g);
+  g=grid('one');
+  g.appendChild(tableCard('The ten most expensive NCs',
+    'Sorted by CoPQ. These are the individual cases worth reading.',
+    d.top_costly,['copq']));
+  s.appendChild(g);out.appendChild(s);
+
+  // 4 · Heat maps
+  s=section(4,'Heat maps');g=grid('one');
+  g.appendChild(card('heat_rc_det','Root cause against detection point',
+    'Where each cause gets caught. Click a cell to read those NCs.',
+    mkHeat(d.heat_rc_det)));
+  s.appendChild(g);
+  g=grid('one');
+  g.appendChild(card('heat_proj_rc','Project against root cause',
+    'Which causes cluster in which project.',mkHeat(d.heat_proj_rc)));
+  g.appendChild(card('heat_month_rc','Month against root cause',
+    'The last 18 months. A hot row that keeps going is a cause nobody has fixed.',
+    mkHeat(d.heat_month_rc)));
+  s.appendChild(g);out.appendChild(s);
+
+  // 5 · Time
+  s=section(5,'Over time');g=grid('one');
+  g.appendChild(card('trend_monthly','Opened against closed, per month',
+    'When the closing line sits above the opening line, the backlog is coming down. Click a point to read that month.',
+    mkTrend(d.trend_monthly)));
+  g.appendChild(card('backlog','Open backlog',
+    'Everything opened so far minus everything closed, month by month.',
+    mkArea(d.backlog)));
+  s.appendChild(g);
+  g=grid('one');
+  g.appendChild(card('leadtime_hist','How long NCs stay open',
+    'Days from opening to closing. Median in scope: '+
+      (d.leadtime_hist.median||0)+' days.',
+    mkLead(d.leadtime_hist)));
+  s.appendChild(g);out.appendChild(s);
+
+  // 6 · Supplier vs production
+  s=section(6,'Supplier against production');g=grid('one');
+  g.appendChild(card('supplier_monthly','Supplier and production NCs per month',
+    'Z2 procurement complaints against Z3 production NCs, by month opened.',
+    mkGrouped(d.supplier_monthly)));
+  s.appendChild(g);
+  g=grid('one');
+  g.appendChild(card('supplier_compare','Side by side',
+    'Each measure on its own scale. Amber is supplier, blue is production. Click a bar to read those NCs.',
+    mkCompare(d.supplier_compare)));
+  s.appendChild(g);out.appendChild(s);
+
+  return out;
+}
+
+// ---------- render ----------
+function render(d){
+  LAST=d;STATE.options=d.options;
+  const b=document.getElementById('board');
+
+  if(!FILTERS_BUILT){
+    b.innerHTML='';
+    const host=document.createElement('div');host.id='filterHost';b.appendChild(host);
+    const body=document.createElement('div');body.id='body';b.appendChild(body);
+    host.appendChild(buildFilters(d.options));
+    paintFilters();
+    FILTERS_BUILT=true;
+  }
+  setCount(d.filtered,d.all);
+
+  const body=document.getElementById('body');
+  body.innerHTML='';
+  body.appendChild(buildBody(d));
+  requestAnimationFrame(()=>{resizeAllPlots();setTimeout(resizeAllPlots,300);});
+
+  if(PENDING_RAW){                    // reopen the table after a drill
+    const p=PENDING_RAW;PENDING_RAW=null;
+    setTimeout(()=>openRaw(p.id,p.req),60);
+  }
+}
+
+// ---------- refresh ----------
+let _refreshTimer=null;
+function queueRefresh(){
+  clearTimeout(_refreshTimer);
+  _refreshTimer=setTimeout(refresh,220);
+}
+async function refresh(){
+  const d=await api('data',{filters:payloadFilters()});
+  if(d.empty)return;
+  render(d);          // filter bar is kept; only the body is rebuilt
+}
+async function boot(){
+  showVersion();
+  const d=await api('data',{filters:payloadFilters()});
+  if(d.empty){document.getElementById('board').innerHTML=
+    '<div class="empty">No data loaded yet.<br>Click <b>Load export</b> to add the NC export.</div>';
+    FILTERS_BUILT=false;return;}
+  render(d);
+}
+function hardBoot(){FILTERS_BUILT=false;boot();}
+
+// ---------- toast ----------
+function toast(m){const t=document.getElementById('toast');
+  t.textContent=m;t.style.display='block';
+  clearTimeout(t._t);t._t=setTimeout(()=>{t.style.display='none';},2800);}
+
+// ---------- feedback ----------
+function openFeedback(){document.getElementById('feedbackSheet').classList.add('open');}
+function closeFeedback(){document.getElementById('feedbackSheet').classList.remove('open');}
+async function sendFeedback(){
+  const msg=document.getElementById('fb_msg').value.trim();
+  if(!msg){toast('Write a line first, then send');return;}
+  const fd=new FormData();
+  fd.append('message',msg);
+  fd.append('name',document.getElementById('fb_name').value);
+  fd.append('category',document.getElementById('fb_cat').value);
+  const f=document.getElementById('fb_file').files[0];
+  if(f)fd.append('file',f);
+  try{
+    const r=await fetch('api/feedback',{method:'POST',body:fd});
+    const j=await r.json();
+    if(j&&j.ok){closeFeedback();toast('Thanks — saved with the dashboard');
+      document.getElementById('fb_msg').value='';
+      document.getElementById('fb_file').value='';}
+    else toast('Could not save that — try again');
+  }catch(e){toast('Could not save that — try again');}
+}
+
+// ---------- load dialog ----------
+function openLoad(){document.getElementById('loadSheet').classList.add('open');}
+function closeLoad(){document.getElementById('loadSheet').classList.remove('open');}
+function pickMode(m){STATE.loadMode=m;
+  document.getElementById('modeAdd').classList.toggle('sel',m==='add');
+  document.getElementById('modeReplace').classList.toggle('sel',m==='replace');}
+document.getElementById('loadFile').onchange=(e)=>{
+  STATE.loadFileObj=e.target.files[0];
+  document.getElementById('loadName').textContent=
+    STATE.loadFileObj?'Selected: '+STATE.loadFileObj.name:'';};
+async function doLoad(){
+  if(!STATE.loadFileObj){document.getElementById('loadMsg').textContent='Pick a file first.';return;}
+  const fd=new FormData();fd.append('file',STATE.loadFileObj);fd.append('mode',STATE.loadMode);
+  document.getElementById('loadMsg').textContent='Loading…';
+  const r=await fetch('api/upload',{method:'POST',body:fd});
+  const j=await r.json();
+  if(j.ok){document.getElementById('loadMsg').textContent=
+    'Loaded '+j.added+' NCs. '+j.total+' now in Integration + Matching.';
+    closeLoad();STATE.filters={};DRILL.rc=[];DRILL.det=[];
+    FILTERS_BUILT=false;boot();}
+  else document.getElementById('loadMsg').textContent='Load failed.';
+}
+
+boot();
+</script>
+</body>
+</html>
