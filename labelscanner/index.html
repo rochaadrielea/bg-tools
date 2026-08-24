@@ -297,7 +297,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v8.2';
+const VERSION = 'v8.3';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -1899,7 +1899,11 @@ const BAND_CFG = {
   // into "Maine s00186" - a material number has never contained a lowercase
   // letter, so allowing them only gave the engine wrong answers to choose from.
   mat: {psm:'6', wl:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.'},
-  rev: {psm:'6', wl:REV_WHITELIST},       // capitals only, for its whole life
+  rev:  {psm:'6', wl:REV_WHITELIST},      // the vocabulary, for its whole life
+  // v8.3: the revision reads the SAME picture two ways, and until now it did
+  // them one after the other on one worker - so a look cost two reads back to
+  // back. A second identical worker lets both views run at once and halves it.
+  rev2: {psm:'6', wl:REV_WHITELIST},
   chg: {psm:'6', wl:''}
 };
 const bandWorkers = {};
@@ -3154,7 +3158,10 @@ function stopMaterialVoting(){
 //  Running out of attempts does NOT block the label - it goes to the confirm
 //  strip with the Revision shown blank, which is the operator's cue to look.
 // ============================================================================
-const REV_POLL_MS    = 450;
+// v8.3: faster. A look now costs about half what it did (the two views read on
+// two threads instead of one after the other), so the loop can come round more
+// often without queueing up behind itself.
+const REV_POLL_MS    = 220;
 // Adriele's rule: FIVE votes, and FOUR of them must agree. Much stricter than
 // the material's two, and deliberately so - the material has 399 numbers to be
 // checked against, the revision has nothing. Four out of five is the only
@@ -3165,7 +3172,12 @@ const REV_POLL_MS    = 450;
 // blurred frame could sink a letter that four later reads all agree on.
 // REV_MAX_LOOKS stops it looking forever when the band is aimed at nothing.
 const REV_MAX_TRIES  = 10;   // votes collected (Adriele: at least 10 tries)
-const REV_LOCK_VOTES = 4;    // votes that must agree
+// THREE agreeing, not four. Four was the right number when the answer could be
+// any of 26 letters and nothing vouched for it. With a five-letter vocabulary
+// doing its own filtering - and every invalid reading discarded rather than
+// counted - three agreeing frames is already stronger evidence than four were
+// before. Adriele asked for 3, and the vocabulary is what pays for it.
+const REV_LOCK_VOTES = 3;    // votes that must agree
 const REV_MAX_LOOKS  = 40;   // band reads allowed while gathering those votes
 
 // (REV_WHITELIST is declared up with BAND_CFG - the band workers are
@@ -3289,8 +3301,23 @@ async function revTick(){
       // ====================================================================
       let bw = null;
       try{ bw = binarise(band); }catch(_){}
-      const rawA = await readBand('rev', band);
-      const rawB = bw ? await readBand('rev', bw) : '';
+
+      let rawA = '', rawB = '';
+      if(bw){
+        // Both views at once when a second worker exists; one after the other
+        // when it does not. Either way the rule below is identical - this is
+        // purely how long the look takes.
+        const w2 = await getBandWorker('rev2');
+        if(w2){
+          const both = await Promise.all([readBand('rev', band), readBand('rev2', bw)]);
+          rawA = both[0]; rawB = both[1];
+        } else {
+          rawA = await readBand('rev', band);
+          rawB = await readBand('rev', bw);
+        }
+      } else {
+        rawA = await readBand('rev', band);
+      }
 
       // ONE VALID READING BETWEEN THE TWO VIEWS IS ENOUGH  -  v8.2
       // With only five letters possible, a view that comes back R or V or G has
@@ -3503,9 +3530,15 @@ setInterval(function(){
   // time it was allowed to start the label had usually gone. It now starts as
   // soon as the label is identified as WAE and anything at all has been read
   // off it, and runs alongside the charge instead of behind it.
+  // v8.3: EARLIER. The band is anchored to the CH-/EQ- barcode, and that
+  // barcode is usually the first thing that decodes - so the revision can start
+  // reading the moment it lands, instead of waiting for the material or the
+  // charge to arrive first. On the EQ label the charge comes from text and
+  // takes seconds; the revision no longer waits behind it.
   if(!revVoteRunning && !heldField('Rev')
      && revTries < REV_MAX_TRIES && revLooks < REV_MAX_LOOKS
-     && isWae() && (heldField('Mat') || heldField('Char'))) startRevVoting();
+     && isWae() && (heldField('CH-Nr') || heldField('Mat') || heldField('Char')))
+    startRevVoting();
 }, 600);
 
 renderTable();
