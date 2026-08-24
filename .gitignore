@@ -55,3 +55,7 @@ __pycache__/
 venv/
 !labelscanner/data/
 !labelscanner/data/master.json
+# v7 guard
+*.bak
+*.bak.*
+quality.db*

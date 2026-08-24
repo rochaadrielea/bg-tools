@@ -60,16 +60,10 @@
   .status.hit .dot{background:#fff;box-shadow:0 0 8px #fff;}
   .status.bad .dot{background:var(--bad);box-shadow:0 0 8px var(--bad);}
 
-  /* v6.2: the controls used to be absolutely positioned INSIDE the camera view,
-     which covered the label you were trying to aim at - and with six chips they
-     wrapped over each other. They now sit ABOVE the view, in normal flow. */
   .camtools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;}
   .chip{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:20px;padding:9px 13px;cursor:pointer;user-select:none;}
   .chip.on{background:var(--signal);color:#08130E;border-color:var(--signal);}
   .chip.act{border-color:var(--warn);color:var(--warn);}
-  /* v6.1: the hint used to sit INSIDE the camera view at top:52px, which assumed
-     one row of chips. With four chips they wrap to two rows and the text printed
-     straight over "Read label" and the zoom slider. It now lives under the view. */
   .hint{margin:10px 0 0;font-family:var(--mono);font-size:11px;line-height:1.5;color:#FFDCA8;background:rgba(255,180,84,.14);border:1px solid var(--warn);border-radius:8px;padding:7px 10px;display:none;}
   .hint.show{display:block;}
   .rawline{margin:8px 0 0;font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--ink-dim);border:1px dashed var(--line);border-radius:8px;padding:6px 9px;display:none;word-break:break-all;}
@@ -115,6 +109,10 @@
   .field.flagged input{color:var(--warn);}
   .field.aged input{color:var(--warn);}
   .field label i{font-style:normal;color:var(--warn);}
+  .morefields{margin:10px 10px 0;font-family:var(--mono);font-size:11px;color:var(--ink-dim);
+    border:1px dashed var(--line);border-radius:8px;padding:7px 10px;display:none;line-height:1.6;}
+  .morefields.show{display:block;}
+  .morefields b{color:var(--ink);}
   .legend{font-family:var(--mono);font-size:10px;color:var(--ink-dim);margin:8px 14px 0;line-height:1.6;}
   .legend .g{color:var(--signal);}.legend .o{color:var(--warn);}
 
@@ -127,24 +125,29 @@
   td.flag{color:var(--warn);}
   .empty{color:var(--ink-dim);font-family:var(--mono);font-size:12px;text-align:center;padding:22px;}
 
-  /* v6.5: compact amber CONFIRM strip. Not the full review card - just the two
-     mandatory values and one button, in a distinct amber so it reads as
-     "look and confirm", different from the green success splash and the red
-     review card. Fires when the Charge was read but has no master to vouch for
-     it, so a human confirms it by eye. */
+  /* v7.0: THE CONFIRM STRIP IS NOW THE ONLY DOOR A ROW CAN WALK THROUGH.
+     It no longer shows two values - it shows the four that matter (Material,
+     Charge, Revision, Serial) so the operator checks the whole label against
+     what is in their hand, once, every time. */
   .confirmbar{position:fixed;left:0;right:0;bottom:0;z-index:30;
     background:#3A2A12;border-top:2px solid var(--warn);
-    padding:14px 16px calc(14px + env(safe-area-inset-bottom));
+    padding:12px 14px calc(12px + env(safe-area-inset-bottom));
     display:none;max-width:640px;margin:0 auto;}
   .confirmbar.show{display:block;}
-  .confirmbar .cvals{font-family:var(--mono);font-size:16px;color:#FFE9C4;
-    text-align:center;margin:0 0 12px;line-height:1.5;}
-  .confirmbar .cvals b{color:#fff;}
-  .confirmbar .cvals .tag{font-size:12px;color:var(--warn);}
-  .confirmbar .crow{display:grid;grid-template-columns:1fr 2fr;gap:10px;}
-  .confirmbar button{font-family:var(--sans);font-size:16px;font-weight:700;
-    border-radius:11px;padding:15px;cursor:pointer;border:1px solid var(--line);}
-  .confirmbar .cdismiss{background:transparent;color:var(--ink-dim);}
+  .confirmbar .ctitle{font-family:var(--mono);font-size:11px;letter-spacing:1px;
+    color:var(--warn);text-transform:uppercase;margin:0 0 8px;text-align:center;}
+  .cgrid{display:grid;gap:1px;background:#5A431E;border-radius:9px;overflow:hidden;margin:0 0 10px;}
+  .crowf{display:grid;grid-template-columns:82px 1fr;align-items:center;background:#4A3617;}
+  .crowf .k{font-family:var(--mono);font-size:11px;color:#D8B87C;padding:0 0 0 12px;}
+  .crowf .v{font-family:var(--mono);font-size:17px;color:#fff;padding:10px 12px;word-break:break-all;}
+  .crowf .v.miss{color:#C9A464;font-size:14px;}
+  .crowf.tagrow .v{font-size:13px;color:var(--warn);}
+  .confirmbar .crow{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .confirmbar .crow.three{grid-template-columns:1fr 1fr 1.4fr;}
+  .confirmbar button{font-family:var(--sans);font-size:15px;font-weight:700;
+    border-radius:11px;padding:14px 8px;cursor:pointer;border:1px solid var(--line);}
+  .confirmbar .cdismiss{background:transparent;color:#D8B87C;}
+  .confirmbar .cedit{background:transparent;color:#fff;border-color:#8A6B2E;}
   .confirmbar .cok{background:var(--warn);color:#241703;border-color:var(--warn);}
 
   .exportbar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 22%);display:flex;gap:10px;max-width:640px;margin:0 auto;}
@@ -162,7 +165,6 @@
   <div class="banner" id="banner"></div>
 
   <div class="camtools" id="camtools">
-      <div class="chip on" id="autoChip">Auto-add</div>
       <div class="chip" id="manualChip">Add manually</div>
       <div class="chip" id="scanChip">Scan label</div>
       <div class="chip" id="refreshChip">Refresh camera</div>
@@ -172,7 +174,6 @@
         <span>zoom</span><input type="range" id="zoom" min="1" max="5" step="0.1" value="1">
     </div>
   </div>
-
 
   <div class="stage">
     <video id="vid" playsinline muted autoplay></video>
@@ -198,16 +199,17 @@
   </div>
 
   <div class="review" id="review">
-    <h2 id="reviewTitle">Review &amp; confirm</h2>
+    <h2 id="reviewTitle">Fill in this label</h2>
     <div class="rnote" id="rnote"></div>
     <div class="fields" id="fields"></div>
+    <div class="morefields" id="moreFields"></div>
     <div class="legend">
       <span class="g">&#9642;</span> from barcode &nbsp; <span class="o">&#9642;</span> from OCR &nbsp; no mark = typed by you<br>
-      Material and Charge are required. Everything else is optional.
+      Material and Charge are required. Revision and Serial are filled when the label carries them.
     </div>
     <div class="controls" style="margin:12px 10px 4px;">
       <button class="ghost" id="discardBtn">Discard</button>
-      <button class="primary" id="addBtn">Add row</button>
+      <button class="primary" id="addBtn">Check &amp; confirm</button>
     </div>
   </div>
 
@@ -218,9 +220,11 @@
 </div>
 
 <div class="confirmbar" id="confirmBar">
-  <div class="cvals" id="confirmVals"></div>
-  <div class="crow">
+  <div class="ctitle">Check against the label in your hand</div>
+  <div class="cgrid" id="confirmGrid"></div>
+  <div class="crow three">
     <button class="cdismiss" id="confirmDismiss">Not this</button>
+    <button class="cedit" id="confirmEdit">Edit</button>
     <button class="cok" id="confirmOk">Confirm &amp; add</button>
   </div>
 </div>
@@ -232,73 +236,61 @@
 
 <script>
 // ============================================================================
-//  WAE LABEL SCANNER  v6.3
+//  WAE LABEL SCANNER  v7.0
 //  ---------------------------------------------------------------------------
-//  THE ONE RULE THIS VERSION EXISTS FOR
+//  WHAT CHANGED FROM v6.8, AND WHY
 //
-//  Nothing older than COHERENCE_MS (900 ms) is ever paired, shown, prefilled or
-//  written. Past that window a value is not evidence, so it does not exist.
+//  1. NOTHING IS EVER WRITTEN WITHOUT A HUMAN LOOKING AT IT.
+//     v6.8 auto-added a row the moment Material + Charge were both read from
+//     barcodes. That is fast and it is also the one place where a wrong pairing
+//     could reach the table with nobody having seen it. The confirm strip is now
+//     the ONLY door: barcode-only, OCR, hand-typed - every label stops, shows
+//     Material / Charge / Revision / Serial, and waits for one tap. The
+//     "Auto-add" chip is gone because it no longer means anything.
 //
-//  v4.2 held every field it had ever read until a row was written: batch off
-//  label A, material off label B, auto-added as one row. v5.x narrowed that but
-//  still KEPT a stale value and sent the mixed pair to review, where a tap
-//  could still write it. v6.0 deletes it instead - the moment a mandatory field
-//  arrives from a barcode, any other mandatory field past the window is EVICTED
-//  and the operator is told. The wrong pairing never forms, so there is nothing
-//  to click through.
+//  2. REVISION IS READ, NOT HOPED FOR.
+//     Rev is a controlled vocabulary of 26 - one letter. So the same principle
+//     that makes the material trustworthy applies: the read does not have to be
+//     right, it has to be close, and the vocabulary judges it. Dedicated band,
+//     5 attempts, 2 agreeing reads to file, letter-repair (8->B, 4->A, 0->D).
+//     Anything that is not a single A-Z is thrown away, never guessed.
 //
-//  Consequences of that rule, all deliberate:
-//   - the operator can always type a label in by hand (Add manually is always
-//     on screen), and that card opens with LIVE values only, which in practice
-//     means empty. Blank is the safe default.
-//   - an OCR burst suspends the window, because holding still on one label is
-//     deliberate. Any barcode arriving mid-burst cancels the burst and evicts:
-//     a new label always wins over a running read.
+//  3. THE MATERIAL TRIES HARD BEFORE IT ASKS.
+//     v6.8 gave up after a few quick video-frame reads and opened the card.
+//     v7.0 escalates first, the way a document scanner does: full-resolution
+//     still -> magnify into the readable range -> Otsu black-and-white ->
+//     read at 0/90/180/270 -> judge every token against the master. The
+//     rotation matters: a label photographed sideways could never yield a
+//     material by text before, because only the barcode ladder rotated.
 //
-//  MASTER LIST: one list, material numbers only. In list -> ML. Not in list,
-//  or no list loaded -> RV. RV never blocks a row.
+//  4. THE CARD IS FOUR FIELDS, NOT ELEVEN.
+//     Filling a label by hand means Material, Charge, Revision, Serial.
+//     Everything else the scanner read is kept on the row and shown as a
+//     read-only line, so nothing is lost and nothing has to be typed twice.
 //
-//  Tuning lives in three places and nowhere else:
+//  UNCHANGED AND DELIBERATE:
+//   - MASTER LIST judges the material number only. In list -> ML, not -> RV.
+//     RV never blocks a row.
+//   - The CHARGE has no vocabulary, so it is never settled by a majority of
+//     one. Unclear -> the operator chooses.
+//   - Distance-2 repairs are NEVER auto-applied.
+//
+//  Tuning lives in four places and nowhere else:
 //    applyBarcodes()  barcode -> field rules   (green mark)
 //    parseOcr()       printed text -> field    (amber mark)
+//    fixRevChar()     the revision letter repair
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v6.8';
+const VERSION = 'v7.0';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
-// COHERENCE_MS  THE staleness window. Older than this = not this label.
-// IDLE_MS       no evidence at all for this long -> throw the part-read away.
-// BOX_SPANS     two barcodes are on one label when their centres are within
-//               this many barcode-diagonals of each other.
-// GRACE_MS      after the mandatory pair lands, keep reading this long so the
-//               rest of the SAME label joins the same row.
-// HINT_MS       no row written for this long -> remind about Add manually.
 const COHERENCE_MS = 900;
 const IDLE_MS = 2500;
 const BOX_SPANS = 2.5;
-const GRACE_MS = 800;
 const HINT_MS = 6000;
 const NEED_VOTES = 2;
-const OCR_PASSES = 3;
-// OCR_MAX_PX  longest edge handed to Tesseract. v6.0 UPSCALED the crop 1.6x,
-//             which made every pass chew ~2.5x the pixels for no accuracy gain -
-//             that was the "reading text extremely slow".
-// ENHANCE_EVERY  a raw decode is cheap; the upscale+contrast retry is not, so it
-//             only runs on every Nth frame that found nothing.
-// MAT_FIX_DIST  a one-character OCR repair is applied ONLY when exactly one
-//             master number sits that far away. Distance 2 is never auto-applied:
-//             a real extra part can sit 2 characters from a valid one and nothing
-//             can tell them apart.
-// Tesseract needs roughly 30 px of capital-letter height to read reliably. The
-// label crop off a phone preview is ~650 px wide, which gives about 15 - and
-// that is why "Mat.No 3001195" came back as "Maine s00186". Measured on the real
-// label: at 1x the material is unreadable garbage, at 3-4x it reads 3001106,
-// one or two characters out.
-// v6.1 upscaled EVERYTHING (slow, no gain on an already-large photo); v6.2
-// refused to upscale at all (fast, unreadable on a small crop). Both were wrong:
-// the target is a RANGE. Small crops are magnified, large ones are shrunk.
 const OCR_MIN_PX = 1800;
 const OCR_MAX_PX = 2200;
 const ENHANCE_EVERY = 3;
@@ -308,6 +300,10 @@ const COLS = ["Mat","Definition","Rev","SerNr","Char","L-Char","Auftr","Menge","
 const AUDIT_COLS = ["Source","Proof","Check"];
 const ALL_COLS = COLS.concat(AUDIT_COLS);
 const MANDATORY = ["Mat","Char"];
+// v7.0: the four fields a person actually reads off a label by eye. These are
+// the ones shown on the confirm strip and the only ones the hand-fill card
+// offers. The rest still travel with the row - they are just not typed.
+const KEY_COLS = ["Mat","Char","Rev","SerNr"];
 const STORE_KEY = 'wae_label_rows_v5';   // unchanged on purpose: keeps rows already on the phone
 
 const rows = loadRows();
@@ -323,10 +319,11 @@ const fileBtn=document.getElementById('fileBtn'), focusBtn=document.getElementBy
 const scanChip=document.getElementById('scanChip'), torchChip=document.getElementById('torchChip');
 const refreshChip=document.getElementById('refreshChip'), clearChip=document.getElementById('clearChip');
 const rawLine=document.getElementById('rawLine');
-const autoChip=document.getElementById('autoChip'), manualChip=document.getElementById('manualChip');
+const manualChip=document.getElementById('manualChip');
 const hintEl=document.getElementById('hint');
 const zoomWrap=document.getElementById('zoomWrap'), zoom=document.getElementById('zoom');
 const review=document.getElementById('review'), fieldsEl=document.getElementById('fields'), rnote=document.getElementById('rnote');
+const moreFieldsEl=document.getElementById('moreFields');
 const reviewTitle=document.getElementById('reviewTitle');
 const addBtn=document.getElementById('addBtn'), discardBtn=document.getElementById('discardBtn');
 const exportBtn=document.getElementById('exportBtn'), clearBtn=document.getElementById('clearBtn');
@@ -349,15 +346,15 @@ document.getElementById('freshBtn').addEventListener('click', async()=>{
 //  The master judges the MATERIAL NUMBER and nothing else.
 //   - not the CHARGE: a batch is assigned by the production order at build
 //     time. No BOM states which batch was consumed, so any check would reject
-//     every new batch. A correct charge depends entirely on reading the right
-//     label - which is what the eviction rule above is for.
+//     every new batch.
+//   - not the REVISION: the label carries the revision of the part in the bag,
+//     which is exactly the thing that may differ from the design. Checking it
+//     against a list would flag the deviation we are here to record.
 //   - not the DESCRIPTION: the same part carries different text in different
 //     languages, so comparing text flags correct reads.
 //
-//  In list -> ML. Not in list -> RV. No list loaded -> RV, and nothing is
-//  auto-added while the list is missing: every row passes through review.
-//  RV NEVER BLOCKS A ROW. A part that is not in the list is still a part that
-//  was physically there, and losing that read is worse than flagging it.
+//  In list -> ML. Not in list -> RV. No list loaded -> RV.
+//  RV NEVER BLOCKS A ROW.
 // ============================================================================
 let MASTER = null;
 const matIndex = new Map();
@@ -375,8 +372,6 @@ async function loadMaster(){
     const res = await fetch('data/master.json?t='+Date.now(), {cache:'no-store'});
     if(!res.ok) throw new Error('HTTP '+res.status);
     MASTER = await res.json();
-    // Two shapes are valid: the internal file lists objects with names, the
-    // published file lists bare numbers. Only the number is ever used.
     (MASTER.materials||[]).forEach(function(m){
       const id = normId(typeof m === 'string' ? m : (m && m.material));
       if(id) matIndex.set(id, true);
@@ -388,13 +383,11 @@ async function loadMaster(){
   }catch(e){
     MASTER = null; matList = [];
     masterLine.className = 'masterline off';
-    masterLine.innerHTML = 'master list <b>NOT LOADED</b> &mdash; nothing is checked, every row is tagged RV and must be confirmed';
+    masterLine.innerHTML = 'master list <b>NOT LOADED</b> &mdash; nothing is checked, every row is tagged RV';
     console.warn('master.json:', e);
   }
 }
 
-// The only verdict there is. Two values, no prose - this string goes straight
-// into the Check column of the export.
 function checkTag(mat){
   if(!MASTER) return 'RV';
   const m = normId(mat);
@@ -403,21 +396,10 @@ function checkTag(mat){
 
 // ---------------------------------------------------------------------------
 //  READING THE MATERIAL FROM TEXT (the DocuBOM idea, in the browser)
-//
-//  A material number is a CONTROLLED VOCABULARY - 399 of them. So the OCR does
-//  not have to be right, it only has to be close, and the master judges the
-//  rest. That is why text can be trusted here and cannot be trusted for the
-//  Charge, which has no vocabulary to check against.
-//
 //    confirmed  exact in the master
-//    corrected  ONE unambiguous character repaired: exactly one master number
-//               sits at distance 1. The original read is kept and shown.
-//    review     not in the master, no safe repair. Value kept as read, tagged
-//               RV, nearest candidate offered as a hint only.
-//
-//  Distance 2 is NEVER auto-applied. Learned the hard way on the scanned
-//  Auftragsstuecklisten: a genuine extra part can sit two characters from a
-//  valid one and no amount of voting can tell them apart.
+//    corrected  ONE unambiguous character repaired
+//    review     not in the master, no safe repair -> tagged RV
+//  Distance 2 is NEVER auto-applied.
 // ---------------------------------------------------------------------------
 function editDist(a, b, cap){
   if(a === b) return 0;
@@ -430,27 +412,19 @@ function editDist(a, b, cap){
       cur[j] = Math.min(prev[j]+1, cur[j-1]+1, prev[j-1] + (a[i-1]===b[j-1]?0:1));
       if(cur[j]<best) best=cur[j];
     }
-    if(best > cap) return cap+1;          // whole row already too far
+    if(best > cap) return cap+1;
     const t=prev; prev=cur; cur=t;
   }
   return prev[b.length];
 }
 
-// OCR confusion pairs are DETERMINISTIC, not guesses: a printed 0 comes back as
-// O, a 1 as l or I, a 5 as S, an 8 as B. Substituting them and keeping the result
-// ONLY when it lands exactly on a master number is the same controlled-vocabulary
-// principle as the distance-1 repair - it is verified, not invented. If the
-// substituted form is not in the master, it is thrown away and the raw read kept,
-// so a material with genuine letters (C3529120-C, N3060311X) cannot be mangled.
 const CONFUSE = [[/O/g,'0'],[/[IL]/g,'1'],[/S/g,'5'],[/B/g,'8'],[/Z/g,'2'],[/G/g,'6']];
 
 function confusionVariants(s){
   const out = [s];
-  // all-digits reading: the most common case by far
   let all = s;
   CONFUSE.forEach(function(c){ all = all.replace(c[0], c[1]); });
   if(all !== s) out.push(all);
-  // one substitution at a time, for part numbers that legitimately mix both
   CONFUSE.forEach(function(c){
     const v = s.replace(c[0], c[1]);
     if(v !== s && out.indexOf(v) < 0) out.push(v);
@@ -458,13 +432,10 @@ function confusionVariants(s){
   return out;
 }
 
-// A material token as it comes off the page: spaces and stray dots inside the
-// number are OCR artefacts ("300 1195", "3001.195"), a trailing dash is not.
 function cleanMatToken(raw){
   return String(raw||'').toUpperCase().replace(/[\s.]/g,'').replace(/[^A-Z0-9-]/g,'');
 }
 
-// -> {tier, value, original} - the material actually filed
 function resolveMat(raw){
   const t = cleanMatToken(raw);
   if(!t) return {tier:'review', value:'', original:''};
@@ -475,24 +446,11 @@ function resolveMat(raw){
   for(let i=1;i<vs.length;i++){
     if(matIndex.has(vs[i])) return {tier:'corrected', value:vs[i], original:t};
   }
-  const fx = masterFix(t);                     // then the single-character repair
+  const fx = masterFix(t);
   if(fx.tier === 'corrected') return fx;
   return {tier:'review', value:t, original:''};
 }
 
-// LAST RESORT, AND THE MOST RELIABLE ONE: forget the field labels entirely and
-// look for a master number anywhere in the text. The label may print "Mat.No",
-// "Mat.", or the OCR may mangle the words around the number - but the number
-// itself belongs to a list of 399. EXACT hits only here (after confusion
-// substitution): accepting a near-miss without a field label to anchor it is how
-// a batch number would get filed as a material.
-// WHEN THE READ IS TOO BROKEN TO TRUST, SUGGEST INSTEAD OF GUESS.
-// Measured on the real label, the best OCR pass returned 3001106 for a material
-// printed 3001195 - two characters out. Applying that automatically is exactly
-// the distance-2 mistake this tool refuses to make. But making the operator type
-// seven digits when the answer is one of three numbers is its own kind of bad.
-// So: the closest master numbers are offered as buttons in the card. One tap,
-// eyes on the label, nothing invented.
 function nearestMasters(text, howMany, notMat){
   if(!MASTER) return [];
   const lines = String(text||'').split(/\n/).filter(function(l){ return !OTHER_FIELD_LINE.test(l); });
@@ -518,11 +476,7 @@ function nearestMasters(text, howMany, notMat){
   return out;
 }
 
-// Lines that belong to another field. Measured on the real label: the token scan
-// picked up "Prod no 2003721" as the material in 4 of 6 reads. A production order
-// is not a material - but if one ever happens to collide with a master number,
-// filing it as the material is silent and wrong. So the scan never looks at a
-// line that carries another field's label.
+// Lines that belong to another field. A production order is not a material.
 const OTHER_FIELD_LINE =
   /prod\s*n|ba[t1lI][a-z0-9]{0,3}\s*[.:]?\s*\d|qty|menge|expiry|verfalls|charge|l-?cha|sernr|ch-\d|eq-\d/i;
 
@@ -539,7 +493,6 @@ function matFromTokens(text, exclude, exclude2){
   return '';
 }
 
-// -> {tier, value, original, near}
 function masterFix(raw){
   const m = normId(raw);
   if(!m) return {tier:'review', value:'', original:'', near:''};
@@ -555,22 +508,43 @@ function masterFix(raw){
     if(d < nearD){ nearD = d; near = matList[i]; }
   }
   // A single-character repair is only safe when NOTHING ELSE IS CLOSE.
-  // Caught on the real label: the line pass read 3001166, which is one character
-  // from 3001196 and two from 3001195 - the true part. The old rule saw one
-  // candidate at distance 1, corrected to 3001196 and tagged it ML. Confidently
-  // wrong, which is the worst thing this tool can produce. A rival within two
-  // characters now blocks the repair and both are offered to the operator.
   if(at1.length === 1 && at2.length === 0) return {tier:'corrected', value:at1[0], original:m, near:''};
   return {tier:'review', value:m, original:'', near:(nearD<=2 ? near : '')};
 }
 
 // ============================================================================
+//  THE REVISION LETTER  -  v7.0
+//  ---------------------------------------------------------------------------
+//  Rev is a vocabulary of 26: one capital letter, A B C D ... So the same rule
+//  that makes the material trustworthy applies here and NOT to the charge - the
+//  read only has to be close, because the vocabulary decides.
+//
+//  The repairs below are deterministic OCR confusions, read off the real
+//  labels: "Rev. B" comes back as 8, "Rev. A" as 4. Substituting them is
+//  verified, not invented, because the result must still be a single A-Z.
+//  Anything else - two characters, a digit that repairs to nothing, a word - is
+//  DISCARDED. A blank revision is visible; a wrong one is not.
+// ============================================================================
+const REV_FIX = {'8':'B','4':'A','0':'D','6':'G','5':'S','1':'I','2':'Z','7':'T','9':'G','$':'S'};
+
+function fixRevChar(raw){
+  // Punctuation is noise ("B." -> B). Anything that is still more than ONE
+  // character after that is not a revision and is thrown away.
+  // Caught in test: taking the first character turned a band that read only the
+  // word "REV" into revision R - a value invented out of the label's own label.
+  // A revision is one character or it is nothing.
+  const s = String(raw||'').toUpperCase().replace(/[^A-Z0-9$]/g,'');
+  if(s.length !== 1) return '';
+  const c = REV_FIX[s] || s;
+  return /^[A-Z]$/.test(c) ? c : '';
+}
+
+// ============================================================================
 //  LABEL SESSION
-//  One session = one physical label. Every field carries when it was read and,
-//  where the decoder gave us one, where in the crop it was read.
+//  One session = one physical label.
 // ============================================================================
 let session = newSession();
-let attemptStart = Date.now();     // last time a row was written / camera start
+let attemptStart = Date.now();
 function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:''}; }
 
 function resetSession(reason){
@@ -582,28 +556,17 @@ function resetSession(reason){
   if(had && reason) setStatus(reason,'live');
 }
 
-// v6.1: NOTHING IS ERASED.
-// v6.0 deleted a mandatory field once it went stale. It was the safest possible
-// rule and it was wrong in practice: reading text takes seconds, so the value
-// you had just captured disappeared while you waited, and the work was lost.
-//
-// So a read value is now HELD for the whole label session. What the clock still
-// decides is the only thing that matters: whether a pair may be written
-// AUTOMATICALLY, or whether it goes to the card for ONE CONFIRMING TAP.
-// A stale pair is never auto-added, is marked with its age in the card, and two
-// different barcode values for one field still stop as a conflict. Nothing is
-// lost, nothing is silently paired.
+// NOTHING IS ERASED. A read value is HELD for the whole label session; the
+// clock only decides whether a pair is PROVEN, which the card then reports.
 function isFresh(f){
   if(!f) return false;
-  if(ocrActive) return true;              // deliberate hold on one label
+  if(ocrActive) return true;
   return (Date.now() - f.t) <= COHERENCE_MS;
 }
 function heldField(col){ return session.fields[col] || null; }
 function heldVal(col){ const f = heldField(col); return f ? f.value : ''; }
 function ageOf(f){ return f ? Math.round((Date.now()-f.t)/1000) : 0; }
 
-// Record one field. `box` and `tick` are optional; when the decoder cannot tell
-// us where in the crop the code was, we say so rather than assume.
 function put(field, value, src, box, tick){
   if(!value) return false;
   const now = Date.now();
@@ -612,9 +575,8 @@ function put(field, value, src, box, tick){
   if(prev && prev.src==='bc' && src!=='bc') return false;          // barcode wins over OCR
   if(prev && prev.value===value){ prev.t=now; session.lastAt=now; return false; }
 
-  // TWO BARCODES, SAME FIELD, DIFFERENT VALUES, both fresh. Not a better read -
-  // evidence that more than one label is in view. Keep the first, record the
-  // disagreement, let evaluate() send it to review.
+  // TWO BARCODES, SAME FIELD, DIFFERENT VALUES: evidence that more than one
+  // label is in view. Keep the first, record the disagreement.
   if(prev && prev.src==='bc' && src==='bc'){
     session.conflict = {field:field, kept:prev.value, other:value};
     session.lastAt = now;
@@ -626,24 +588,15 @@ function put(field, value, src, box, tick){
   return true;
 }
 
-// Housekeeping. It no longer throws anything away - it only reminds.
 setInterval(function(){
   if(!scanning) return;
-  const busyUi = review.classList.contains('show');
+  const busyUi = review.classList.contains('show') || confirmBar.classList.contains('show');
   const incomplete = !MANDATORY.every(function(k){ return heldField(k); });
   const overdue = (Date.now()-attemptStart) > HINT_MS;
   hintEl.classList.toggle('show', !busyUi && incomplete && overdue);
 }, 400);
 
-// ---- the reticle is a GATE, and now a physical one --------------------------
-// v5.x decoded the whole frame and discarded codes that fell outside the box.
-// That cost full-frame detection 12x a second, and on any phone without
-// BarcodeDetector the decoder returned no positions at all, so the gate was
-// silently OFF. v6.0 decodes the CROP: a code outside the box is never seen by
-// either engine, and detection is ~3x less pixels.
-//
-// The video is drawn with object-fit:cover, so the element crops the frame.
-// This converts the reticle's on-screen rectangle back into video pixels.
+// ---- the reticle is a GATE, and a physical one ------------------------------
 const RET_INSET_X = 0.08, RET_INSET_Y = 0.14;   // must match .reticle CSS inset
 let retCache = null;
 
@@ -666,8 +619,6 @@ window.addEventListener('orientationchange', function(){ retCache=null; });
 const cropCv = document.createElement('canvas');
 const cropCtx = cropCv.getContext('2d');
 
-// Draws the aiming box into cropCv. Returns the canvas, or null if the video
-// is not producing pixels yet.
 function drawCrop(scale, grey){
   const r = reticleRect();
   if(!r || r.w < 8 || r.h < 8) return null;
@@ -679,10 +630,6 @@ function drawCrop(scale, grey){
   return cropCv;
 }
 
-// NOTE: v6.1 had a drawForOcr() that read text from the live video crop. v6.2
-// reads text from a still photo instead (see scanLabel), so it is gone. The
-// barcode-anchored crop idea survives inside the still path, where the label is
-// sharp enough for it to pay off.
 function boxesCohere(a,b){
   if(!a||!b) return null;                 // unknown, not false
   const ca={x:a.x+a.width/2, y:a.y+a.height/2};
@@ -692,21 +639,13 @@ function boxesCohere(a,b){
   return d <= span * BOX_SPANS;
 }
 
-// Can we PROVE the mandatory fields came off one label?
-//   same-frame  strongest: both codes in a single detection
-//   near        different frames, close in time, boxes agree
-//   time-only   close in time but no position available (ZXing / OCR)
-//   split       boxes disagree -> no auto-add
-// (a pair too far apart in time cannot reach here any more: the older one is
-//  evicted before the newer one is written)
+// Can we PROVE the mandatory fields came off one label? This no longer decides
+// whether a row is WRITTEN (a human does that now) - it decides what warning
+// the confirm strip carries.
 function proveSameLabel(){
   const a = heldField(MANDATORY[0]), b = heldField(MANDATORY[1]);
   if(!a || !b) return {ok:false, kind:'incomplete'};
   if(a.tick && b.tick && a.tick===b.tick) return {ok:true, kind:'same-frame'};
-  // Read far apart in time, or held from an earlier moment. Kept, never
-  // auto-added: the card shows each value's age and one tap confirms it.
-  // 'split' is reserved for the different case below - two values whose
-  // positions in the frame say they are on two different labels.
   if(Math.abs(a.t-b.t) > COHERENCE_MS) return {ok:false, kind:'stale-pair'};
   if(!isFresh(a) || !isFresh(b)) return {ok:false, kind:'stale-pair'};
   const co = boxesCohere(a.box, b.box);
@@ -719,22 +658,19 @@ function proveSameLabel(){
 //  CAMERA  (user-authorised, never auto-started)
 // ============================================================================
 let stream=null, track=null, scanning=false, codeReader=null, frameTick=0;
-let nativeDetector=null, autoMode=true, lastBeep=0, worker=null;
+let nativeDetector=null, lastBeep=0, worker=null;
 let ocrActive=false, ocrRun=0;
 let gateActive=true;
 let scanBusy=false;          // a still scan is running: the live loop stands down
-let lastOcrText='';          // what the text reader actually returned, for the card
-let matSuggestions=[];       // closest master numbers, offered as one-tap buttons
-let charSuggestions=[];      // competing Charge readings, offered as one-tap buttons
-let rawUnplaced='';          // last code that matched no rule
-let lastRaw='';              // last code seen at all, with its format
+let lastOcrText='';
+let matSuggestions=[];
+let charSuggestions=[];
+let rawUnplaced='';
+let lastRaw='';
 let enhanceTick=0;
 
 const hints = new Map();
 hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-// v6.1: more symbologies. The new MSL label's barcode has not been identified,
-// and a format that is not in this list is not "unreadable" - it is simply never
-// attempted. Code 93, Codabar and the UPC/EAN-8 family cost nothing to add.
 hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
   ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
   ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.CODABAR,
@@ -747,7 +683,6 @@ const NATIVE_FORMATS = ['code_128','code_39','code_93','codabar','data_matrix',
                         'qr_code','itf','ean_13','ean_8','upc_a','upc_e','pdf417'];
 try{
   if('BarcodeDetector' in window){
-    // asking for a format the browser does not support throws, so ask it first
     if(BarcodeDetector.getSupportedFormats){
       BarcodeDetector.getSupportedFormats().then(function(sup){
         const use = NATIVE_FORMATS.filter(function(f){ return sup.indexOf(f)>=0; });
@@ -773,9 +708,6 @@ if(!secureContextOk()){
 
 authBtn.addEventListener('click', startCamera);
 
-// Three constraint sets, tried in order. Some phones stall on a 1920x1080
-// request; a plain rear-camera request nearly always succeeds, and
-// {video:true} works on anything with a lens.
 const CONSTRAINTS = [
   {video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false},
   {video:{facingMode:'environment'},audio:false},
@@ -796,9 +728,6 @@ async function getStream(){
   throw lastErr || new Error('no camera');
 }
 
-// Waits for real pixels. Never blocks forever: awaiting vid.play() can neither
-// resolve nor reject on some browsers, which used to leave the status stuck on
-// "Starting camera" with no way to tell what went wrong.
 function waitForVideo(ms){
   return new Promise(function(resolve){
     let done = false;
@@ -839,7 +768,7 @@ async function startCamera(){
     authBtn.textContent = 'Restart camera';
     setStatus('Point at ONE label' + (gateActive ? '' : ' (aim box cannot filter on this device)'), 'live');
 
-    warmWorker();              // load the text reader now, not when it is needed
+    warmWorker();
     audioUnlock();
   }catch(e){
     stopCamera();
@@ -871,10 +800,6 @@ function stopCamera(){
   if(stream){ try{ stream.getTracks().forEach(function(t){ t.stop(); }); }catch(_){} stream=null; }
 }
 
-// ~12 checks a second on the CROP. The native detector returns every barcode in
-// the crop with its position, which is what lets us prove two codes share a
-// label. OCR is never run in parallel with this: on a phone each pass takes
-// seconds and starved this loop of CPU, which is why v4.2 missed reads.
 async function nativeLoop(){
   let fails = 0;
   while(scanning){
@@ -883,9 +808,6 @@ async function nativeLoop(){
       if(cv){
         let codes = await nativeDetector.detect(cv);
         fails = 0;
-        // Nothing found on the plain crop. A blurred or low-contrast label often
-        // decodes after an upscale + contrast stretch - the cheap end of the
-        // restoration ladder. Too expensive every frame, so it is throttled.
         if((!codes || !codes.length) && (++enhanceTick % ENHANCE_EVERY === 0)){
           const en = drawCrop(2,true);
           if(en) codes = await nativeDetector.detect(en);
@@ -900,8 +822,6 @@ async function nativeLoop(){
         }
       }
     }catch(err){
-      // Some devices advertise BarcodeDetector and then fail on every call.
-      // Swallowing this silently means the camera runs and nothing is read.
       fails++;
       if(fails === 5){
         console.warn('native detector failing, switching to compatibility reader', err);
@@ -928,9 +848,6 @@ function pointsToBox(pts){
   return {x:x1, y:y1, width:Math.max(1,x2-x1), height:Math.max(1,y2-y1)};
 }
 
-// Compatibility path. Decodes the same crop so the aim box still gates. If this
-// build of ZXing has no canvas entry point we fall back to the whole video
-// element and SAY SO, rather than pretending the box is filtering.
 function startZxing(){
   codeReader = new ZXing.BrowserMultiFormatReader(hints, 200);
   if(typeof codeReader.decodeFromCanvas === 'function'){
@@ -996,29 +913,19 @@ focusBtn.addEventListener('click',function(){ if(!track) return;
   setStatus('Refocusing\u2026','busy'); setTimeout(function(){ setStatus('Point at ONE label','live'); },700);
 });
 
-autoChip.addEventListener('click',function(){ autoMode=!autoMode; autoChip.classList.toggle('on',autoMode);
-  setStatus(autoMode?'Auto-add on':'Manual \u2014 review every label','live'); });
-
 manualChip.addEventListener('click', openManual);
-
-// Adriele's note: "Refresh camera button". Cheapest fix for a stream that has
-// gone to sleep or lost focus - restart it without reloading the page, so the
-// rows already in the table are untouched.
 refreshChip.addEventListener('click', function(){ startCamera(); });
 
-// Nothing expires on its own any more, so there has to be a way to say
-// "forget this label, I am moving on".
 clearChip.addEventListener('click', function(){
-  clearTimeout(graceTimer);
+  stopAllVoting();
+  hideConfirm();
   resetSession('Label cleared');
   showRaw();
 });
 
 // ============================================================================
 //  BARCODE RULES
-//  Order matters and is deliberate: most specific first. In v4.2 the loose Mat
-//  pattern was tested before the L-Char pattern, so a 10-digit L-Char barcode
-//  matched Mat first and was filed as the material number.
+//  Order matters and is deliberate: most specific first.
 // ============================================================================
 function applyBarcodes(codes, tick){
   let changed = false;
@@ -1049,41 +956,27 @@ function applyBarcodes(codes, tick){
       continue;
     }
 
-    // A BARE 6-7 DIGIT NUMBER IS AMBIGUOUS, AND GETTING IT WRONG IS THE WORST
-    // BUG THIS TOOL CAN HAVE. On a WAE label it is the material; on the MSL
-    // label it is the BATCH printed under "Batch", and v6.0 would have filed
-    // 582507 as the material number - exactly the MSL bug from the python
-    // scanner. Digit count cannot separate them. THE MASTER CAN:
-    //   in the master  -> it is a material
-    //   not in it      -> it is a batch, so it is the Charge
-    // If a genuinely RV material arrives this way it lands in Charge and Mat
-    // stays empty, so auto-add cannot fire and the card opens instead. Wrong,
-    // but never silent.
+    // A BARE 6-7 DIGIT NUMBER IS AMBIGUOUS. On a WAE label it is the material;
+    // on the MSL label it is the BATCH. Digit count cannot separate them.
+    // THE MASTER CAN: in the master -> material; not in it -> charge.
     if(/^\d{6,7}$/.test(s)){
       if(MASTER && matIndex.has(normId(s))){
         changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
       } else if(MASTER){
         changed = put('Char', s,'bc',box,tick) || changed;
       } else {
-        // no master to ask: refuse to guess, show it, let the operator place it
         rawUnplaced = s;
         changed = false;
       }
       continue;
     }
 
-    // Nothing matched. v6.0 dropped it in total silence, so a new label format
-    // looked like "the scanner cannot read the barcode". Now it is shown.
     rawUnplaced = s;
   }
   return changed;
 }
 
 // A DECODED CODE IS ALWAYS SHOWN, MATCHED OR NOT.
-// v6.0 dropped any value that fitted no rule in complete silence, so a new label
-// format was indistinguishable from "the camera cannot read the barcode". This
-// line is also how the content of an unidentified barcode gets identified: point
-// the phone at it and read what it says.
 function showRaw(){
   if(!lastRaw){ rawLine.className='rawline'; return; }
   const placed = !rawUnplaced;
@@ -1092,18 +985,13 @@ function showRaw(){
     + (placed ? '' : ' &mdash; no rule matched this, so it was NOT filed. Tell Adriele this line.');
 }
 
-// new-label detection v6.8
-// Decide what mandatory-field value an incoming barcode would carry, using the
-// same rules as applyBarcodes but WITHOUT writing anything. If it carries a
-// material or a batch that DIFFERS from the one currently held, the label has
-// changed - so clear the old session first. This kills the "kept the memory of
-// the last label" bug across every format, and covers the single-lone-barcode
-// case with no timer: a new barcode simply resets.
+// new-label detection: decide what mandatory value an incoming barcode would
+// carry, WITHOUT writing anything. Different value -> the label changed.
 function barcodeMandatory(s){
   s = String(s||'').trim();
   if(/^CH-?\d+$/i.test(s))  return {field:'Char', value:s.replace(/^CH-?/i,'')};
-  if(/^EQ-?\d+$/i.test(s))  return null;                       // EQ is not mandatory
-  if(/^\d{10}$/.test(s))    return null;                       // L-Char
+  if(/^EQ-?\d+$/i.test(s))  return null;
+  if(/^\d{10}$/.test(s))    return null;
   if(/^[A-Z]{1,2}\d{4,}[A-Z0-9-]{0,6}$/i.test(s)) return {field:'Mat', value:s.toUpperCase()};
   if(/^\d{6,7}$/.test(s)){
     if(MASTER && matIndex.has(normId(s))) return {field:'Mat', value:s.toUpperCase()};
@@ -1116,28 +1004,40 @@ function isNewLabel(codes){
     const m = barcodeMandatory(c && c.value);
     if(!m) continue;
     const held = heldVal(m.field);
-    if(held && normId(held) !== normId(m.value)) return true;   // different mandatory value
+    if(held && normId(held) !== normId(m.value)) return true;
+  }
+  return false;
+}
+
+// v7.0: is this barcode set the SAME label that was just confirmed? The camera
+// is still pointed at it after a Confirm, so without this the strip re-opens
+// on the label already in the table. Cleared as soon as a different one shows.
+function isJustConfirmed(codes){
+  if(!lastConfirmed) return false;
+  for(const c of (codes||[])){
+    const m = barcodeMandatory(c && c.value);
+    if(!m) continue;
+    if(normId(m.value) === normId(lastConfirmed[m.field])) return true;
   }
   return false;
 }
 
 function onCodes(codes, tick){
-  // THE BUG THIS GUARD FIXES: during a still scan the label is sitting in front
-  // of the camera, so the live loop decodes it, and the "a new label always
-  // wins" rule below bumped ocrRun - cancelling the very scan that was reading
-  // that label. The scan then returned early and no card ever opened: it looked
-  // like the scanner read the label and did nothing with it.
   if(scanBusy) return;
+  if(confirmBar.classList.contains('show')) return;
 
   // A barcode while text is being read means the label moved. The running OCR
-  // is abandoned and its findings dropped: a new label always wins.
+  // is abandoned: a new label always wins over a running read.
   if(ocrActive){ ocrRun++; ocrActive=false; scanChip.classList.remove('act'); }
 
-  // v6.8: a barcode carrying a DIFFERENT material or batch than the one held
-  // means a new label is in view - clear the old one before reading this.
+  // Still looking at the row that was just added.
+  if(isJustConfirmed(codes)){
+    setStatus('Already added \u2014 point at the NEXT label','live');
+    return;
+  }
+
   if(isNewLabel(codes)){
-    try{ stopMaterialVoting(); }catch(_){}
-    try{ stopChargeVoting(); }catch(_){}
+    stopAllVoting();
     hideConfirm();
     resetSession('New label');
   }
@@ -1154,11 +1054,14 @@ function onCodes(codes, tick){
 
 // ============================================================================
 //  DECIDE WHAT TO DO WITH THE CURRENT SESSION
+//
+//  v7.0: THIS FUNCTION NO LONGER WRITES ANYTHING. Its whole job is to decide
+//  when the label is complete enough to put in front of a human. The confirm
+//  strip is the only door to the table.
 // ============================================================================
-let graceTimer = null;
-
 function evaluate(){
   if(review.classList.contains('show')) return;
+  if(confirmBar.classList.contains('show')) return;
 
   if(session.conflict){
     reticle.classList.add('reject');
@@ -1176,42 +1079,33 @@ function evaluate(){
     if(got.length){
       setStatus(got.map(function(k){ return k+' '+heldVal(k); }).join('  ')
                 + ' \u2014 need ' + miss.join(', '), 'busy');
-      // v6.2: NO AUTOMATIC TEXT READ.
-      // v6.1 fired a three-pass OCR burst here every time a Material was held
-      // without a Charge, and re-fired it on the next barcode - seconds of work,
-      // repeatedly, on a blurred video frame. That is the "tries a lot" grind.
-      // Text is now read ONLY when the operator presses Scan label, and from a
-      // sharp still instead of the stream.
     }
     return;
   }
 
   reticle.classList.remove('partial');
-  const proof = proveSameLabel();
-  const tag = checkTag(heldVal('Mat'));
 
-  // No master list = nothing was checked. Never auto-add in that state.
-  if(!MASTER){
-    setStatus('Master list not loaded \u2014 confirm this row','bad');
-    openReview(proof);
+  // Both mandatory values are in hand. Before showing the strip, give the
+  // optional-but-wanted fields their chance: on a WAE label the Revision is
+  // printed, not encoded, so it needs its own read. The voting loops below
+  // call evaluate() again when they finish or give up.
+  if(isWae() && !heldField('Rev') && revTries < REV_MAX_TRIES && scanning){
+    startRevVoting();
+    setStatus('Reading the revision\u2026','busy');
     return;
   }
-  if(!proof.ok){
-    setStatus(proof.kind==='stale-pair'
-      ? 'Held from an earlier read \u2014 confirm it belongs together'
-      : 'Material and Charge may be from different labels \u2014 check', 'bad');
-    openReview(proof);
-    return;
-  }
-  if(!autoMode){ openReview(proof); return; }
 
-  setStatus('Reading the rest of the label\u2026','busy');
-  clearTimeout(graceTimer);
-  graceTimer = setTimeout(function(){ commit(proof, tag); }, GRACE_MS);
+  presentForConfirm();
 }
 
-// Source is recorded per field, so the export always says where each value came
-// from: a barcode, the text reader, or the operator's fingers.
+// The single place a label is handed to a human.
+function presentForConfirm(){
+  const proof = proveSameLabel();
+  openConfirm(proof);
+}
+
+// Source is recorded per field, so the export always says where each value
+// came from: a barcode, the text reader, or the operator's fingers.
 function sourceLine(get){
   const bc=[], oc=[], ty=[];
   COLS.forEach(function(c){
@@ -1225,46 +1119,12 @@ function sourceLine(get){
   return parts.join(' | ');
 }
 
-// v6.1: the duplicate hold is GONE, at Adriele's instruction. Many materials
-// carry the same batch across several bags, so the notice fired constantly on
-// perfectly correct rows and became noise. Same Material + same Charge is
-// written like anything else. A wrong duplicate is now removed with the red
-// cross in the table instead of being prevented.
 function writeRow(row){
-  rows.push(row); saveRows(); renderTable();   // table refreshes instantly
+  rows.push(row); saveRows(); renderTable();
   attemptStart = Date.now();
   hintEl.classList.remove('show');
-  // v6.5: stop every reading loop the moment a row lands, so the finished label
-  // is not read again. resetSession() clears the fields; these stop the timers.
-  try{ stopMaterialVoting(); }catch(_){}
-  try{ stopChargeVoting(); }catch(_){}
+  stopAllVoting();
   hideConfirm();
-}
-
-function commit(proof, tag){
-  const row = {};
-  COLS.forEach(function(c){ const f=heldField(c); row[c] = f ? f.value : ''; });
-  row.Source = sourceLine(function(c){ const f=heldField(c); return f ? f.src : ''; })
-             + (session.matOriginal ? '  (Mat read as '+session.matOriginal+', corrected against master)' : '');
-  row.Proof  = proof ? proof.kind : 'manual';
-  row.Check  = tag;
-
-  // LAST GATE, and it is unconditional. Between the pair landing and this grace
-  // timer firing, the label can leave the frame and the values go stale. A row
-  // missing either mandatory value proves nothing, so it is never written -
-  // not even empty, not even flagged.
-  if(!row.Mat || !row.Char){
-    resetSession('Label moved before it was saved \u2014 scan it again');
-    return;
-  }
-
-  writeRow(row);
-  // Reset NOW, not on a timer. A delayed reset can wipe the session after the
-  // next label has already started reading into it.
-  resetSession();
-  splashOk(row.Mat + '  /  Charge ' + row.Char, tag);
-  beep(); setTimeout(beep,140);
-  setTimeout(function(){ hideSplash(); restartAfterRow(); }, 900);
 }
 
 function splashOk(txt, tag){
@@ -1274,8 +1134,6 @@ function splashOk(txt, tag){
 }
 function hideSplash(){ document.getElementById('splash').className='splash'; }
 
-// One AudioContext for the whole session. Creating and closing one per beep is
-// slow on iOS and sometimes silent.
 let actx = null;
 function audioUnlock(){
   try{
@@ -1292,7 +1150,109 @@ function beep(){ try{
 }catch(_){} }
 
 // ============================================================================
-//  OCR  (on demand only, and it stops as soon as it has what it needs)
+//  THE CONFIRM STRIP  -  v7.0, the only door
+//  ---------------------------------------------------------------------------
+//  Shows the four values a person can check by eye against the label in their
+//  hand: Material, Charge, Revision, Serial. Revision and Serial are shown even
+//  when empty on a WAE label, because a blank there is information - it says
+//  "the scanner could not read this, look at it yourself".
+//
+//  The camera freezes while the strip is up (scanBusy), so nothing underneath
+//  is read while the person looks.
+// ============================================================================
+const confirmBar = document.getElementById('confirmBar');
+const confirmGrid = document.getElementById('confirmGrid');
+const confirmOk = document.getElementById('confirmOk');
+const confirmDismiss = document.getElementById('confirmDismiss');
+const confirmEdit = document.getElementById('confirmEdit');
+let confirmPending = null;      // the proof object for the row being confirmed
+let lastConfirmed = null;       // {Mat, Char} of the row just written
+
+const CONFIRM_LABELS = {Mat:'Material', Char:'Charge', Rev:'Revision', SerNr:'Serial'};
+
+function openConfirm(proof){
+  const wae = isWae();
+  const tag = checkTag(heldVal('Mat'));
+  let html = '';
+  KEY_COLS.forEach(function(c){
+    const v = heldVal(c);
+    // Serial is only printed on some labels: hide the row when there is nothing
+    // to check and nothing to expect. Revision on a WAE label is always shown.
+    if(!v && c === 'SerNr' && !wae) return;
+    if(!v && c === 'Rev' && !wae) return;
+    const miss = !v;
+    html += '<div class="crowf"><div class="k">'+CONFIRM_LABELS[c]+'</div>'
+          + '<div class="v'+(miss?' miss':'')+'">'
+          + (miss ? 'not read \u2014 check the label' : String(v).replace(/</g,'&lt;'))
+          + '</div></div>';
+  });
+  html += '<div class="crowf tagrow"><div class="k">check</div><div class="v">'
+        + tag + (tag==='RV' ? '  \u00b7 not in the master list' : '  \u00b7 in the master list')
+        + (proof && !proof.ok ? '  \u00b7 ' + proof.kind : '')
+        + '</div></div>';
+  confirmGrid.innerHTML = html;
+  confirmPending = proof || {ok:false, kind:'manual'};
+  confirmBar.classList.add('show');
+  review.className = 'review';
+  scanBusy = true;
+  stopAllVoting();
+  setStatus('Check the label, then confirm','busy');
+}
+
+function hideConfirm(){
+  confirmBar.classList.remove('show');
+  confirmPending = null;
+}
+
+confirmOk.addEventListener('click', function(){
+  if(!confirmPending) return;
+  const row = {};
+  COLS.forEach(function(c){ const f=heldField(c); row[c] = f ? f.value : ''; });
+  row.Source = sourceLine(function(c){ const f=heldField(c); return f ? f.src : ''; })
+             + (session.matOriginal ? '  (Mat read as '+session.matOriginal+', corrected against master)' : '');
+  row.Proof  = (confirmPending.kind || 'manual') + ' (confirmed by user)';
+  row.Check  = checkTag(row.Mat);
+
+  scanBusy = false;
+  hideConfirm();
+  if(!row.Mat || !row.Char){ resetSession('Missing a value \u2014 scan again'); return; }
+
+  lastConfirmed = {Mat:row.Mat, Char:row.Char};
+  writeRow(row);
+  resetSession();
+  splashOk(row.Mat + '  /  Charge ' + row.Char
+           + (row.Rev ? '  /  Rev ' + row.Rev : ''), row.Check);
+  beep(); setTimeout(beep,140);
+  setTimeout(function(){ hideSplash(); restartAfterRow(); }, 900);
+});
+
+// "Not this" throws the whole reading away. Nothing is written.
+confirmDismiss.addEventListener('click', function(){
+  scanBusy = false;
+  hideConfirm();
+  resetSession('Cleared \u2014 point at the label again');
+  restartAfterRow();
+});
+
+// "Edit" keeps everything that was read and opens the four-field card so a
+// wrong or missing value can be typed. It comes straight back to this strip.
+confirmEdit.addEventListener('click', function(){
+  scanBusy = false;
+  const p = confirmPending;
+  hideConfirm();
+  openReview(p || {ok:false, kind:'manual'});
+});
+
+// ---- restart the reading state after a row is added -------------------------
+function restartAfterRow(){
+  stopAllVoting();
+  resetSession();
+  if(track){ try{ track.applyConstraints({advanced:[{focusMode:'continuous'}]}); }catch(_){} }
+  setStatus('Point at the NEXT label','live');
+}
+
+// ============================================================================
+//  OCR  (on demand, and it stops as soon as it has what it needs)
 // ============================================================================
 scanChip.addEventListener('click', scanLabel);
 
@@ -1305,9 +1265,8 @@ async function ensureWorker(silent){
   return worker;
 }
 
-// Tesseract's page segmentation decides how it carves the image into lines, and
-// it is often the difference between reading a line and skipping it entirely.
-// Three passes, three modes, instead of the same mode three times:
+// Page segmentation decides how Tesseract carves the image into lines, and it
+// is often the difference between reading a line and skipping it:
 //   6  one uniform block   - the normal case
 //   4  columns of text     - catches "Mat.No   3001195" as label + value
 //   11 sparse text         - finds text the other two miss on a creased bag
@@ -1317,26 +1276,31 @@ async function setPsm(mode){
 }
 function warmWorker(){ ensureWorker(true).catch(function(){}); }
 
-// A mandatory value only lands once two passes agree, so one blurry misread
-// cannot reach the table.
 function vote(field, value){
   if(!value) return;
   const f = session.fields;
   if(f[field] && f[field].src==='bc') return;          // a barcode is never overruled
 
-  // EVERY field is voted, not just the mandatory two. On the real label the six
-  // reads returned expiry 14.09.2052 and 14.09.2063 for a date printed 2053, and
-  // "first read wins" filed one of them. A contradicted value is worse than a
-  // blank one - blank is visible, wrong is not.
+  // The REVISION is a 26-letter vocabulary, so it is filed on agreement like
+  // the material, not on a clean win. Two passes reading B is proof enough;
+  // demanding it beat the runner-up by two left it blank on every real label.
+  if(field === 'Rev'){
+    const rv = fixRevChar(value);
+    if(!rv) return;
+    session.votes.Rev = session.votes.Rev || {};
+    session.votes.Rev[rv] = (session.votes.Rev[rv]||0)+1;
+    if(session.votes.Rev[rv] >= NEED_VOTES) put('Rev', rv, 'ocr', null, 0);
+    return;
+  }
+
+  // EVERY other non-mandatory field is voted and resolved at the end: a
+  // contradicted value is worse than a blank one, because blank is visible.
   if(MANDATORY.indexOf(field) < 0){
     session.votes[field] = session.votes[field] || {};
     session.votes[field][value] = (session.votes[field][value]||0)+1;
     return;
   }
 
-  // The MATERIAL is checked against the master before it is even voted on: a
-  // one-character repair makes two passes that read 3OO1195 and 3001195 agree,
-  // instead of them cancelling each other out.
   let v = value, orig = '';
   if(field === 'Mat'){
     const fix = resolveMat(value);
@@ -1346,20 +1310,17 @@ function vote(field, value){
 
   session.votes[field] = session.votes[field] || {};
   session.votes[field][v] = (session.votes[field][v]||0)+1;
-  if(orig) session.votePending = orig;
 
-  // The MATERIAL is filed as soon as two passes agree, because the master has
-  // already vouched for the value.
+  // The MATERIAL is filed as soon as two passes agree: the master has already
+  // vouched for the value.
   if(field === 'Mat' && session.votes[field][v] >= NEED_VOTES){
     if(put(field, v, 'ocr', null, 0) && orig) session.matOriginal = orig;
   }
   // The CHARGE is NOT filed here. It has no vocabulary to check against, so a
-  // wrong one is undetectable, and on the real label the readings were
-  // 682607 x3 against 582507 x2 - a majority vote would have written the WRONG
-  // batch. It is resolved once, after all passes, and only when it wins clearly.
+  // wrong one is undetectable. Resolved once, after all passes, and only when
+  // it wins clearly.
 }
 
-// Called after the last pass.
 function tally(field){
   const v = session.votes[field];
   if(!v) return [];
@@ -1367,8 +1328,8 @@ function tally(field){
                        .sort(function(a,b){ return b.n-a.n; });
 }
 
-// A value is filed only when it wins CLEANLY: either it was the only reading, or
-// it beat the runner-up by more than one. Everything else stays blank.
+// A value is filed only when it wins CLEANLY: either it was the only reading,
+// or it beat the runner-up by more than one.
 function clearWinner(list, need){
   if(!list.length) return null;
   if(list.length === 1) return list[0].n >= (need||1) ? list[0].value : null;
@@ -1377,15 +1338,14 @@ function clearWinner(list, need){
 }
 
 function resolveVotes(){
-  // the Charge: no vocabulary can check it, so an unclear read is handed back to
-  // the operator as choices rather than settled by a majority of one
   if(!heldField('Char')){
     const list = tally('Char');
     const win = clearWinner(list, NEED_VOTES);
     if(win) put('Char', win, 'ocr', null, 0);
     else if(list.length) charSuggestions = list.slice(0,4);
   }
-  // everything else: file the clean winners, leave the contradicted ones blank
+  // The SERIAL follows the same discipline as the charge - no vocabulary can
+  // check it, so a contradicted read stays blank rather than being guessed.
   COLS.forEach(function(c){
     if(MANDATORY.indexOf(c) >= 0) return;
     if(heldField(c)) return;
@@ -1395,24 +1355,12 @@ function resolveVotes(){
 }
 
 // ============================================================================
-//  SCAN LABEL  -  one sharp still, read like a document scanner
-//
-//  Why a still and not the video stream:
-//   - takePhoto() runs a real autofocus/exposure cycle and returns the full
-//     sensor image. The video stream is a small, continuously-moving frame, and
-//     a Code128 at ~260 blurred pixels cannot be decoded at all - which is why
-//     the live loop can fail on a label that a photo reads instantly.
-//   - it happens ONCE, on demand, instead of grinding in a loop.
-//
-//  Three capture paths because browser support is uneven: ImageCapture on
-//  Chrome/Android, grabFrame where takePhoto is missing, and a plain canvas draw
-//  on iOS Safari, which has neither.
+//  STILL CAPTURE  -  three paths, because browser support is uneven
 // ============================================================================
 const stillCv = document.createElement('canvas');
 const stillCtx = stillCv.getContext('2d', {willReadFrequently:true});
 
 async function captureStill(){
-  // 1. full-resolution photo
   if(window.ImageCapture && track){
     try{
       const ic = new ImageCapture(track);
@@ -1424,7 +1372,6 @@ async function captureStill(){
       if(bmp.close) bmp.close();
       return {w:bmp.width, h:bmp.height, how:'photo'};
     }catch(_){}
-    // 2. a frame straight off the track
     try{
       const ic = new ImageCapture(track);
       const bmp = await ic.grabFrame();
@@ -1435,7 +1382,6 @@ async function captureStill(){
       return {w:bmp.width, h:bmp.height, how:'frame'};
     }catch(_){}
   }
-  // 3. whatever the video element is showing (iOS)
   if(!vid.videoWidth) return null;
   stillCv.width = vid.videoWidth; stillCv.height = vid.videoHeight;
   stillCtx.filter = 'none';
@@ -1443,8 +1389,6 @@ async function captureStill(){
   return {w:vid.videoWidth, h:vid.videoHeight, how:'video'};
 }
 
-// The aiming box, in the still's own pixels. reticleRect() is in video pixels and
-// a photo is usually larger, so it is scaled proportionally rather than reused.
 function cropStill(still){
   const r = reticleRect();
   const out = document.createElement('canvas');
@@ -1503,13 +1447,27 @@ function binarise(src){
   return c;
 }
 
-// Decode ladder: cheapest first, stop at the first read. Same escalation as the
-// "Dynamsoft for free" work - restoration, not a better decoder - except here it
-// runs on ONE sharp image, so it is affordable.
+function rotateCanvas(src,deg){
+  if(deg===0) return src;
+  const c=document.createElement('canvas'), ctx=c.getContext('2d');
+  if(deg===180){ c.width=src.width; c.height=src.height; ctx.translate(c.width,c.height); ctx.rotate(Math.PI); }
+  else { c.width=src.height; c.height=src.width; ctx.translate(c.width/2,c.height/2);
+         ctx.rotate(deg*Math.PI/180); ctx.translate(-src.width/2,-src.height/2); }
+  ctx.drawImage(src,0,0); return c;
+}
+
+function upscale(src){
+  const w=src.width, h=src.height;
+  const c=document.createElement('canvas'); const sc=Math.min(2, 2200/Math.max(w,h)+0.001);
+  c.width=w*sc; c.height=h*sc;
+  const ctx=c.getContext('2d'); ctx.filter='grayscale(1) contrast(1.2)'; ctx.drawImage(src,0,0,c.width,c.height);
+  return c;
+}
+
+// Decode ladder: cheapest first, stop at the first read. Restoration, not a
+// better decoder - and it runs on ONE sharp image, so it is affordable.
 async function decodeLadder(base){
   const variants = [['as taken', base]];
-  // each restoration step is optional: if one cannot be built, the ladder simply
-  // has one rung fewer instead of failing
   try{ variants.push(['upscaled', scaleCanvas(base, 2, true)]); }catch(_){}
   try{ variants.push(['contrast', scaleCanvas(base, 3, true)]); }catch(_){}
   try{ variants.push(['black & white', binarise(scaleCanvas(base, 2, true))]); }catch(_){}
@@ -1518,10 +1476,6 @@ async function decodeLadder(base){
 
   for(let v=0; v<variants.length; v++){
     for(const deg of [0,90,180,270]){
-      // A failure building one variant must cost that variant only. Outside a
-      // try, a single throw here aborted the whole ladder AND skipped the text
-      // read that follows it - one canvas problem would look like "the scan
-      // does not work".
       let cv;
       try{ cv = rotateCanvas(variants[v][1], deg); }catch(_){ continue; }
       if(!cv) continue;
@@ -1552,21 +1506,10 @@ async function decodeLadder(base){
 
 // ============================================================================
 //  THE MATERIAL LINE, READ ON ITS OWN
-//
-//  Measured on the real label, reading the whole crop at once returns
-//  "Maine s00186" - unusable. Cropping to the material line, magnifying hard and
-//  telling Tesseract it is ONE LINE of digits returns "3001166" on the same
-//  pixels: from garbage to two characters out. On a sharper still it should land
-//  exactly, and the master decides either way.
-//
-//  Where the line is: the barcode sits at the BOTTOM of these labels, so its box
-//  gives us the label's footprint - Adriele's "once it finds the barcode, focus
-//  there". With no barcode we fall back to the top of the aiming box.
-//
-//  The digit whitelist is what removes O/S/B confusion at the source instead of
-//  repairing it afterwards. It would corrupt a material that genuinely contains
-//  letters, so an alphanumeric pass runs too, and NOTHING is accepted unless the
-//  master recognises it.
+//  Reading the whole crop at once returned "Maine s00186" on the real label -
+//  unusable. Cropping to the material line, magnifying hard and telling
+//  Tesseract it is ONE LINE returned "3001166" on the same pixels. The master
+//  decides either way.
 // ============================================================================
 const MAT_WHITELISTS = ['0123456789', '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-'];
 
@@ -1575,18 +1518,16 @@ function materialBand(crop, box){
   const ctx = c.getContext('2d');
   let sx, sy, sw, sh;
   if(box && box.height > 4){
-    // label footprint from the barcode: about six line-heights above it
     const bandTop = Math.max(0, box.y - box.height*6.5);
     sx = Math.max(0, box.x - box.width*0.30);
     sw = Math.min(crop.width - sx, box.width*1.60);
     sy = bandTop;
-    sh = Math.min(crop.height - sy, (box.y - bandTop) * 0.30);   // the top line
+    sh = Math.min(crop.height - sy, (box.y - bandTop) * 0.30);
   } else {
     sx = 0; sw = crop.width;
     sy = 0; sh = Math.round(crop.height*0.28);
   }
   if(sw < 20 || sh < 8) return null;
-  // magnify hard: this is one short line, so the cost is small and the gain large
   const f = Math.max(2, Math.min(8, 2400/sw));
   c.width = Math.round(sw*f); c.height = Math.round(sh*f);
   ctx.filter = 'grayscale(1) contrast(1.45)';
@@ -1625,14 +1566,114 @@ async function readMaterialLine(crop, box, token){
   return {value:'', original:'', texts:found};
 }
 
+// ============================================================================
+//  DEEP MATERIAL SCAN  -  v7.0, "try harder before you ask"
+//  ---------------------------------------------------------------------------
+//  v6.8 gave up after three or four quick video-frame band reads and opened the
+//  card. That is the behaviour Adriele called out: the tool asked the operator
+//  to type a number it had not really tried to read.
+//
+//  This is the document-scanner escalation, in the order a scanner app does it:
+//    1. a REAL still (full sensor, its own focus/exposure cycle)
+//    2. magnify into Tesseract's readable range (1800-2200 px on the long edge)
+//    3. Otsu black-and-white - kills the glare off a poly bag
+//    4. read at 0 / 90 / 180 / 270
+//    5. judge every token against the 399-material master
+//
+//  Step 4 is the one that was missing entirely: only the BARCODE ladder rotated,
+//  so a label photographed sideways could never yield a material by text. The
+//  sideways photo of the SPACER HEX label is exactly that case.
+//
+//  Upright first, so a normal label finishes in one pass and pays nothing for
+//  the rest of the ladder.
+// ============================================================================
+async function deepMaterialScan(){
+  if(scanBusy || ocrActive) return false;
+  const token = ++ocrRun;
+  scanBusy = true; ocrActive = true;
+  scanChip.classList.add('act');
+  const texts = [];
+  try{
+    setStatus('Taking a sharp photo of the label\u2026','busy');
+    const still = await captureStill();
+    if(!still){ setStatus('Could not take a photo','bad'); return false; }
+    const crop = cropStill(still);
+    await ensureWorker(false);
+
+    // one restoration, reused for every rotation
+    const long = Math.max(crop.width, crop.height);
+    let f = 1;
+    if(long < OCR_MIN_PX) f = Math.min(4, OCR_MIN_PX/long);
+    else if(long > OCR_MAX_PX) f = OCR_MAX_PX/long;
+    const grey = scaleCanvas(crop, f, true);
+    let bw = null;
+    try{ bw = binarise(grey); }catch(_){}
+    const bases = bw ? [['sharpened',grey],['cleaned',bw]] : [['sharpened',grey]];
+
+    for(const deg of [0,90,180,270]){
+      for(let b=0;b<bases.length;b++){
+        if(ocrRun !== token) return false;
+        let cv;
+        try{ cv = rotateCanvas(bases[b][1], deg); }catch(_){ continue; }
+        if(!cv) continue;
+        setStatus('Reading the material\u2026 ' + bases[b][0]
+                  + (deg ? ', turned ' + deg + '\u00b0' : ''), 'busy');
+        for(const psm of ['6','4']){
+          if(ocrRun !== token) return false;
+          try{ await worker.setParameters({tessedit_pageseg_mode:psm,
+                                           tessedit_char_whitelist:''}); }catch(_){}
+          const out = await worker.recognize(cv);
+          const txt = ((out && out.data && out.data.text) || '');
+          if(!txt.trim()) continue;
+          texts.push(txt);
+
+          const p = parseOcr(txt);
+          // everything else the pass happened to read joins the session too -
+          // a rotation that finds the material usually finds the rest as well
+          for(const k in p){ if(k.charAt(0) !== '_' && k !== 'Mat') vote(k, p[k]); }
+          if(p._matOriginal) session.matOriginal = p._matOriginal;
+
+          // field-anchored material first (it carries the label's own word)
+          if(p.Mat){
+            const r = resolveMat(p.Mat);
+            const ok = (r.tier !== 'review')
+                    || (/^[A-Z]{1,2}[0-9]/.test(r.value) && r.value.length >= 6);
+            if(r.value && ok){
+              put('Mat', r.value, 'ocr', null, 0);
+              if(r.original) session.matOriginal = r.original;
+            }
+          }
+          if(heldField('Mat')){
+            lastOcrText = texts.join('\n---\n');
+            resolveVotes();
+            return true;
+          }
+        }
+      }
+    }
+    lastOcrText = texts.join('\n---\n');
+    resolveVotes();
+    return !!heldField('Mat');
+  }catch(e){
+    console.warn('deepMaterialScan', e);
+    return false;
+  }finally{
+    try{ await worker.setParameters({tessedit_char_whitelist:''}); }catch(_){}
+    scanBusy = false;
+    if(ocrRun === token){ ocrActive = false; scanChip.classList.remove('act'); }
+  }
+}
+
+// ============================================================================
+//  SCAN LABEL  -  one sharp still, read like a document scanner
+// ============================================================================
 async function scanLabel(){
   if(ocrActive || scanBusy) return;
   if(!vid.videoWidth){ setStatus('Turn the camera on first','busy'); return; }
   const token = ++ocrRun;
-  ocrActive = true;                        // holds the clock: one deliberate label
-  scanBusy = true;                         // and the live loop stands down
+  ocrActive = true;
+  scanBusy = true;
   scanChip.classList.add('act');
-  clearTimeout(graceTimer);
   try{
     setStatus('Taking a photo \u2014 hold still\u2026','busy');
     const still = await captureStill();
@@ -1650,10 +1691,6 @@ async function scanLabel(){
         + '  (' + got.how + ', ' + shot + ')';
       applyBarcodes(got.codes, tick);
     } else {
-      // The capture path matters more than anything else here: 'photo' is the
-      // full sensor, 'video' is the preview frame and is no sharper than what the
-      // live loop already failed on. If this line says video, the phone has no
-      // ImageCapture and the label must fill more of the frame instead.
       lastRaw = 'no barcode found \u2014 capture was ' + shot;
     }
     showRaw();
@@ -1662,10 +1699,6 @@ async function scanLabel(){
     setStatus('Reading the text\u2026','busy');
     await ensureWorker(false);
 
-    // Scale into the readable range, then TWO preprocessing variants. Measured on
-    // the real label: contrast-stretch reads the material better on some passes,
-    // Otsu black-and-white reads the batch better on others. Reading both and
-    // voting across all of them is worth far more than three passes of one.
     const long = Math.max(crop.width, crop.height);
     let f = 1;
     if(long < OCR_MIN_PX) f = Math.min(4, OCR_MIN_PX/long);
@@ -1687,13 +1720,12 @@ async function scanLabel(){
         const p = parseOcr(txt);
         if(p._matOriginal) session.matOriginal = p._matOriginal;
         for(const k in p){ if(k.charAt(0) !== '_') vote(k, p[k]); }
-        if(MANDATORY.every(function(k){ return session.fields[k]; })){ v = variants.length; break; }
       }
     }
     resolveVotes();
+    lastOcrText = texts.join('\n---\n');
 
-    // Material still missing? Read its line on its own, magnified, one line at a
-    // time, digits first.
+    // Material still missing? Read its line on its own, magnified.
     if(!heldField('Mat')){
       setStatus('Reading the material number\u2026','busy');
       const ml = await readMaterialLine(crop, null, token);
@@ -1707,9 +1739,8 @@ async function scanLabel(){
       }
     }
 
-    // RV material from the still (v6.7): the line reader only returns master-valid
-    // values. A P-part is not in the master, so pull it from the parsed label text
-    // instead - parseOcr already captured "Mat. P2006000-001" as an RV value.
+    // RV material: the line reader only returns master-valid values, so a
+    // P-part is pulled from the parsed label text instead.
     if(!heldField('Mat')){
       for(let ti=0; ti<texts.length && !heldField('Mat'); ti++){
         const pr = parseOcr(texts[ti]);
@@ -1724,14 +1755,9 @@ async function scanLabel(){
     }
 
     lastOcrText = texts.join('\n---\n');
-    // Nothing found by field label or by exact token? Then offer the closest
-    // master numbers as one-tap suggestions - never applied on their own.
-    // A number already read as the order, the batch or a lot is not a candidate
-    // material, however close it sits to one in the master. On the real label the
-    // production order 2003721 was offered as the top material suggestion.
     const notMat = [];
     ['Auftr','Char','L-Char','CH-Nr'].forEach(function(k){
-      const f = heldField(k); if(f) notMat.push(normId(f.value));
+      const f2 = heldField(k); if(f2) notMat.push(normId(f2.value));
       tally(k).forEach(function(x){ notMat.push(normId(x.value)); });
     });
     matSuggestions = heldField('Mat') ? [] : nearestMasters(texts.join('\n'), 3, notMat);
@@ -1741,23 +1767,20 @@ async function scanLabel(){
   }finally{
     scanBusy = false;
     if(ocrRun === token){ ocrActive=false; scanChip.classList.remove('act'); }
-    // v6.7: if the scan got BOTH mandatory values, decide how to finish:
-    //  - material master-valid + proof ok -> let evaluate() auto-add
-    //  - material RV (not in master) -> amber confirm strip, one tap
-    //  - otherwise -> the full card
-    if(heldField('Mat') && heldField('Char')){
-      const tag = checkTag(heldVal('Mat'));
-      if(tag === 'RV'){ openConfirm(heldVal('Mat'), heldVal('Char'), 'RV'); return; }
-      const proof = proveSameLabel();
-      if(proof.ok && autoMode && MASTER){ evaluate(); return; }
-    }
-    // Whatever the scan managed to read, the card opens so it can be completed
-    // by hand - the whole point of pressing the button.
-    openReview(proveSameLabel());
+    // v7.0: a scan never writes a row. Both mandatory values present -> the
+    // confirm strip. Something missing -> the four-field card.
+    if(heldField('Mat') && heldField('Char')) evaluate();
+    else openReview(proveSameLabel());
   }
 }
 
-function digitFix(v){ return v.replace(/O/g,'0').replace(/B/g,'8').replace(/S/g,'5').replace(/[Il]/g,'1'); }
+// The capture classes already accept O B S I l Z G where a digit is expected,
+// so the repair must cover all of them. G->6 and Z->2 were missing, which is
+// why a serial read as "G26" came back as G26 instead of 626.
+function digitFix(v){
+  return String(v).replace(/O/g,'0').replace(/B/g,'8').replace(/S/g,'5')
+                  .replace(/[Il]/g,'1').replace(/Z/g,'2').replace(/G/g,'6');
+}
 
 // Sep 14, 2053 -> 14.09.2053, so both label families export the same way.
 const MONTHS = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
@@ -1773,13 +1796,11 @@ function toDeDate(s){
 // ============================================================================
 //  TEXT -> FIELDS.  TWO LABEL FAMILIES, ONE PARSER.
 //
-//  WAE:  Mat. / Char / L-Char / Menge / Verfallsdatum   (German, DD.MM.YYYY)
+//  WAE:  Mat. / Char / L-Char / SerNr / Rev. / Menge / Verfallsdatum (German)
 //  MSL:  Mat.No / Batch / Prod no / Qty 4 PC / Expiry Date Sep 14, 2053
 //
-//  Both are tried on every read; a label only matches one of them, so there is
-//  no need to know in advance which is in front of the camera. The MSL patterns
-//  are checked FIRST where the two could collide ("Mat.No" also matches a loose
-//  "Mat." pattern), same most-specific-first discipline as the barcode rules.
+//  Both are tried on every read. The MSL patterns are checked FIRST where the
+//  two could collide, same most-specific-first discipline as the barcode rules.
 // ============================================================================
 function parseOcr(text){
   const j = text.split(/\n/).map(function(l){ return l.trim(); }).filter(Boolean).join('\n');
@@ -1788,16 +1809,9 @@ function parseOcr(text){
   let r;
 
   // ---- material -----------------------------------------------------------
-  // CAPTURE LOOSELY, JUDGE STRICTLY. v6.2 demanded 4+ consecutive DIGITS here, so
-  // one O read for a 0 - the single most common OCR error on these labels - made
-  // the pattern fail outright and the master repair never even ran. Tested: 5 of
-  // 9 realistic corruptions were missed. Now any alphanumeric token is taken and
-  // resolveMat() decides what it is, against the 399 numbers in the master.
-  // The label word itself is also allowed to be mangled: No / Ne / N0 / Nr.
+  // CAPTURE LOOSELY, JUDGE STRICTLY. Any alphanumeric token is taken and
+  // resolveMat() decides what it is, against the master.
   const MAT_LABELS = [
-    // v6.7: the leading M is often misread on a tilted label (V/N/H for M), so
-    // anchor on "at" plus an optional first letter, then No/Nr/etc. Capture
-    // loosely; resolveMat judges the value against the master afterwards.
     /\b[MVNH]?at[.,]?\s*(?:No|Ne|N0|Nr|N°)[.,:]?\s*([A-Z0-9][A-Z0-9.\- ]{4,16})/i,
     /\b[MVNH]?at[.,]?\s*[:.]?\s*([A-Z0-9][A-Z0-9.\- ]{4,16})/i
   ];
@@ -1810,33 +1824,26 @@ function parseOcr(text){
   }
 
   // ---- charge / batch -----------------------------------------------------
-  // MSL prints "Batch 582507"; WAE prints "Char". L-Char is checked separately
+  // MSL prints "Batch 582507"; WAE prints "Char.". L-Char is checked separately
   // and must not be allowed to satisfy the Char pattern.
-  // "Batch" itself gets mangled - Batoh, Batch., Baich, 8atch. Anchor on "Ba"
-  // plus one t-like character and allow the rest of the word to be anything
-  // short, then digitFix the number. Same principle as the material: capture
-  // loosely, and let the value itself be judged afterwards.
   if(r=g(/(?:^|\n)\s*[B8]\s*a\s*[t1lI][A-Za-z0-9]{0,3}\s*[.:]?\s*([0-9OBSIlZG]{4,8})\b/i)) out.Char=digitFix(r);
   else if(r=g(/(?:^|\n)\s*[CG]?ha[rl]?\.?\s*[:.]?\s*([0-9OBSIl]{5,7})\b/)) out.Char=digitFix(r);
   if(r=g(/L-?[CG]?ha[rl]?\.?\s*[:.]?\s*([0-9OBSIl]{4,})/)) out['L-Char']=digitFix(r);
 
   // ---- description --------------------------------------------------------
-  // the line straight after the material line, on both families
   let def = g(/Mat\.?\s*(?:No\.?)?\s*[A-Z0-9.-]+\s*\n\s*([A-Z][A-Za-z0-9 ,.\/()-]{3,})/);
   if(!def){
     const L = j.split('\n');
     def = L.find(function(l){
       return /^[A-Z][A-Za-z0-9 ,.\/()-]{4,}$/.test(l)
-        && !/GRAVITY|SCHWEIZ|BEYOND|PNF|LNR|EXPIRY|BATCH|PROD|QTY|MSL/i.test(l);
+        && !/GRAVITY|SCHWEIZ|BEYOND|PNF|LNR|EXPIRY|BATCH|PROD|QTY|MSL|ZPP|WAE|PES/i.test(l);
     }) || '';
   }
   if(def) out.Definition = def;
 
   // ---- order number -------------------------------------------------------
-  // MSL "Prod no 2003721" is the production order -> Auftr, same as WAE.
-  // an order number is digits only, so a misread letter can be substituted back
-  // without ambiguity
   if(r=g(/Prod\.?\s*n[o0][.:]?\s*([0-9OBSIlZG]{4,})/i)) out.Auftr=digitFix(r);
+  else if(r=g(/Au[fl]tr\.?\s*\/?\s*Menge:?\s*([0-9OBSIlZG]{4,})/i)) out.Auftr=digitFix(r);
   else if(r=g(/Menge:?\s*\n?\s*([0-9OBSIlZG]{3,})/)) out.Auftr=digitFix(r);
 
   // ---- quantity + unit ----------------------------------------------------
@@ -1847,9 +1854,42 @@ function parseOcr(text){
     if(r=g(/\b(ST|PCS|KG|M)\b/)) out.Einheit=r;
   }
 
-  // ---- revision / serial --------------------------------------------------
-  if(r=g(/Rev\.?\s*([A-Z])\b/)) out.Rev=r;
-  if(r=g(/SerNr\.?\s*(\d{2,})/)) out.SerNr=r;
+  // ---- REVISION  (v7.0) ---------------------------------------------------
+  // The word itself gets mangled - Pev, Fev, Rov, Rev,, R2v - so anchor on a
+  // loose three-character shape and let fixRevChar judge the letter. The value
+  // may sit far to the right of the word, and PSM 4 puts that on its own line,
+  // so a same-line lookahead AND a next-line form are both tried.
+  //   Rev.  B        one line
+  //   Rev.\n B       column mode split them
+  // A "Rev" with nothing readable after it yields nothing, on purpose.
+  const REV_PATTERNS = [
+    /\b[PRFB8][e€o][vyu][.,:]?\s{0,40}([A-Z0-9])\b/,
+    /\b[PRFB8][e€o][vyu][.,:]?\s*\n\s*([A-Z0-9])\b/,
+    /\bRev(?:ision)?[.,:]?\s{0,40}([A-Z0-9])\b/i
+  ];
+  for(let i=0;i<REV_PATTERNS.length && !out.Rev;i++){
+    const m = j.match(REV_PATTERNS[i]);
+    if(m){
+      const rv = fixRevChar(m[1]);
+      if(rv) out.Rev = rv;
+    }
+  }
+
+  // ---- SERIAL  (v7.0) -----------------------------------------------------
+  // "SerNr. 626" mangles to SerNe / Sertir / Ser Nr / SerN. - anchor on "Se"
+  // plus an r/n and an N, allow anything short between, then digit-fix the
+  // number. Never invented: a label with no serial (the SPACER HEX bag prints
+  // "SerNr." with nothing after it) must come back blank.
+  // The gap between the word and the number is SPACES ONLY, never a newline.
+  // Caught in test: with \s* the pattern walked past an empty "SerNr." line and
+  // took the CHARGE off the line below it. On the SPACER HEX bag that would have
+  // filed 889932 as the serial of a part that has none.
+  let sn = g(/\bSe[rn][ \t]*[.,]?[ \t]*N[A-Za-z]{0,2}[.,:]?[ \t]*([0-9OBSIlZG]{2,12})\b/i);
+  if(!sn) sn = g(/\bSe[rn]ia[l1][ \t]*(?:No|Nr)?[.,:]?[ \t]*([0-9OBSIlZG]{2,12})\b/i);
+  if(sn){
+    const fixed = digitFix(sn);
+    if(/^\d{2,12}$/.test(fixed)) out.SerNr = fixed;   // digits or nothing
+  }
 
   // ---- expiry -------------------------------------------------------------
   if(r=g(/Verfallsdatum:?\s*(\d{2}\.\d{2}\.\d{4})/)) out.Verfallsdatum=r;
@@ -1862,8 +1902,8 @@ function parseOcr(text){
   if(r=g(/(CH-?\d{5,})/)) out['CH-Nr'] = r.replace(/^CH-?/,'CH-');
   if(r=g(/(EQ-?\d{5,})/)) out['CH-Nr'] = out['CH-Nr'] || r;
 
-  // Still no material? Look for one of the 399 anywhere in the text, ignoring
-  // the field labels completely.
+  // Still no material? Look for one from the master anywhere in the text,
+  // ignoring the field labels completely.
   if(!out.Mat){
     const t = matFromTokens(j, out.Char ? normId(out.Char) : '', out.Auftr ? normId(out.Auftr) : '');
     if(t){ out.Mat = t; out._matByToken = true; }
@@ -1872,16 +1912,22 @@ function parseOcr(text){
   return out;
 }
 
+// Is this the WAE / ZPP family? That is where a Revision is printed and must be
+// read. The MSL family has no Rev line, so nothing is demanded there.
+function isWae(){
+  const f = heldField('CH-Nr');
+  if(f && /^(CH|EQ)-?\d/i.test(String(f.value))) return true;
+  if(heldField('L-Char') || heldField('SerNr')) return true;
+  return /WAE|ZPP.?LABEL|Verfallsdatum|Char\s*\./i.test(lastOcrText||'');
+}
+
 // ============================================================================
 //  UPLOAD  (works with no camera, so it also works on http://)
-//  One still = one label, so everything read here shares a frame tick. Stops
-//  rotating as soon as both mandatory values are held, and reuses one reader
-//  instead of building four and four data URLs.
 // ============================================================================
 fileBtn.addEventListener('click', function(){ fileInput.click(); });
 fileInput.addEventListener('change', function(e){
   const file = e.target.files[0]; if(!file) return;
-  resetSession();
+  stopAllVoting(); hideConfirm(); resetSession();
   const img = new Image();
   img.onload = async function(){
     setStatus('Reading photo\u2026','busy');
@@ -1908,39 +1954,49 @@ fileInput.addEventListener('change', function(e){
         }
       }catch(_){}
     }
+    // v7.0: an uploaded photo gets the same rotation ladder for TEXT that the
+    // camera path now gets - a photo held sideways is common, and before this
+    // only the barcode was ever rotated.
     try{
       await ensureWorker(false);
-      const out = await worker.recognize(upscale(c));
-      const p = parseOcr((out && out.data && out.data.text) || '');
-      for(const k in p) if(!session.fields[k]) put(k,p[k],'ocr',null,tick);
+      const base = upscale(c);
+      let bwu = null; try{ bwu = binarise(base); }catch(_){}
+      const bases = bwu ? [base, bwu] : [base];
+      const texts = [];
+      outer:
+      for(const deg of [0,90,180,270]){
+        for(let b=0;b<bases.length;b++){
+          let rc; try{ rc = rotateCanvas(bases[b],deg); }catch(_){ continue; }
+          const out = await worker.recognize(rc);
+          const txt = (out && out.data && out.data.text) || '';
+          if(!txt.trim()) continue;
+          texts.push(txt);
+          const p = parseOcr(txt);
+          if(p._matOriginal) session.matOriginal = p._matOriginal;
+          for(const k in p){ if(k.charAt(0) !== '_') vote(k, p[k]); }
+          if(heldField('Mat') && heldField('Char')) break outer;
+        }
+      }
+      resolveVotes();
+      lastOcrText = texts.join('\n---\n');
     }catch(_){}
-    openReview(proveSameLabel());
+    if(heldField('Mat') && heldField('Char')) presentForConfirm();
+    else openReview(proveSameLabel());
     setStatus(scanning?'Point at ONE label':'Photo read', scanning?'live':'');
   };
   img.src = URL.createObjectURL(file); fileInput.value='';
 });
 
-function upscale(src){
-  const w=src.width, h=src.height;
-  const c=document.createElement('canvas'); const sc=Math.min(2, 2200/Math.max(w,h)+0.001);
-  c.width=w*sc; c.height=h*sc;
-  const ctx=c.getContext('2d'); ctx.filter='grayscale(1) contrast(1.2)'; ctx.drawImage(src,0,0,c.width,c.height);
-  return c;
-}
-function rotateCanvas(src,deg){
-  if(deg===0) return src;
-  const c=document.createElement('canvas'), ctx=c.getContext('2d');
-  if(deg===180){ c.width=src.width; c.height=src.height; ctx.translate(c.width,c.height); ctx.rotate(Math.PI); }
-  else { c.width=src.height; c.height=src.width; ctx.translate(c.width/2,c.height/2);
-         ctx.rotate(deg*Math.PI/180); ctx.translate(-src.width/2,-src.height/2); }
-  ctx.drawImage(src,0,0); return c;
-}
-
 // ============================================================================
-//  REVIEW / MANUAL CARD
-//  Opens with LIVE values only. A value the scanner read four seconds ago is
-//  not offered, because offering it is how the wrong pairing used to get
-//  written with a human signature on it. Empty is the safe default.
+//  THE HAND-FILL CARD  -  v7.0, FOUR FIELDS
+//  ---------------------------------------------------------------------------
+//  Filling a label by hand means Material, Charge, Revision, Serial. Eleven
+//  boxes made a two-value job look like a form. Everything else the scanner
+//  read is KEPT on the row and shown as a read-only line underneath, so nothing
+//  is lost and nothing has to be typed twice.
+//
+//  The card never writes a row either. "Check & confirm" hands it to the strip,
+//  same as a read label: one place decides, one place is checked.
 // ============================================================================
 const PROOF_TEXT = {
   'same-frame':'Both codes were read in one camera frame.',
@@ -1949,12 +2005,14 @@ const PROOF_TEXT = {
   'split':'These values were read in different places. They may be from TWO DIFFERENT LABELS. Check before adding.',
   'conflict':'TWO DIFFERENT LABELS were seen. Move the other one out of view, point at one label, scan again.',
   'incomplete':'Type the Material and the Charge from the label in your hand.',
-  'manual':'Type the Material and the Charge from the label in your hand. Everything else is optional.',
-  'stale-pair':'These values are still held from an earlier read, not from the label being read right now. Nothing was thrown away - check they belong together, then add.'
+  'manual':'Type the Material and the Charge from the label in your hand. Revision and Serial if the label shows them.',
+  'stale-pair':'These values are still held from an earlier read, not from the label being read right now. Nothing was thrown away \u2014 check they belong together.'
 };
 
 function openManual(){
-  clearTimeout(graceTimer);
+  stopAllVoting();
+  hideConfirm();
+  scanBusy = false;
   openReview({ok:false, kind:'manual'});
 }
 
@@ -1970,7 +2028,7 @@ function openReview(proof){
   const manual = proof && (proof.kind==='manual' || proof.kind==='incomplete');
   const bad = proof && !proof.ok && (proof.kind==='split' || proof.kind==='conflict');
   review.className = 'review show' + (bad?' alarm':'');
-  reviewTitle.textContent = manual ? 'Add this label by hand' : 'Review & confirm';
+  reviewTitle.textContent = manual ? 'Fill in this label' : 'Check and fix';
 
   const msgs = [];
   if(proof && PROOF_TEXT[proof.kind] && proof.kind!=='same-frame' && proof.kind!=='near')
@@ -1982,16 +2040,13 @@ function openReview(proof){
   if(!MASTER) msgs.push('The master list is not loaded, so the material was not checked. This row will be tagged <b>RV</b>.');
   if(session.matOriginal)
     msgs.push('Material read as <b>'+session.matOriginal+'</b>, corrected to <b>'
-      + current.Mat.value + '</b> - one character, and only one master number is that close.');
+      + current.Mat.value + '</b> \u2014 one character, and only one master number is that close.');
   else if(MASTER && current.Mat.value){
     const fx = masterFix(current.Mat.value);
     if(fx.tier==='review')
       msgs.push('<b>'+current.Mat.value+'</b> is not in the master list (tag <b>RV</b>).'
-        + (fx.near ? ' Nearest is <b>'+fx.near+'</b> - check the label, this is a hint only.' : ''));
+        + (fx.near ? ' Nearest is <b>'+fx.near+'</b> \u2014 check the label, this is a hint only.' : ''));
   }
-  // If a mandatory field is missing after a scan, SHOW THE RAW TEXT. Without it
-  // "it is not reading Mat.No" is unfixable from a distance - with it, the exact
-  // corruption is visible and the pattern can be repaired.
   if(matSuggestions.length && !String(current.Mat.value||'').trim()){
     msgs.push('The material could not be read cleanly. Closest in the master list &mdash; '
       + 'check the label and tap the right one:<br>'
@@ -2007,6 +2062,10 @@ function openReview(proof){
                + '<span style="color:var(--ink-dim)"> \u00d7'+s.n+'</span></button>';
         }).join(' '));
   }
+  if(isWae() && !String(current.Rev.value||'').trim()){
+    msgs.push('This looks like a <b>WAE</b> label, and the Revision could not be read. '
+      + 'It is the single letter next to <b>Rev.</b> \u2014 type it.');
+  }
   const missing = MANDATORY.filter(function(k){ return !String(current[k].value||'').trim(); });
   if(missing.length && lastOcrText){
     msgs.push('The text reader saw this &mdash; read it out if the number is wrong:<br>'
@@ -2014,7 +2073,7 @@ function openReview(proof){
       + lastOcrText.replace(/</g,'&lt;').replace(/\n/g,' \u00b7 ').slice(0,300)
       + '</span>');
   }
-  const stale = COLS.filter(function(c){ return current[c].age > 0; });
+  const stale = KEY_COLS.filter(function(c){ return current[c].age > 0; });
   if(stale.length)
     msgs.push('Held from earlier: ' + stale.map(function(c){
       return '<b>'+c+'</b> '+current[c].age+'s ago'; }).join(', ') + '.');
@@ -2022,7 +2081,7 @@ function openReview(proof){
   else rnote.className='rnote';
 
   fieldsEl.innerHTML='';
-  COLS.forEach(function(col){
+  KEY_COLS.forEach(function(col){
     const f = current[col];
     let cls = f.src==='bc' ? 'src-bc' : (f.src==='ocr' ? 'src-ocr' : '');
     if(MANDATORY.indexOf(col) >= 0) cls += ' req';
@@ -2035,13 +2094,26 @@ function openReview(proof){
       + (f.value||'').replace(/"/g,'&quot;') + '" spellcheck="false">';
     fieldsEl.appendChild(row);
   });
+
+  // Everything else the scanner picked up, kept and shown but not typed.
+  const extras = COLS.filter(function(c){
+    return KEY_COLS.indexOf(c) < 0 && String(current[c].value||'').trim();
+  });
+  if(extras.length){
+    moreFieldsEl.className = 'morefields show';
+    moreFieldsEl.innerHTML = 'also read and kept on this row: '
+      + extras.map(function(c){
+          return c+' <b>'+String(current[c].value).replace(/</g,'&lt;')+'</b>'; }).join(' &middot; ');
+  } else {
+    moreFieldsEl.className = 'morefields';
+    moreFieldsEl.innerHTML = '';
+  }
+
   review.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
-// Tapping a suggestion records the operator's CHOICE in the session, not just in
-// the input box: openReview rebuilds the card from the session, so a value only
-// written to `current` would be wiped the moment the card redraws. Recorded as
-// 'typed' because that is what it is - a person read the label and decided.
+// Tapping a suggestion records the operator's CHOICE in the session, not just
+// in the input box: openReview rebuilds the card from the session.
 rnote.addEventListener('click', function(e){
   if(!current || !e.target || !e.target.dataset) return;
   const m = e.target.dataset.mat, c = e.target.dataset.char;
@@ -2056,6 +2128,8 @@ fieldsEl.addEventListener('input', function(e){
   if(col && current) current[col].value = e.target.value;
 });
 
+// "Check & confirm": write what was typed back into the session, then hand the
+// label to the strip. A typed label is confirmed exactly like a read one.
 addBtn.addEventListener('click', function(){
   if(!current) return;
   const missing = MANDATORY.filter(function(k){ return !String(current[k].value||'').trim(); });
@@ -2065,29 +2139,34 @@ addBtn.addEventListener('click', function(){
       + 'A row without both is not traceable, so it is not written.';
     return;
   }
-  const row = {};
-  COLS.forEach(function(c){ row[c] = String(current[c].value||'').trim(); });
-  // a hand-typed material gets the same one-character repair, and it is recorded
-  let fixNote = session.matOriginal ? '  (Mat read as '+session.matOriginal+', corrected against master)' : '';
-  if(!fixNote){
-    const fx = masterFix(row.Mat);
-    if(fx.tier==='corrected'){ fixNote='  (Mat entered as '+fx.original+', corrected against master)'; row.Mat=fx.value; }
-  }
-  row.Source = sourceLine(function(c){
-    const f = current[c];
-    if(f.src) return f.src;
-    return String(f.value||'').trim() ? 'typed' : '';
-  }) + fixNote;
-  row.Proof  = (current._proof ? current._proof.kind : 'manual') + ' (confirmed by user)';
-  row.Check  = checkTag(row.Mat);
 
-  writeRow(row);
-  current=null; resetSession(); review.className='review';
-  setStatus('Row added \u2014 next label','live');
+  KEY_COLS.forEach(function(c){
+    const v = String(current[c].value||'').trim();
+    if(!v) return;
+    const f = heldField(c);
+    if(f && f.value === v) return;                 // unchanged, keep its source
+    let out = v;
+    if(c === 'Rev'){ out = fixRevChar(v) || v.toUpperCase(); }
+    if(c === 'Mat'){
+      const fx = masterFix(v);
+      if(fx.tier === 'corrected'){ out = fx.value; session.matOriginal = fx.original; }
+    }
+    session.fields[c] = {value:out, src:'typed', t:Date.now(), box:null, tick:0};
+  });
+  // a key field cleared in the card is cleared on the row too
+  KEY_COLS.forEach(function(c){
+    if(!String(current[c].value||'').trim()) delete session.fields[c];
+  });
+
+  const p = current._proof;
+  current = null;
+  review.className = 'review';
+  openConfirm(p && p.ok ? p : {ok:false, kind:(p && p.kind) || 'manual'});
 });
 
 discardBtn.addEventListener('click', function(){
-  current=null; resetSession(); review.className='review';
+  current=null; stopAllVoting(); resetSession(); review.className='review';
+  scanBusy = false;
   setStatus(scanning?'Point at ONE label':'Camera off', scanning?'live':'');
 });
 
@@ -2132,55 +2211,37 @@ clearBtn.addEventListener('click', function(){
 });
 
 // ============================================================================
-//  MATERIAL BAND VOTING  -  add-on for v6.3, makes v6.4
+//  MATERIAL BAND VOTING
 //  ---------------------------------------------------------------------------
-//  WHAT IT DOES
-//  While the camera is on and the batch has been read from the barcode but the
-//  material is still empty, this quietly takes a STILL every MAT_POLL_MS, reads
-//  ONLY the material band (the top line of the label), repairs it against the
-//  399-material master, and tallies votes. The moment one master-valid material
-//  wins MAT_LOCK_VOTES times, it is filed and voting stops - evaluate() then
-//  auto-adds the row (batch + material, both valid). If MAT_MAX_TRIES stills
-//  pass with no winner, the card opens with the closest master numbers as
-//  buttons.
+//  While the camera is on and the batch has been read but the material is still
+//  empty, this takes a quick band read every MAT_POLL_MS, repairs it against
+//  the master, and tallies votes. Two agreeing master-valid reads file it.
 //
-//  WHY STILLS, NOT VIDEO FRAMES: a still runs a real focus/exposure cycle and is
-//  sharp enough to read 7 characters. A video frame is not - that was the whole
-//  failure. Proven on the real MSL label: 7 of 8 degraded stills read K1000846
-//  exactly; the 8th read nothing (never a wrong token), which is why we vote.
-//
-//  WHY NOT MANY PER SECOND / PYSPARK: one OCR pass is ~250-400 ms and is the
-//  only cost. Running it faster starves the barcode loop and reads the same
-//  number twice. 2 agreeing stills is enough. Spark cannot make one Tesseract
-//  call faster and cannot run in a browser - it is the wrong tool and is not used.
-//
-//  This block is self-contained. Paste it once, just ABOVE the final
-//  `renderTable(); loadMaster();` lines. Then change those last two lines to
-//  also start the loop (see the two-line note at the very bottom).
+//  v7.0 CHANGE - IT NO LONGER GIVES UP AFTER THREE TRIES.
+//  The quick band is a horizontal slice of the live video: fast, and defeated
+//  by a tilted or sideways label. After MAT_DEEP_AFTER misses it escalates to
+//  deepMaterialScan() - a real still, magnified, Otsu-cleaned, read at all four
+//  rotations. Only if THAT fails does the card open, and then it opens with the
+//  closest master numbers as one-tap buttons.
 // ============================================================================
-
-const MAT_POLL_MS   = 450;   // gap between material stills
-const MAT_LOCK_VOTES = 2;    // agreeing master-valid reads needed to file
-const MAT_MAX_TRIES  = 10;   // stills with no winner -> open the card
-const MAT_STILL_AFTER = 4;   // quick band failed this many times -> fire the still Scan (v6.7)
-let matStillFired = false;   // one auto-still per session
+const MAT_POLL_MS    = 450;
+const MAT_LOCK_VOTES = 2;
+const MAT_DEEP_AFTER = 3;    // quick band misses -> escalate to the deep scan
+const MAT_MAX_TRIES  = 10;   // absolute ceiling before the card opens
 
 let matVoteRunning = false;
-let matVotes = {};           // master-valid value -> count
-let matRvVotes = {};         // cleanly-read but NOT-in-master value -> count (v6.6)
+let matVotes = {};
+let matRvVotes = {};
 let matTries = 0;
 let matVoteTimer = null;
-let matVoteText = [];        // raw reads, for the card if it falls through
+let matVoteText = [];
+let matDeepFired = false;
 
-// One offscreen canvas for the band, reused.
 const mbCv = document.createElement('canvas');
 const mbCtx = mbCv.getContext('2d', {willReadFrequently:true});
 
 // The material band = the top slice of the aim box. On both label families the
-// material line is the first line and the barcode is at the bottom, so the top
-// ~18% of the box holds the material and nothing else. Read WITHOUT a whitelist
-// (a whitelist clipped the label word and broke the read on the real label),
-// PSM 6, magnified 3x.
+// material line is the first line, so the top ~20% holds it and nothing else.
 function grabMaterialBand(){
   const r = reticleRect();
   if(!r || !vid.videoWidth) return null;
@@ -2197,17 +2258,13 @@ function grabMaterialBand(){
 
 async function materialTick(){
   if(!matVoteRunning) return;
-
-  // stop conditions: material already known, camera busy elsewhere, or a card open
-  const busy = scanBusy || ocrActive || review.classList.contains('show');
-  if(heldField('Mat') || !MANDATORY.every(function(k){ return k==='Mat' || heldField(k); }) === false){}
   if(heldField('Mat')){ stopMaterialVoting(); return; }
   if(!scanning){ stopMaterialVoting(); return; }
-
-  // only vote once the BATCH is in hand - no point reading material for a label
-  // whose barcode has not landed yet
   if(!heldField('Char')){ matVoteTimer = setTimeout(materialTick, MAT_POLL_MS); return; }
 
+  const busy = scanBusy || ocrActive
+            || review.classList.contains('show')
+            || confirmBar.classList.contains('show');
   if(busy){ matVoteTimer = setTimeout(materialTick, MAT_POLL_MS); return; }
 
   try{
@@ -2221,7 +2278,6 @@ async function materialTick(){
       const toks = raw.toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
       let filed = '';
       for(let i=0;i<toks.length && !filed;i++){
-        // skip anything that is the batch / order / lot already known
         const t = cleanMatToken(toks[i]);
         if(t === normId(heldVal('Char'))) continue;
         const res = resolveMat(toks[i]);
@@ -2230,11 +2286,9 @@ async function materialTick(){
           matVotes[filed] = (matVotes[filed]||0) + 1;
           if(res.tier === 'corrected') session.matOriginal = res.original;
         } else if(res.tier === 'review' && res.value){
-          // RV material path v6.6: read cleanly but not in the master. A P-part
-          // (safety sheet, bushing) is still a real material. Tally it
-          // separately; two agreeing reads -> amber confirm strip, tagged RV.
-          // Must look like a real material (a letter then digits), not a stray
-          // word, and must not be the batch/order already held.
+          // a P-part (safety sheet, bushing) is not in the master and is still a
+          // real material. Tallied separately; it reaches the confirm strip
+          // tagged RV, exactly like any other unvouched value.
           const rv = res.value;
           if(/^[A-Z]{1,2}[0-9]/.test(rv) && rv.length>=6
              && rv !== normId(heldVal('Char')) && rv !== normId(heldVal('Auftr'))
@@ -2248,43 +2302,40 @@ async function materialTick(){
         ? filed + '  (\u00d7' + matVotes[filed] + ')'
         : 'try ' + matTries + '/' + MAT_MAX_TRIES), 'busy');
 
-      // WINNER: one master-valid value has reached the lock count
       for(const v in matVotes){
         if(matVotes[v] >= MAT_LOCK_VOTES){
           put('Mat', v, 'ocr', null, 0);
           stopMaterialVoting();
-          evaluate();                 // batch + material now both present
+          evaluate();
           return;
         }
       }
-
-      // RV WINNER (v6.6): a not-in-master material read the same twice. File it,
-      // tag RV, and hand it to the amber confirm strip for one human tap - a
-      // material with no master to vouch for it is confirmed by eye, exactly
-      // like the charge. Needs the Charge in hand (the barcode gives it on the
-      // MSL label) so the strip can show both.
       for(const v in matRvVotes){
-        if(matRvVotes[v] >= MAT_LOCK_VOTES && heldField('Char')){
+        if(matRvVotes[v] >= MAT_LOCK_VOTES){
           put('Mat', v, 'ocr', null, 0);
           stopMaterialVoting();
-          openConfirm(v, heldVal('Char'), 'RV');
+          evaluate();
           return;
         }
       }
 
-      // AUTO-STILL (v6.7): the quick horizontal band is defeated by a tilted
-      // label. After a few misses, fire the real Scan-label still ONCE - it
-      // rotates 0/90/180/270 and reads the material line properly, which is how
-      // "take the picture like we normally do" is meant to happen automatically.
-      if(!matStillFired && matTries >= MAT_STILL_AFTER && !scanBusy && !ocrActive){
-        matStillFired = true;
+      // ESCALATE. This is the "try harder" step: full still, four rotations.
+      if(!matDeepFired && matTries >= MAT_DEEP_AFTER){
+        matDeepFired = true;
         stopMaterialVoting();
-        setStatus('Taking a photo to read the material\u2026','busy');
-        scanLabel();          // handles RV -> confirm strip, master -> auto, else card
+        const got = await deepMaterialScan();
+        if(got){ evaluate(); return; }
+        // the deep scan looked properly and found nothing - now it is fair to ask
+        const notMat = [];
+        ['Auftr','Char','L-Char','CH-Nr'].forEach(function(k){
+          const f = heldField(k); if(f) notMat.push(normId(f.value));
+        });
+        matSuggestions = nearestMasters((matVoteText.join('\n') + '\n' + lastOcrText), 3, notMat);
+        setStatus('Material not read \u2014 tap it or type it','bad');
+        openReview(proveSameLabel());
         return;
       }
 
-      // GIVE UP -> card with the closest master numbers as buttons
       if(matTries >= MAT_MAX_TRIES){
         stopMaterialVoting();
         lastOcrText = matVoteText.join('\n---\n');
@@ -2293,7 +2344,7 @@ async function materialTick(){
           const f = heldField(k); if(f) notMat.push(normId(f.value));
         });
         matSuggestions = nearestMasters(matVoteText.join('\n'), 3, notMat);
-        setStatus('Material not read \u2014 tap the right one','bad');
+        setStatus('Material not read \u2014 tap it or type it','bad');
         openReview(proveSameLabel());
         return;
       }
@@ -2306,46 +2357,151 @@ async function materialTick(){
 function startMaterialVoting(){
   if(matVoteRunning) return;
   matVoteRunning = true;
-  matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matStillFired = false;
+  matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
   clearTimeout(matVoteTimer);
   matVoteTimer = setTimeout(materialTick, MAT_POLL_MS);
 }
-
 function stopMaterialVoting(){
   matVoteRunning = false;
   clearTimeout(matVoteTimer);
 }
 
-// Restart voting cleanly whenever a new label session begins. resetSession()
-// already runs on every add / clear / discard, so hook onto the camera pulse:
-// the housekeeping interval below re-arms voting if the batch is in but the
-// material is not, and the loop is idle.
-setInterval(function(){
-  if(!scanning) return;
-  if(matVoteRunning) return;
-  if(review.classList.contains('show')) return;
-  if(heldField('Char') && !heldField('Mat')) startMaterialVoting();
-}, 600);
+// ============================================================================
+//  REVISION BAND VOTING  -  v7.0
+//  ---------------------------------------------------------------------------
+//  WHY IT NEEDS ITS OWN BAND: on the WAE label "Rev." and its letter sit at the
+//  RIGHT of the label with a wide gap between them, and PSM 4 (column mode) puts
+//  the word and the letter on different lines. Reading the whole crop, the
+//  pattern therefore misses even when both characters were recognised perfectly.
+//  A band containing only that corner removes the gap problem entirely.
+//
+//  WHERE: right 30% of the aim box, 25-50% down. Measured on the real labels -
+//  "Rev. B" on the 3001280 doubler and "Rev. A" on the 3003689 spacer both sit
+//  there. Confirmed by Adriele as the same position on every WAE label.
+//
+//  5 ATTEMPTS, 2 AGREEING READS. The letter is a 26-value vocabulary, so
+//  agreement is proof; nothing that fails to repair to a single A-Z is kept.
+//  Running out of attempts does NOT block the label - it goes to the confirm
+//  strip with the Revision shown blank, which is the operator's cue to look.
+// ============================================================================
+const REV_POLL_MS   = 450;
+const REV_MAX_TRIES = 5;
+const REV_LOCK_VOTES = 2;
 
+let revVoteRunning = false;
+let revVotes = {};
+let revTries = 0;
+let revVoteTimer = null;
 
+const rbCv = document.createElement('canvas');
+const rbCtx = rbCv.getContext('2d', {willReadFrequently:true});
+
+function grabRevBand(){
+  const r = reticleRect();
+  if(!r || !vid.videoWidth) return null;
+  const sx = r.x + r.w * 0.62;        // right-hand third, with a little overlap
+  const sy = r.y + r.h * 0.25;
+  const sw = r.w * 0.38;
+  const sh = r.h * 0.25;
+  const f = 4;                        // one short line: magnify hard, costs little
+  const w = Math.round(sw*f), h = Math.round(sh*f);
+  if(w < 30 || h < 12) return null;
+  if(rbCv.width!==w || rbCv.height!==h){ rbCv.width=w; rbCv.height=h; }
+  rbCtx.filter = 'grayscale(1) contrast(1.5)';
+  rbCtx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, h);
+  return rbCv;
+}
+
+async function revTick(){
+  if(!revVoteRunning) return;
+  if(heldField('Rev')){ stopRevVoting(); evaluate(); return; }
+  if(!scanning){ stopRevVoting(); return; }
+
+  const busy = scanBusy || ocrActive
+            || review.classList.contains('show')
+            || confirmBar.classList.contains('show');
+  if(busy){ revVoteTimer = setTimeout(revTick, REV_POLL_MS); return; }
+
+  try{
+    const band = grabRevBand();
+    if(band){
+      await ensureWorker(true);
+      // PSM 7 = one line. The whitelist keeps letters and the digits that
+      // repair into letters, and drops the punctuation that turns "Rev. B"
+      // into a two-token mess.
+      try{ await worker.setParameters({tessedit_pageseg_mode:'7',
+        tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.'}); }catch(_){}
+      const out = await worker.recognize(band);
+      try{ await worker.setParameters({tessedit_char_whitelist:''}); }catch(_){}
+      const raw = ((out && out.data && out.data.text) || '').trim();
+
+      let rv = '';
+      const p = parseOcr(raw);
+      if(p.Rev) rv = p.Rev;
+      if(!rv){
+        // the band holds almost nothing else, so a lone character in it after
+        // the word has been stripped is the revision
+        const m = raw.toUpperCase().replace(/[^A-Z0-9 ]/g,' ')
+                     .replace(/\b[PRFB8][EO][VYU]\b/g,' ')
+                     .match(/\b([A-Z0-9])\b/);
+        if(m) rv = fixRevChar(m[1]);
+      }
+      if(rv){ revVotes[rv] = (revVotes[rv]||0) + 1; }
+      revTries++;
+
+      let best='', bestN=0;
+      for(const k in revVotes){ if(revVotes[k]>bestN){ bestN=revVotes[k]; best=k; } }
+      setStatus('Reading revision\u2026 ' + (best ? 'Rev '+best+'  (\u00d7'+bestN+')'
+                                                 : 'try '+revTries+'/'+REV_MAX_TRIES), 'busy');
+
+      if(bestN >= REV_LOCK_VOTES){
+        put('Rev', best, 'ocr', null, 0);
+        stopRevVoting();
+        evaluate();
+        return;
+      }
+      if(revTries >= REV_MAX_TRIES){
+        // Out of attempts. The Revision stays BLANK and the label still goes to
+        // the strip - blank is the message. Nothing is guessed from one read.
+        stopRevVoting();
+        presentForConfirm();
+        return;
+      }
+    }
+  }catch(e){ console.warn('revTick', e); }
+
+  revVoteTimer = setTimeout(revTick, REV_POLL_MS);
+}
+
+function startRevVoting(){
+  if(revVoteRunning) return;
+  revVoteRunning = true;
+  revVotes = {}; revTries = 0;
+  clearTimeout(revVoteTimer);
+  revVoteTimer = setTimeout(revTick, REV_POLL_MS);
+}
+function stopRevVoting(){
+  revVoteRunning = false;
+  clearTimeout(revVoteTimer);
+}
 
 // ============================================================================
-//  CHARGE BAND VOTING  -  v6.5
+//  CHARGE BAND VOTING
 //  ---------------------------------------------------------------------------
-//  WHEN IT RUNS: only when an EQ- barcode has been seen (the WAE / equipment
-//  label) AND the Charge is still empty. The EQ code is the signal that this is
-//  the label whose Charge lives in text, lower-left ("Char. 300603"). On the MSL
-//  label there is no EQ code, so this never fires there - material voting does.
+//  Runs when an EQ- barcode has been seen (the equipment label, whose Charge
+//  lives in text: "Char. 579371") and the Charge is still empty. The MSL label
+//  has no EQ code, so this never fires there.
 //
-//  WHY IT NEVER AUTO-ADDS: the Charge has NO master to check it, so a wrong read
-//  is undetectable. After up to CHG_MAX_TRIES stills, the most-seen value is put
-//  in the AMBER CONFIRM STRIP and a human confirms it by eye. One tap adds the
-//  row. The camera is paused while the strip is up so the next label underneath
-//  is not read.
+//  The band also covers the SerNr line, which sits directly above Char. on
+//  these labels - so the serial is read by the same pass, for free.
+//
+//  The Charge has NO master to check it, so it is never settled by a majority
+//  of one and never auto-written. It reaches the confirm strip like everything
+//  else and a human checks it by eye.
 // ============================================================================
 const CHG_POLL_MS  = 450;
 const CHG_MAX_TRIES = 10;
-const CHG_LOCK_VOTES = 2;   // two identical charge reads -> show confirm strip now
+const CHG_LOCK_VOTES = 2;
 
 let chgVoteRunning = false;
 let chgVotes = {};
@@ -2355,17 +2511,13 @@ let chgVoteTimer = null;
 const cbCv = document.createElement('canvas');
 const cbCtx = cbCv.getContext('2d', {willReadFrequently:true});
 
-// The charge sits in the LOWER-LEFT of the label ("Char. 300603"). The aim box
-// holds the whole label, so the charge band is roughly the lower third, left
-// two-thirds. Read plain PSM 6 (no whitelist), magnified 3x. parseOcr's Char
-// pattern then pulls the number out of "Char. 300603".
 function grabChargeBand(){
   const r = reticleRect();
   if(!r || !vid.videoWidth) return null;
   const sx = r.x;
-  const sy = r.y + r.h * 0.55;          // lower part of the label
-  const sw = r.w * 0.66;                // left two-thirds
-  const sh = r.h * 0.30;
+  const sy = r.y + r.h * 0.52;          // lower part: SerNr, Char., L-Char.
+  const sw = r.w * 0.70;
+  const sh = r.h * 0.34;
   const f = 3;
   const w = Math.round(sw*f), h = Math.round(sh*f);
   if(w < 30 || h < 12) return null;
@@ -2375,7 +2527,6 @@ function grabChargeBand(){
   return cbCv;
 }
 
-// Does the session hold an EQ code? That is the trigger for charge voting.
 function hasEqCode(){
   const f = heldField('CH-Nr');
   return !!(f && /^EQ-?\d+/i.test(String(f.value)));
@@ -2384,9 +2535,10 @@ function hasEqCode(){
 async function chargeTick(){
   if(!chgVoteRunning) return;
   if(!scanning){ stopChargeVoting(); return; }
-  if(heldField('Char')){ stopChargeVoting(); return; }      // already have it
-  if(confirmBar.classList.contains('show')){ chgVoteTimer=setTimeout(chargeTick,CHG_POLL_MS); return; }
-  const busy = scanBusy || ocrActive || review.classList.contains('show');
+  if(heldField('Char')){ stopChargeVoting(); return; }
+  const busy = scanBusy || ocrActive
+            || review.classList.contains('show')
+            || confirmBar.classList.contains('show');
   if(busy){ chgVoteTimer=setTimeout(chargeTick,CHG_POLL_MS); return; }
 
   try{
@@ -2396,32 +2548,42 @@ async function chargeTick(){
       try{ await worker.setParameters({tessedit_pageseg_mode:'6', tessedit_char_whitelist:''}); }catch(_){}
       const out = await worker.recognize(band);
       const raw = ((out && out.data && out.data.text) || '').trim();
-      // reuse the label parser so "Char. 300603" -> Char, digit-fixed
       const p = parseOcr(raw);
+
+      // the serial rides along on the same band, voted like any optional field
+      if(p.SerNr && !heldField('SerNr')) vote('SerNr', p.SerNr);
+
       let val = p.Char ? digitFix(String(p.Char)) : '';
-      // ignore if it collides with the material/order/lchar already held
       if(val && val !== normId(heldVal('Mat')) && val !== normId(heldVal('L-Char'))){
         chgVotes[val] = (chgVotes[val]||0) + 1;
       }
       chgTries++;
 
-      // best so far
       let best='', bestN=0;
       for(const k in chgVotes){ if(chgVotes[k]>bestN){ bestN=chgVotes[k]; best=k; } }
       setStatus('Reading charge\u2026 ' + (best ? best+'  (\u00d7'+bestN+')' : 'try '+chgTries+'/'+CHG_MAX_TRIES), 'busy');
 
-      // EARLY LOCK: two stills agree on the same charge -> confirm now, do not
-      // run the remaining tries.
       if(bestN >= CHG_LOCK_VOTES){
+        put('Char', best, 'ocr', null, 0);
         stopChargeVoting();
-        confirmWithMaterial(best);
+        const w = clearWinner(tally('SerNr'), 1);
+        if(w && !heldField('SerNr')) put('SerNr', w, 'ocr', null, 0);
+        evaluate();
         return;
       }
 
       if(chgTries >= CHG_MAX_TRIES){
         stopChargeVoting();
-        if(best){ confirmWithMaterial(best); }
-        else { setStatus('Charge not read \u2014 add by hand','bad'); openReview(proveSameLabel()); }
+        if(best){
+          put('Char', best, 'ocr', null, 0);
+          const w = clearWinner(tally('SerNr'), 1);
+          if(w && !heldField('SerNr')) put('SerNr', w, 'ocr', null, 0);
+          evaluate();
+        } else {
+          charSuggestions = tally('Char').slice(0,4);
+          setStatus('Charge not read \u2014 read it off the label','bad');
+          openReview(proveSameLabel());
+        }
         return;
       }
     }
@@ -2441,96 +2603,26 @@ function stopChargeVoting(){
   clearTimeout(chgVoteTimer);
 }
 
-// confirmWithMaterial v6.8
-// The charge is ready. Before showing the strip, ALWAYS make sure the material
-// is read too - the strip must give back BOTH. If material is missing, fire the
-// still (rotates + reads the Mat / Mat. / at line) once, then open the strip
-// with whatever it found; material blank is allowed but we try hard first.
-async function confirmWithMaterial(charge){
-  if(!heldField('Mat') && !scanBusy && !ocrActive){
-    setStatus('Reading the material too\u2026','busy');
-    await scanLabel();                 // fills Mat if it can (master or RV)
-    // scanLabel may itself open a card/strip; if it already added or opened,
-    // don't double up
-    if(confirmBar.classList.contains('show') || review.classList.contains('show')) return;
-  }
-  const mat = heldVal('Mat');
-  openConfirm(mat, charge, mat ? checkTag(mat) : 'RV');
-}
-
-// ---- the amber confirm strip ------------------------------------------------
-const confirmBar = document.getElementById('confirmBar');
-const confirmVals = document.getElementById('confirmVals');
-const confirmOk = document.getElementById('confirmOk');
-const confirmDismiss = document.getElementById('confirmDismiss');
-let confirmPending = null;   // {mat, char, tag}
-
-// Show the strip. Camera pauses (scanBusy) so nothing underneath is read while
-// the person looks and confirms.
-function openConfirm(mat, char, tag){
-  confirmPending = {mat:mat, char:char, tag:tag};
-  confirmVals.innerHTML = '<b>'+String(mat).replace(/</g,'&lt;')+'</b>'
-    + '  /  Charge <b>'+String(char).replace(/</g,'&lt;')+'</b>'
-    + '  <span class="tag">['+tag+']</span>';
-  confirmBar.classList.add('show');
-  scanBusy = true;                       // freeze the reading loops
-  setStatus('Confirm the charge','busy');
-}
-function hideConfirm(){
-  confirmBar.classList.remove('show');
-  confirmPending = null;
-}
-
-confirmOk.addEventListener('click', function(){
-  if(!confirmPending) return;
-  // write the charge into the session, then commit like any confirmed row
-  put('Char', confirmPending.char, 'ocr', null, 0);
-  const row = {};
-  COLS.forEach(function(c){ const f=heldField(c); row[c] = f ? f.value : ''; });
-  row.Source = sourceLine(function(c){ const f=heldField(c); return f ? f.src : ''; })
-             + (session.matOriginal ? '  (Mat read as '+session.matOriginal+', corrected against master)' : '');
-  row.Proof  = 'charge confirmed by user';
-  row.Check  = confirmPending.tag;
-  scanBusy = false;
-  hideConfirm();
-  if(!row.Mat || !row.Char){ resetSession('Missing a value \u2014 scan again'); return; }
-  writeRow(row);
-  resetSession();
-  splashOk(row.Mat + '  /  Charge ' + row.Char, row.Check);
-  beep(); setTimeout(beep,140);
-  setTimeout(function(){ hideSplash(); restartAfterRow(); }, 900);
-});
-
-confirmDismiss.addEventListener('click', function(){
-  scanBusy = false;
-  hideConfirm();
-  resetSession('Cleared \u2014 point at the label again');
-  restartAfterRow();
-});
-
-// ---- restart the camera / reading state after a row is added ----------------
-// The tool used to keep grinding on the just-finished label. This gives it a
-// clean slate: stop the loops, clear the session, refocus the camera so the
-// next label is read fresh.
-function restartAfterRow(){
+function stopAllVoting(){
   try{ stopMaterialVoting(); }catch(_){}
   try{ stopChargeVoting(); }catch(_){}
-  resetSession();
-  if(track){ try{ track.applyConstraints({advanced:[{focusMode:'continuous'}]}); }catch(_){} }
-  setStatus('Point at ONE label','live');
+  try{ stopRevVoting(); }catch(_){}
 }
 
-// ---- re-arm the two voting loops from one pulse -----------------------------
-// Material voting: batch in, material not.  (unchanged trigger)
-// Charge voting:   EQ code in, charge not.
+// ---- one pulse re-arms every reading loop -----------------------------------
+//   Material: batch in, material not.
+//   Charge:   EQ code in, charge not.
+//   Revision: a WAE label, both mandatory values in, revision not, attempts left.
 setInterval(function(){
   if(!scanning) return;
+  if(scanBusy) return;
   if(review.classList.contains('show')) return;
   if(confirmBar.classList.contains('show')) return;
   if(!matVoteRunning && heldField('Char') && !heldField('Mat')) startMaterialVoting();
   if(!chgVoteRunning && hasEqCode() && !heldField('Char')) startChargeVoting();
+  if(!revVoteRunning && !heldField('Rev') && revTries < REV_MAX_TRIES
+     && isWae() && heldField('Mat') && heldField('Char')) startRevVoting();
 }, 600);
-
 
 renderTable();
 loadMaster();
