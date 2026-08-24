@@ -297,7 +297,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v8.3';
+const VERSION = 'v8.4';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -837,7 +837,7 @@ function fixRevChar(raw){
 // ============================================================================
 let session = newSession();
 let attemptStart = Date.now();
-function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null, locked:{}}; }
+function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null, locked:{}, stray:null}; }
 
 function resetSession(reason){
   matSuggestions = [];
@@ -868,8 +868,13 @@ function ageOf(f){ return f ? Math.round((Date.now()-f.t)/1000) : 0; }
 // Freeze a field so no further OCR pass can move it. Called the moment a value
 // earns its agreement, and automatically for anything read off a barcode or
 // typed by the operator.
-function lock(field){ session.locked[field] = 1; }
+function lock(field, src){ session.locked[field] = src || 'ocr'; }
 function isLocked(field){ return !!session.locked[field]; }
+function lockedBy(field){ return session.locked[field] || ''; }
+// Is there anything on this label worth protecting?
+function holdingSomething(){
+  return KEY_COLS.some(function(c){ return isLocked(c); });
+}
 
 function put(field, value, src, box, tick){
   if(!value) return false;
@@ -877,24 +882,41 @@ function put(field, value, src, box, tick){
 
   const prev = session.fields[field];
 
-  // A FIELD THAT HAS ALREADY EARNED ITS AGREEMENT IS FROZEN.
-  // v7.6: once the revision has its four agreeing reads, or the material has
-  // been settled, later reads must not be able to move it. They could before -
-  // nothing guarded a value that came from OCR - so shifting the camera after a
-  // good read could quietly replace it with a worse one. That is Adriele's
-  // "it should throw away because we move the camera".
-  // Only a BARCODE (stronger evidence) or the OPERATOR TYPING can change a
-  // locked value. Another OCR pass cannot.
-  if(session.locked[field] && src !== 'bc' && src !== 'typed') return false;
+  // ==========================================================================
+  //  A LOCKED FIELD IS HELD UNTIL THE OPERATOR SAYS OTHERWISE  -  v8.4
+  //  ------------------------------------------------------------------------
+  //  Adriele: "once it takes the material and batch and revision, do not change
+  //  because the camera changed site - hold the information until the user
+  //  confirms, especially if it matches the master list."
+  //
+  //  Who may still change a locked value, and nobody else:
+  //    typed  - always. The operator is holding the physical label.
+  //    bc     - only over a value that was LOCKED BY OCR. A barcode is better
+  //             evidence than a read, but it is not better than another barcode
+  //             and it is not better than a person.
+  //  Everything else is refused, and a barcode that wanted to overwrite a
+  //  barcode-locked field is recorded as a STRAY - a sign that a second label
+  //  came into view - so the confirm strip can warn about it. It is no longer
+  //  raised as a conflict, because a conflict threw a red card and interrupted
+  //  a label that was already correctly captured.
+  // ==========================================================================
+  const lk = lockedBy(field);
+  if(lk){
+    const mayChange = (src === 'typed') || (src === 'bc' && lk === 'ocr');
+    if(!mayChange){
+      if(prev && prev.value !== value && src === 'bc'){
+        session.stray = {field:field, kept:prev.value, other:value};
+      }
+      return false;
+    }
+  }
 
-  // A barcode outranks OCR - but NOT the operator. v7.6 caught this: a person
-  // reading the physical label in their hand and typing a value (or tapping a
-  // suggestion) was silently ignored whenever a barcode had got there first.
+  // A barcode outranks OCR - but NOT the operator.
   if(prev && prev.src==='bc' && src!=='bc' && src!=='typed') return false;
   if(prev && prev.value===value){ prev.t=now; session.lastAt=now; return false; }
 
-  // TWO BARCODES, SAME FIELD, DIFFERENT VALUES: evidence that more than one
-  // label is in view. Keep the first, record the disagreement.
+  // TWO BARCODES, SAME FIELD, DIFFERENT VALUES, and neither is locked yet:
+  // more than one label is genuinely in view. Keep the first, flag it.
   if(prev && prev.src==='bc' && src==='bc'){
     session.conflict = {field:field, kept:prev.value, other:value};
     session.lastAt = now;
@@ -902,7 +924,7 @@ function put(field, value, src, box, tick){
   }
 
   session.fields[field] = {value:value, src:src, t:now, box:box||null, tick:(tick||0)};
-  if(src === 'bc' || src === 'typed') session.locked[field] = 1;
+  if(src === 'bc' || src === 'typed') session.locked[field] = src;
   session.lastAt = now;
   return true;
 }
@@ -1476,7 +1498,32 @@ function onCodes(codes, tick){
     return;
   }
 
+  // ==========================================================================
+  //  MOVING THE CAMERA MUST NOT COST YOU THE LABEL  -  v8.4
+  //  ------------------------------------------------------------------------
+  //  THIS WAS THE BUG. Moving in to read the revision swings the aim box across
+  //  the tray, a neighbouring barcode decodes for one frame, isNewLabel() said
+  //  "different label" and resetSession() threw away the material, the charge
+  //  AND the revision that had already been captured. It was the only automatic
+  //  wipe in the whole tool, and it fired at exactly the wrong moment.
+  //
+  //  Now: if ANYTHING on this label is locked, the stray code is ignored
+  //  outright. It is recorded so the confirm strip can say a second label was
+  //  seen, and nothing else happens - the reading loops carry on with what they
+  //  already have. The session is only ever cleared by the operator: Confirm,
+  //  Not this, Discard, or Clear label.
+  //
+  //  The safety this used to provide has not gone anywhere. It has moved to the
+  //  confirm strip, where a human reads Material and Charge off the label in
+  //  their hand before a row is written - a better place for it than a timer.
+  // ==========================================================================
   if(isNewLabel(codes)){
+    if(holdingSomething()){
+      const m = barcodeMandatory(codes[0] && codes[0].value, waeSignal(codes));
+      if(m) session.stray = {field:m.field, kept:heldVal(m.field), other:m.value};
+      setStatus('Another label came into view \u2014 keeping what is already read','busy');
+      return;                       // hold everything, ignore the stray entirely
+    }
     stopAllVoting();
     hideConfirm();
     resetSession('New label');
@@ -1667,6 +1714,15 @@ function openConfirm(proof){
         + tag + (tag==='RV' ? '  \u00b7 not in the master list' : '  \u00b7 in the master list')
         + (proof && !proof.ok ? '  \u00b7 ' + proof.kind : '')
         + '</div></div>';
+  // A second label passed through the aim box while this one was being read.
+  // Nothing was taken from it - but say so, because it is the one situation
+  // where the values above deserve a second look.
+  if(session.stray){
+    html += '<div class="crowf tagrow"><div class="k">note</div><div class="v">'
+          + 'another label was seen (' + session.stray.field + ' '
+          + String(session.stray.other).replace(/</g,'&lt;') + ') \u2014 nothing was taken from it'
+          + '</div></div>';
+  }
   confirmGrid.innerHTML = html;
 
   // BIG BUTTONS FOR THE REVISION. Only when the material and the charge are
@@ -2005,7 +2061,7 @@ function vote(field, value){
     const rv = fixRevChar(value);
     if(!rv) return;
     revVotes[rv] = (revVotes[rv]||0)+1;
-    if(revVotes[rv] >= REV_LOCK_VOTES){ put('Rev', rv, 'ocr', null, 0); lock('Rev'); }
+    if(revVotes[rv] >= REV_LOCK_VOTES){ put('Rev', rv, 'ocr', null, 0); lock('Rev','ocr'); }
     return;
   }
 
@@ -3071,7 +3127,7 @@ async function materialTick(){
       for(const v in matRvVotes){
         if(matRvVotes[v] >= MAT_RV_LOCK_VOTES){
           put('Mat', v, 'ocr', null, 0);
-          lock('Mat');
+          lock('Mat','ocr');
           stopMaterialVoting();
           showProgress();
           evaluate();
@@ -3161,7 +3217,7 @@ function stopMaterialVoting(){
 // v8.3: faster. A look now costs about half what it did (the two views read on
 // two threads instead of one after the other), so the loop can come round more
 // often without queueing up behind itself.
-const REV_POLL_MS    = 220;
+const REV_POLL_MS    = 150;
 // Adriele's rule: FIVE votes, and FOUR of them must agree. Much stricter than
 // the material's two, and deliberately so - the material has 399 numbers to be
 // checked against, the revision has nothing. Four out of five is the only
@@ -3177,7 +3233,12 @@ const REV_MAX_TRIES  = 10;   // votes collected (Adriele: at least 10 tries)
 // doing its own filtering - and every invalid reading discarded rather than
 // counted - three agreeing frames is already stronger evidence than four were
 // before. Adriele asked for 3, and the vocabulary is what pays for it.
-const REV_LOCK_VOTES = 3;    // votes that must agree
+// TWO agreeing. Each look is already two independent views of the frame judged
+// against a five-letter vocabulary, with every invalid reading discarded - so
+// two agreeing looks is four consistent readings across two different frames.
+// Adriele asked for 2 and for speed; the vocabulary and the two-view rule are
+// what make 2 safe here where it would have been reckless at 26 letters.
+const REV_LOCK_VOTES = 2;    // votes that must agree
 const REV_MAX_LOOKS  = 40;   // band reads allowed while gathering those votes
 
 // (REV_WHITELIST is declared up with BAND_CFG - the band workers are
@@ -3351,7 +3412,7 @@ async function revTick(){
       // FOUR AGREEING READS. Nothing less is filed.
       if(bestN >= REV_LOCK_VOTES){
         put('Rev', best, 'ocr', null, 0);
-        lock('Rev');                      // four agreed: frozen, stop reading it
+        lock('Rev','ocr');                // agreed: frozen, stop reading it
         stopRevVoting();
         showProgress();
         evaluate();
@@ -3468,7 +3529,7 @@ async function chargeTick(){
 
       if(bestN >= CHG_LOCK_VOTES){
         put('Char', best, 'ocr', null, 0);
-        lock('Char');
+        lock('Char','ocr');
         stopChargeVoting();
         showProgress();
         const w = clearWinner(tally('SerNr'), 1);
