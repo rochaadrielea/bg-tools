@@ -282,7 +282,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v7.5';
+const VERSION = 'v7.7';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -330,6 +330,64 @@ const exportBtn=document.getElementById('exportBtn'), clearBtn=document.getEleme
 const masterLine=document.getElementById('masterLine');
 
 function setStatus(t,c){ statusTxt.textContent=t; statusEl.className='status'+(c?' '+c:''); }
+
+// ============================================================================
+//  ONE SETTLED PROGRESS LINE  -  v7.6
+//  ---------------------------------------------------------------------------
+//  Three reading loops each rewrote the status on every tick: "Reading
+//  material...", "Reading charge...", "Reading revision...", roughly six times
+//  a second, flipping between whichever loop got the worker last. Adriele:
+//  "we don't need to keep changing the message in the screen".
+//
+//  They now all write the SAME line - a compact scoreboard of the label - and
+//  it is only redrawn when something actually changes. A field that has earned
+//  its agreement shows a tick and never moves again, so what you see settles
+//  instead of flickering, and you can tell at a glance what is still missing.
+//
+//      Mat 3001280 OK   Charge 889932 OK   Rev B 3/4
+// ============================================================================
+let lastProgress = '';
+
+function bestVote(tally){
+  let best='', n=0;
+  for(const k in (tally||{})){ if(tally[k]>n){ n=tally[k]; best=k; } }
+  return {value:best, n:n};
+}
+
+function showProgress(){
+  if(review.classList.contains('show') || confirmBar.classList.contains('show')) return;
+  const parts = [];
+
+  const m = heldVal('Mat');
+  if(m) parts.push('Mat ' + m + ' \u2713');
+  else {
+    const b = bestVote(matVotes), r = bestVote(matRvVotes);
+    const w = b.n >= r.n ? b : r;
+    const need = (w === b) ? MAT_LOCK_VOTES : MAT_RV_LOCK_VOTES;
+    parts.push('Mat ' + (w.value ? w.value + ' ' + w.n + '/' + need : '\u2026'));
+  }
+
+  const c = heldVal('Char');
+  if(c) parts.push('Charge ' + c + ' \u2713');
+  else {
+    const w = bestVote(chgVotes);
+    parts.push('Charge ' + (w.value ? w.value + ' ' + w.n + '/' + CHG_LOCK_VOTES : '\u2026'));
+  }
+
+  if(isWae()){
+    const rv = heldVal('Rev');
+    if(rv) parts.push('Rev ' + rv + ' \u2713');
+    else {
+      const w = bestVote(revVotes);
+      parts.push('Rev ' + (w.value ? w.value + ' ' + w.n + '/' + REV_LOCK_VOTES : '\u2026'));
+    }
+  }
+
+  const line = parts.join('   ');
+  if(line === lastProgress) return;        // nothing changed: leave the screen alone
+  lastProgress = line;
+  setStatus(line, 'busy');
+}
 function showBanner(html,kind){ banner.innerHTML=html; banner.className='banner show '+(kind||'warn'); }
 
 document.getElementById('freshBtn').addEventListener('click', async()=>{
@@ -545,7 +603,7 @@ function fixRevChar(raw){
 // ============================================================================
 let session = newSession();
 let attemptStart = Date.now();
-function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null}; }
+function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null, locked:{}}; }
 
 function resetSession(reason){
   matSuggestions = [];
@@ -554,6 +612,8 @@ function resetSession(reason){
   matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
   revVotes = {}; revTries = 0; revLooks = 0;
   chgVotes = {}; chgTries = 0;
+  lastProgress = '';
+  lastBandSig.mat = lastBandSig.rev = lastBandSig.chg = 0;
   const had = Object.keys(session.fields).length;
   session = newSession();
   reticle.classList.remove('partial','reject');
@@ -571,12 +631,32 @@ function heldField(col){ return session.fields[col] || null; }
 function heldVal(col){ const f = heldField(col); return f ? f.value : ''; }
 function ageOf(f){ return f ? Math.round((Date.now()-f.t)/1000) : 0; }
 
+// Freeze a field so no further OCR pass can move it. Called the moment a value
+// earns its agreement, and automatically for anything read off a barcode or
+// typed by the operator.
+function lock(field){ session.locked[field] = 1; }
+function isLocked(field){ return !!session.locked[field]; }
+
 function put(field, value, src, box, tick){
   if(!value) return false;
   const now = Date.now();
 
   const prev = session.fields[field];
-  if(prev && prev.src==='bc' && src!=='bc') return false;          // barcode wins over OCR
+
+  // A FIELD THAT HAS ALREADY EARNED ITS AGREEMENT IS FROZEN.
+  // v7.6: once the revision has its four agreeing reads, or the material has
+  // been settled, later reads must not be able to move it. They could before -
+  // nothing guarded a value that came from OCR - so shifting the camera after a
+  // good read could quietly replace it with a worse one. That is Adriele's
+  // "it should throw away because we move the camera".
+  // Only a BARCODE (stronger evidence) or the OPERATOR TYPING can change a
+  // locked value. Another OCR pass cannot.
+  if(session.locked[field] && src !== 'bc' && src !== 'typed') return false;
+
+  // A barcode outranks OCR - but NOT the operator. v7.6 caught this: a person
+  // reading the physical label in their hand and typing a value (or tapping a
+  // suggestion) was silently ignored whenever a barcode had got there first.
+  if(prev && prev.src==='bc' && src!=='bc' && src!=='typed') return false;
   if(prev && prev.value===value){ prev.t=now; session.lastAt=now; return false; }
 
   // TWO BARCODES, SAME FIELD, DIFFERENT VALUES: evidence that more than one
@@ -588,6 +668,7 @@ function put(field, value, src, box, tick){
   }
 
   session.fields[field] = {value:value, src:src, t:now, box:box||null, tick:(tick||0)};
+  if(src === 'bc' || src === 'typed') session.locked[field] = 1;
   session.lastAt = now;
   return true;
 }
@@ -797,6 +878,10 @@ async function startCamera(){
     setStatus('Point at ONE label' + (gateActive ? '' : ' (aim box cannot filter on this device)'), 'live');
 
     warmWorker();
+    // the revision and charge bands are needed on every WAE label, so start
+    // their workers now in the background rather than paying for it mid-read
+    getBandWorker('rev').catch(function(){});
+    getBandWorker('chg').catch(function(){});
     audioUnlock();
   }catch(e){
     stopCamera();
@@ -1458,6 +1543,116 @@ function bandRead(psm, whitelist, canvas){
   return job;
 }
 
+// ============================================================================
+//  ONE WORKER PER BAND  -  v7.7, REAL parallel reading
+//  ---------------------------------------------------------------------------
+//  The three loops already ran at the same time, but every read they made went
+//  through the queue above onto ONE Tesseract worker - so they took turns, and
+//  each one's poll was really the sum of all three. That is not parallel.
+//
+//  Each band now owns its own worker. A Tesseract worker is a real Web Worker,
+//  so three of them read on three threads at once, and the material, the charge
+//  and the revision genuinely progress together instead of in rotation.
+//
+//  It also removes the parameter problem at the source: each worker is
+//  configured ONCE, at creation, and its settings are never touched again. The
+//  revision worker is capitals-only for its whole life; the material worker
+//  never is. Nothing can bleed between them because nothing is ever reset.
+//
+//  Workers are created LAZILY - the charge worker only appears on a label that
+//  needs its charge read from text, the material worker only if the barcode
+//  failed - so a phone is never asked to hold three of them unless three are
+//  genuinely in use. If a second or third worker cannot be created (an older
+//  phone running out of memory), the pool switches off for good and everything
+//  falls back to the shared queue above. Slower, still correct.
+// ============================================================================
+// The revision is a CAPITAL. Always. Rev. A / B / C / D ...
+// v7.4: the whitelist used to include lowercase AND digits, which let Tesseract
+// return 'b' for B and '8' for B and made every read compete with itself -
+// Adriele: "revision is reading super bad". Restricting it to capitals means
+// the engine CANNOT return a lowercase letter or a digit; it must choose one of
+// 26 capitals. Same controlled-vocabulary principle that makes the material
+// number trustworthy, applied to the smallest vocabulary on the label.
+// The dot stays so the word "Rev." survives as an anchor.
+// REV_FIX is still the safety net for the whole-crop path, where no whitelist
+// is applied and an 8 or a 4 can still come back.
+const REV_WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ.';
+
+const BAND_CFG = {
+  mat: {psm:'6', wl:''},                  // letters AND digits: K1005524, 3001280
+  rev: {psm:'6', wl:REV_WHITELIST},       // capitals only, for its whole life
+  chg: {psm:'6', wl:''}
+};
+const bandWorkers = {};
+const bandPending = {};
+let bandPoolOk = true;
+
+async function getBandWorker(kind){
+  if(bandWorkers[kind]) return bandWorkers[kind];
+  if(!bandPoolOk) return null;
+  if(bandPending[kind]) return bandPending[kind];     // one creation at a time
+  bandPending[kind] = (async function(){
+    try{
+      const w = await Tesseract.createWorker('eng');
+      await w.setParameters({tessedit_pageseg_mode: BAND_CFG[kind].psm,
+                             tessedit_char_whitelist: BAND_CFG[kind].wl});
+      bandWorkers[kind] = w;
+      return w;
+    }catch(e){
+      console.warn('band worker "'+kind+'" could not start, falling back to the shared reader', e);
+      bandPoolOk = false;
+      return null;
+    } finally {
+      bandPending[kind] = null;
+    }
+  })();
+  return bandPending[kind];
+}
+
+async function readBand(kind, canvas){
+  const w = await getBandWorker(kind);
+  if(w){
+    const out = await w.recognize(canvas);
+    return ((out && out.data && out.data.text) || '').trim();
+  }
+  return bandRead(BAND_CFG[kind].psm, BAND_CFG[kind].wl, canvas);
+}
+
+// ============================================================================
+//  TWO READS OF THE SAME FRAME ARE ONE READ
+//  ---------------------------------------------------------------------------
+//  Reading in parallel makes this matter. Three loops polling every 450 ms will
+//  regularly sample pixels the camera has not refreshed - and two reads of the
+//  IDENTICAL image agreeing is not two witnesses, it is the same witness twice.
+//  With four agreeing reads required, a frozen frame could push a wrong letter
+//  all the way to locked.
+//
+//  So a band read only votes when the pixels have actually changed. This is
+//  also, mechanically, why Adriele is right that the scanner "functions better
+//  when you move a little": movement is what makes each read independent
+//  evidence instead of a copy of the last one.
+// ============================================================================
+const lastBandSig = {};
+
+function bandSig(cv){
+  try{
+    const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    let h = 5381;
+    const step = Math.max(4, ((d.length/4/512)|0)*4);   // ~512 samples, cheap
+    for(let i=0;i<d.length;i+=step) h = (((h*33) ^ d[i]) >>> 0);
+    return h;
+  }catch(_){ return 0; }
+}
+
+// true when this band shows something the previous read did not
+function bandChanged(kind, cv){
+  const sig = bandSig(cv);
+  if(!sig) return true;                    // cannot tell: let the read count
+  if(lastBandSig[kind] === sig) return false;
+  lastBandSig[kind] = sig;
+  return true;
+}
+
 function vote(field, value){
   if(!value) return;
   const f = session.fields;
@@ -1475,7 +1670,7 @@ function vote(field, value){
     const rv = fixRevChar(value);
     if(!rv) return;
     revVotes[rv] = (revVotes[rv]||0)+1;
-    if(revVotes[rv] >= REV_LOCK_VOTES) put('Rev', rv, 'ocr', null, 0);
+    if(revVotes[rv] >= REV_LOCK_VOTES){ put('Rev', rv, 'ocr', null, 0); lock('Rev'); }
     return;
   }
 
@@ -2104,9 +2299,15 @@ function parseOcr(text){
 
 // Is this the WAE / ZPP family? That is where a Revision is printed and must be
 // read. The MSL family has no Rev line, so nothing is demanded there.
+//
+// v7.6 BUG THIS FIXES: the TWO-BARCODE rule was added to the barcode routing in
+// v7.2 but never to THIS function - and this is the one that gates the whole
+// revision loop, the Revision row on the confirm strip and the "type the Rev"
+// note on the card. So the family was being decided two different ways in the
+// same session. There is now one answer: waeSignal(), plus the text evidence
+// that only becomes available after something has been read.
 function isWae(){
-  const f = heldField('CH-Nr');
-  if(f && /^(CH|EQ)-?\d/i.test(String(f.value))) return true;
+  if(waeSignal([])) return true;                       // two barcodes, or a CH-/EQ- code
   if(heldField('L-Char') || heldField('SerNr')) return true;
   return /WAE|ZPP.?LABEL|Verfallsdatum|Char\s*\./i.test(lastOcrText||'');
 }
@@ -2416,6 +2617,12 @@ clearBtn.addEventListener('click', function(){
 // ============================================================================
 const MAT_POLL_MS    = 450;
 const MAT_LOCK_VOTES = 2;
+// A material the MASTER RECOGNISES has a second witness, so two agreeing reads
+// are enough - the list already vouched for the value. A material that is NOT
+// in the master has nothing vouching for it at all, exactly like the revision,
+// so it is held to the same bar: FOUR agreeing reads. Adriele asked for 4 on
+// the material; this is where 4 actually buys something and 2 does not.
+const MAT_RV_LOCK_VOTES = 4;
 const MAT_DEEP_AFTER = 10;   // quick band misses -> escalate to the deep scan
 const MAT_MAX_TRIES  = 24;   // absolute ceiling before the card opens
 
@@ -2460,7 +2667,9 @@ async function materialTick(){
   try{
     const band = grabMaterialBand();
     if(band){
-      const raw = await bandRead('6','',band);
+      // same pixels as last time = the same witness twice, not two witnesses
+      if(!bandChanged('mat', band)){ matVoteTimer = setTimeout(materialTick, MAT_POLL_MS); return; }
+      const raw = await readBand('mat', band);
       if(raw) matVoteText.push(raw);
       const toks = raw.toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
       let filed = '';
@@ -2490,22 +2699,24 @@ async function materialTick(){
       // queue - that is contention, not a failed attempt, and it was eating the
       // material's whole allowance.
       if(raw) matTries++;
-      setStatus('Reading material\u2026 ' + (filed
-        ? filed + '  (\u00d7' + matVotes[filed] + ')'
-        : 'try ' + matTries + '/' + MAT_MAX_TRIES), 'busy');
+      showProgress();
 
       for(const v in matVotes){
         if(matVotes[v] >= MAT_LOCK_VOTES){
           put('Mat', v, 'ocr', null, 0);
+          lock('Mat');                    // frozen: no later read can move it
           stopMaterialVoting();
+          showProgress();
           evaluate();
           return;
         }
       }
       for(const v in matRvVotes){
-        if(matRvVotes[v] >= MAT_LOCK_VOTES){
+        if(matRvVotes[v] >= MAT_RV_LOCK_VOTES){
           put('Mat', v, 'ocr', null, 0);
+          lock('Mat');
           stopMaterialVoting();
+          showProgress();
           evaluate();
           return;
         }
@@ -2600,17 +2811,8 @@ const REV_MAX_TRIES  = 5;    // votes collected
 const REV_LOCK_VOTES = 4;    // votes that must agree
 const REV_MAX_LOOKS  = 30;   // band reads allowed while gathering those votes
 
-// The revision is a CAPITAL. Always. Rev. A / B / C / D ...
-// v7.4: the whitelist used to include lowercase AND digits, which let Tesseract
-// return 'b' for B and '8' for B and made every read compete with itself -
-// Adriele: "revision is reading super bad". Restricting it to capitals means
-// the engine CANNOT return a lowercase letter or a digit; it must choose one of
-// 26 capitals. Same controlled-vocabulary principle that makes the material
-// number trustworthy, applied to the smallest vocabulary on the label.
-// The dot stays so the word "Rev." survives as an anchor.
-// REV_FIX is still the safety net for the whole-crop path, where no whitelist
-// is applied and an 8 or a 4 can still come back.
-const REV_WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ.';
+// (REV_WHITELIST is declared up with BAND_CFG - the band workers are
+//  configured with it at creation, which happens earlier in the file.)
 
 let revVoteRunning = false;
 let revVotes = {};
@@ -2693,7 +2895,8 @@ async function revTick(){
       // mush, which is the other half of "reading super bad". PSM 6 reads a
       // small block and the pattern picks the revision out of whatever lines
       // come back.
-      const raw = await bandRead('6', REV_WHITELIST, band);
+      if(!bandChanged('rev', band)){ revVoteTimer = setTimeout(revTick, REV_POLL_MS); return; }
+      const raw = await readBand('rev', band);
       revLooks++;
 
       let rv = '';
@@ -2717,14 +2920,14 @@ async function revTick(){
 
       let best='', bestN=0;
       for(const k in revVotes){ if(revVotes[k]>bestN){ bestN=revVotes[k]; best=k; } }
-      setStatus('Reading revision\u2026 ' + (best
-        ? 'Rev ' + best + '  (' + bestN + '/' + REV_LOCK_VOTES + ' agree)'
-        : 'look ' + revLooks + '/' + REV_MAX_LOOKS), 'busy');
+      showProgress();
 
       // FOUR AGREEING READS. Nothing less is filed.
       if(bestN >= REV_LOCK_VOTES){
         put('Rev', best, 'ocr', null, 0);
+        lock('Rev');                      // four agreed: frozen, stop reading it
         stopRevVoting();
+        showProgress();
         evaluate();
         return;
       }
@@ -2820,7 +3023,8 @@ async function chargeTick(){
   try{
     const band = grabChargeBand();
     if(band){
-      const raw = await bandRead('6','',band);
+      if(!bandChanged('chg', band)){ chgVoteTimer = setTimeout(chargeTick, CHG_POLL_MS); return; }
+      const raw = await readBand('chg', band);
       const p = parseOcr(raw);
 
       // the serial rides along on the same band, voted like any optional field
@@ -2834,11 +3038,13 @@ async function chargeTick(){
 
       let best='', bestN=0;
       for(const k in chgVotes){ if(chgVotes[k]>bestN){ bestN=chgVotes[k]; best=k; } }
-      setStatus('Reading charge\u2026 ' + (best ? best+'  (\u00d7'+bestN+')' : 'try '+chgTries+'/'+CHG_MAX_TRIES), 'busy');
+      showProgress();
 
       if(bestN >= CHG_LOCK_VOTES){
         put('Char', best, 'ocr', null, 0);
+        lock('Char');
         stopChargeVoting();
+        showProgress();
         const w = clearWinner(tally('SerNr'), 1);
         if(w && !heldField('SerNr')) put('SerNr', w, 'ocr', null, 0);
         evaluate();
