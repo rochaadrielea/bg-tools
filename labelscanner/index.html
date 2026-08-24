@@ -297,7 +297,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v7.9';
+const VERSION = 'v8.0';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -376,10 +376,19 @@ function showProgress(){
   const m = heldVal('Mat');
   if(m) parts.push('Mat ' + m + ' \u2713');
   else {
-    const b = bestVote(matVotes), r = bestVote(matRvVotes);
-    const w = b.n >= r.n ? b : r;
-    const need = (w === b) ? MAT_LOCK_VOTES : MAT_RV_LOCK_VOTES;
-    parts.push('Mat ' + (w.value ? w.value + ' ' + w.n + '/' + need : '\u2026'));
+    // WHAT THE MASTER LIST CURRENTLY THINKS IT COULD BE. This is the "put it on
+    // the screen" part: instead of a bare "reading...", the operator sees the
+    // vocabulary closing in, and can tell at a glance whether it is converging
+    // on the right number or hunting in the wrong place entirely.
+    const v = materialVerdict();
+    const short = materialShortlist(2);
+    if(short.length > 1)      parts.push('Mat ' + short.join('? ') + '?');
+    else if(short.length === 1)
+      parts.push('Mat ' + short[0] + '? ' + v.score.toFixed(1) + '/' + MAT_CAND_LOCK.toFixed(1));
+    else {
+      const r = bestVote(matRvVotes);
+      parts.push('Mat ' + (r.value ? r.value + ' ' + r.n + '/' + MAT_RV_LOCK_VOTES : '\u2026'));
+    }
   }
 
   const c = heldVal('Char');
@@ -563,6 +572,115 @@ function bestMasterMatch(raw){
   return {tier:'review', value:t, original:'', near:(bestD <= 2 ? best : '')};
 }
 
+// ============================================================================
+//  THE MASTER LIST AS A LIVE FILTER  -  v8.0
+//  ---------------------------------------------------------------------------
+//  Adriele: "the material should compare with the master list all the time ...
+//  does a filter so when it misses a value it actually sees that the master
+//  list has a very similar value, then put it on the screen".
+//
+//  Until now the master was only a JUDGE at the end: read a token, decide if it
+//  is valid, throw it away if not. Each read had to succeed on its own, and a
+//  read that got most of the number right counted for nothing.
+//
+//  It is now a FILTER that runs on every read and narrows a candidate set. Each
+//  read adds weight to whichever entries it supports, and evidence ACCUMULATES
+//  across reads instead of each one starting from zero. Three kinds of support,
+//  weighted by how much they are worth:
+//
+//    1.00  the token IS an entry.
+//    0.80  the token uniquely CONTAINS an entry, or is uniquely contained by
+//          one. This is the velocity win: "MAT3001280" glued together, or a
+//          cropped "3001280" missing its last digit, used to be discarded.
+//          Now, if only one entry in the whole list fits, that is the answer -
+//          it did not need to be read correctly, only recognisably.
+//    0.70  the token scores within one difference of exactly one entry, with
+//          the runner-up clearly further away (the v7.8 weighted rule).
+//    0.30  it is close to two or more entries. Neither can win on this, but
+//          BOTH go on the screen, which is the "see that the list has a very
+//          similar value" part - the operator reads the label and taps.
+//
+//  A candidate is taken when it reaches MAT_CAND_LOCK and leads by
+//  MAT_CAND_MARGIN. Two clean reads still settle it, exactly as before; a
+//  partial read now contributes instead of being wasted.
+// ============================================================================
+const MAT_CAND_LOCK   = 2.00;
+const MAT_CAND_MARGIN = 1.00;
+const W_EXACT = 1.00, W_CONTAIN = 0.80, W_SCORED = 0.70, W_RIVAL = 0.30;
+const MIN_CONTAIN = 6;          // shorter overlaps than this prove nothing
+
+// What ONE read says about the vocabulary: entry -> weight (best claim only).
+function masterCandidates(text){
+  const out = {};
+  if(!MASTER) return out;
+  const bump = function(m, w){ if(!out[m] || out[m] < w) out[m] = w; };
+
+  const lines = String(text||'').split(/\n/)
+                  .filter(function(l){ return !OTHER_FIELD_LINE.test(l); });
+  const toks = lines.join(' ').toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+
+  for(let i=0;i<toks.length;i++){
+    const t = cleanMatToken(toks[i]);
+    if(t.length < 5) continue;
+
+    if(matIndex.has(t)){ bump(t, W_EXACT); continue; }
+
+    // one entry, and only one, overlaps this token
+    const hits = [];
+    for(let m=0;m<matList.length;m++){
+      const e = matList[m];
+      if(Math.min(t.length, e.length) < MIN_CONTAIN) continue;
+      if(t.indexOf(e) >= 0 || e.indexOf(t) >= 0) hits.push(e);
+      if(hits.length > 1) break;
+    }
+    if(hits.length === 1){ bump(hits[0], W_CONTAIN); continue; }
+
+    // otherwise score the whole vocabulary
+    let best='', bestD=Infinity, second=Infinity, runner='';
+    for(let m=0;m<matList.length;m++){
+      const d = weightedDist(t, matList[m], 2);
+      if(d < bestD){ second=bestD; runner=best; bestD=d; best=matList[m]; }
+      else if(d < second){ second=d; runner=matList[m]; }
+    }
+    if(bestD <= MAT_ACCEPT_COST && (second - bestD) > MAT_MARGIN){
+      bump(best, W_SCORED);
+    } else if(bestD <= 2){
+      // too close to call. Neither wins - but both go on the screen.
+      bump(best, W_RIVAL);
+      if(runner && second <= 2) bump(runner, W_RIVAL);
+    }
+  }
+  return out;
+}
+
+// The running candidate set for the label in view, and what it currently says.
+function addMaterialEvidence(text){
+  const one = masterCandidates(text);
+  for(const m in one) matCand[m] = (matCand[m]||0) + one[m];
+  return Object.keys(one).length > 0;
+}
+
+// -> {value, score, lead} - value is '' until one entry is clearly ahead
+function materialVerdict(){
+  let best='', bestS=0, second=0;
+  for(const m in matCand){
+    if(matCand[m] > bestS){ second=bestS; bestS=matCand[m]; best=m; }
+    else if(matCand[m] > second){ second=matCand[m]; }
+  }
+  const lead = bestS - second;
+  return {value:(bestS >= MAT_CAND_LOCK && lead >= MAT_CAND_MARGIN) ? best : '',
+          top:best, score:bestS, lead:lead};
+}
+
+// The shortlist, best first - this is what goes on the screen and onto the
+// buttons. Never invented: every entry here is a real material the vocabulary
+// says the picture could be.
+function materialShortlist(n){
+  return Object.keys(matCand)
+    .sort(function(a,b){ return matCand[b]-matCand[a]; })
+    .slice(0, n||3);
+}
+
 function editDist(a, b, cap){
   if(a === b) return 0;
   if(Math.abs(a.length-b.length) > cap) return cap+1;
@@ -644,8 +762,12 @@ function nearestMasters(text, howMany, notMat){
 }
 
 // Lines that belong to another field. A production order is not a material.
+// v8.0 GAP FOUND BY TEST: the list said "charge", but the WAE label prints
+// "Char. 579371". So the charge line was never excluded from the material scan,
+// and its six digits went into the vocabulary filter as a possible material.
+// "Char"/"Chg" followed by a number, and the order line, are now excluded too.
 const OTHER_FIELD_LINE =
-  /prod\s*n|ba[t1lI][a-z0-9]{0,3}\s*[.:]?\s*\d|qty|menge|expiry|verfalls|charge|l-?cha|sernr|ch-\d|eq-\d/i;
+  /prod\s*n|ba[t1lI][a-z0-9]{0,3}\s*[.:]?\s*\d|qty|menge|expiry|verfalls|charge|cha[rl][.,:]?\s*\d|chg[.,:]?\s*\d|auftr|l-?cha|sernr|ch-\d|eq-\d/i;
 
 function matFromTokens(text, exclude, exclude2){
   if(!MASTER) return '';
@@ -718,7 +840,7 @@ function resetSession(reason){
   matSuggestions = [];
   charSuggestions = [];
   // every reading loop's tally and allowance belongs to the label in view
-  matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
+  matVotes = {}; matCand = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
   revVotes = {}; revTries = 0; revLooks = 0;
   chgVotes = {}; chgTries = 0;
   lastProgress = '';
@@ -2811,6 +2933,7 @@ const MAT_MAX_TRIES  = 24;   // absolute ceiling before the card opens
 
 let matVoteRunning = false;
 let matVotes = {};
+let matCand = {};        // v8.0: master entries -> accumulated support
 let matRvVotes = {};
 let matTries = 0;
 let matVoteTimer = null;
@@ -2897,45 +3020,23 @@ async function materialTick(){
       const raw = rawA;
       if(rawA) matVoteText.push(rawA);
       if(rawB && rawB !== rawA) matVoteText.push(rawB);
+      // EVERY read narrows the vocabulary, whether or not it produced a token
+      // that is valid on its own. This is the accumulation that was missing.
+      addMaterialEvidence(rawA);
+      if(rawB && rawB !== rawA) addMaterialEvidence(rawB);
+
       const toks = (rawA + '\n' + rawB).toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
-      let filed = '';
-      for(let i=0;i<toks.length && !filed;i++){
-        const t = cleanMatToken(toks[i]);
-        if(t === normId(heldVal('Char'))) continue;
-        const res = resolveMat(toks[i]);
-        if(res.tier === 'confirmed' || res.tier === 'corrected'){
-          filed = res.value;
-          matVotes[filed] = (matVotes[filed]||0) + 1;
-          if(res.tier === 'corrected') session.matOriginal = res.original;
-        } else if(res.tier === 'review' && res.value){
-          // a P-part (safety sheet, bushing) is not in the master and is still a
-          // real material. Tallied separately; it reaches the confirm strip
-          // tagged RV, exactly like any other unvouched value.
-          const rv = res.value;
-          if(/^[A-Z]{1,2}[0-9]/.test(rv) && rv.length>=6
-             && rv !== normId(heldVal('Char')) && rv !== normId(heldVal('Auftr'))
-             && rv !== normId(heldVal('L-Char'))){
-            matRvVotes[rv] = (matRvVotes[rv]||0) + 1;
-          }
-        }
-      }
-      // v7.5: a read that recognised NOTHING does not burn a try. With two
-      // loops sharing one Tesseract worker the material band regularly comes
-      // back empty simply because the revision read was in front of it in the
-      // queue - that is contention, not a failed attempt, and it was eating the
-      // material's whole allowance.
       if(raw) matTries++;
       showProgress();
 
-      for(const v in matVotes){
-        if(matVotes[v] >= MAT_LOCK_VOTES){
-          put('Mat', v, 'ocr', null, 0);
-          lock('Mat');                    // frozen: no later read can move it
-          stopMaterialVoting();
-          showProgress();
-          evaluate();
-          return;
-        }
+      const verdict = materialVerdict();
+      if(verdict.value){
+        put('Mat', verdict.value, 'ocr', null, 0);
+        lock('Mat');                      // frozen: no later read can move it
+        stopMaterialVoting();
+        showProgress();
+        evaluate();
+        return;
       }
       for(const v in matRvVotes){
         if(matRvVotes[v] >= MAT_RV_LOCK_VOTES){
@@ -2966,7 +3067,9 @@ async function materialTick(){
         ['Auftr','Char','L-Char','CH-Nr'].forEach(function(k){
           const f = heldField(k); if(f) notMat.push(normId(f.value));
         });
-        matSuggestions = nearestMasters((matVoteText.join('\n') + '\n' + lastOcrText), 3, notMat);
+        matSuggestions = materialShortlist(3).map(function(m){ return {m:m, d:0}; });
+        if(!matSuggestions.length)
+          matSuggestions = nearestMasters((matVoteText.join('\n') + '\n' + lastOcrText), 3, notMat);
         setStatus('Material not read \u2014 tap it or type it','bad');
         readingDone();
         return;
@@ -2979,7 +3082,9 @@ async function materialTick(){
         ['Auftr','Char','L-Char','CH-Nr'].forEach(function(k){
           const f = heldField(k); if(f) notMat.push(normId(f.value));
         });
-        matSuggestions = nearestMasters(matVoteText.join('\n'), 3, notMat);
+        matSuggestions = materialShortlist(3).map(function(m){ return {m:m, d:0}; });
+        if(!matSuggestions.length)
+          matSuggestions = nearestMasters(matVoteText.join('\n'), 3, notMat);
         setStatus('Material not read \u2014 tap it or type it','bad');
         readingDone();
         return;
