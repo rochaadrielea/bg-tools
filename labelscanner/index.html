@@ -297,7 +297,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v8.1';
+const VERSION = 'v8.2';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -825,7 +825,10 @@ function fixRevChar(raw){
   const s = String(raw||'').toUpperCase().replace(/[^A-Z0-9$]/g,'');
   if(s.length !== 1) return '';
   const c = REV_FIX[s] || s;
-  return /^[A-Z]$/.test(c) ? c : '';
+  // v8.2: outside the vocabulary is not a revision, however confident the read.
+  // An R, a V, a G - all real things Tesseract returns - are now silence rather
+  // than a value. Silence costs one more look; a wrong letter costs the row.
+  return isRevLetter(c) ? c : '';
 }
 
 // ============================================================================
@@ -1642,8 +1645,10 @@ function revOptions(){
   Object.keys(revVotes).sort(function(a,b){ return revVotes[b]-revVotes[a]; })
         .forEach(function(k){ if(out.indexOf(k) < 0) out.push(k); });
   const voted = out.length;
-  'ABCDEF'.split('').forEach(function(k){ if(out.indexOf(k) < 0 && out.length < 8) out.push(k); });
-  return {letters: out.slice(0,8), voted: voted};
+  // the rest of the vocabulary fills in behind them - all of it, because with
+  // five letters the complete set fits on the screen
+  REV_LETTERS.split('').forEach(function(k){ if(out.indexOf(k) < 0) out.push(k); });
+  return {letters: out.slice(0, Math.max(REV_LETTERS.length, voted)), voted: voted};
 }
 
 function openConfirm(proof){
@@ -1856,28 +1861,37 @@ function bandRead(psm, whitelist, canvas){
 //  phone running out of memory), the pool switches off for good and everything
 //  falls back to the shared queue above. Slower, still correct.
 // ============================================================================
-// The revision is a CAPITAL. Always. Rev. A / B / C / D ...
-// v7.4 restricted the whitelist to capitals - the engine cannot return a
-// lowercase letter or a digit, it must choose a capital. Same controlled-
-// vocabulary principle that makes the material number trustworthy, applied to
-// the smallest vocabulary on the label.
+// ============================================================================
+//  THE REVISION VOCABULARY  -  v8.2
+//  ---------------------------------------------------------------------------
+//  Adriele: "we can say for now it is from A to E - IF we have more I tell you".
 //
-// v8.1 SHRINKS THE VOCABULARY FURTHER. Adriele: "the revision is confusing a
-// lot, A=I and B=R". I is exactly the shape a poorly-resolved A collapses to,
-// and revision letters do not use it: engineering drawing practice skips
-// I, O and Q precisely because they are unreadable against 1, 0 and O. Taking
-// them out of the whitelist means the engine CANNOT answer I - so the most
-// common way an A goes wrong is closed off at the source rather than repaired
-// afterwards. 23 letters instead of 26, and three fewer wrong answers to pick.
+//  This is the single most valuable thing anyone has told this tool about the
+//  revision. It is why the MATERIAL reads well and the revision did not: a
+//  material number carries far more characters than it needs, so errors get
+//  absorbed by the list - three characters can be wrong and only one entry
+//  still fits. The revision is ONE character, and with 26 candidates there was
+//  no spare information at all. A wrong B looked exactly like a right B.
 //
-// If a revision letter I, O or Q ever does turn up on a real label, put them
-// back in REV_LETTERS and the rest of the tool needs no change.
-const REV_LETTERS   = 'ABCDEFGHJKLMNPRSTUVWXYZ';   // no I, no O, no Q
-const REV_WHITELIST = REV_LETTERS + '.';
+//  Five candidates gives the revision its own redundancy for the first time.
+//  It also deletes the two errors reported by name: I is gone, R is gone.
+//
+//  TO EXTEND IT: add letters to REV_LETTERS. Nothing else changes - the
+//  whitelist, the repairs, the confirm-strip buttons and the rejection rule
+//  are all derived from this one string.
+const REV_LETTERS = 'ABCDE';
+
+//  R and V are in the WHITELIST but never accepted as an ANSWER. The engine has
+//  to be able to spell the word "Rev." to anchor on it; it is simply not
+//  allowed to hand that R back as the revision. Same for V.
+const REV_WHITELIST = REV_LETTERS + 'RV.';
+
+//  Is this a revision this label family can actually carry?
+function isRevLetter(c){ return REV_LETTERS.indexOf(c) >= 0; }
 
 // How hard the revision band is magnified. It is one short line, so the cost is
-// small and the gain is large: B and R differ only in the bottom-right corner,
-// and that corner needs pixels to exist at all.
+// small and the gain is large: B and D differ only in the left-hand bowl, and
+// that bowl needs pixels to exist at all.
 const REV_ZOOM = 6;
 
 const BAND_CFG = {
@@ -3277,15 +3291,27 @@ async function revTick(){
       try{ bw = binarise(band); }catch(_){}
       const rawA = await readBand('rev', band);
       const rawB = bw ? await readBand('rev', bw) : '';
+
+      // ONE VALID READING BETWEEN THE TWO VIEWS IS ENOUGH  -  v8.2
+      // With only five letters possible, a view that comes back R or V or G has
+      // not disagreed - it has said nothing, because it named something that is
+      // not a revision. extractRev already returns '' for those.
+      // So the rule is not "both views must match", it is "the two views must
+      // leave exactly ONE valid letter standing":
+      //   B and R   -> R is not a revision -> {B} -> vote B
+      //   B and D   -> both are real -> genuinely ambiguous -> no vote
+      //   R and G   -> nothing valid -> no vote
+      // This is what makes B-read-as-R stop costing anything: the wrong answer
+      // is not in the vocabulary, so it cannot compete with the right one.
+      const seenNow = [];
+      [extractRev(rawA), bw ? extractRev(rawB) : ''].forEach(function(c){
+        if(c && seenNow.indexOf(c) < 0) seenNow.push(c);
+      });
       revLooks++;
 
-      const a = extractRev(rawA);
-      const bChar = bw ? extractRev(rawB) : a;
-      let rv = '';
-      if(a && bChar && a === bChar) rv = a;          // both agree: one vote
-      else if(a && !bw) rv = a;                       // no second view available
+      const rv = (seenNow.length === 1) ? seenNow[0] : '';
 
-      // A read that recognised nothing, or two views that disagree, is silence.
+      // Nothing valid, or two different valid letters, is silence - not a vote.
       if(rv){
         revVotes[rv] = (revVotes[rv]||0) + 1;
         revTries++;
