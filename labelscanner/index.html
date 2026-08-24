@@ -282,7 +282,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v7.2';
+const VERSION = 'v7.5';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -545,11 +545,15 @@ function fixRevChar(raw){
 // ============================================================================
 let session = newSession();
 let attemptStart = Date.now();
-function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}}; }
+function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null}; }
 
 function resetSession(reason){
   matSuggestions = [];
   charSuggestions = [];
+  // every reading loop's tally and allowance belongs to the label in view
+  matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
+  revVotes = {}; revTries = 0; revLooks = 0;
+  chgVotes = {}; chgTries = 0;
   const had = Object.keys(session.fields).length;
   session = newSession();
   reticle.classList.remove('partial','reject');
@@ -588,8 +592,32 @@ function put(field, value, src, box, tick){
   return true;
 }
 
+// BARE_PARK_MS  how long a bare-digit barcode waits for a second code to prove
+//               the label is WAE before it is accepted as an MSL batch. Long
+//               enough for the detector to get a second frame in (it returns
+//               one code per frame), short enough not to be felt.
+const BARE_PARK_MS = 1500;
+
 setInterval(function(){
   if(!scanning) return;
+
+  // A parked barcode whose wait has run out: one code only, nothing in the
+  // master, so this is the MSL family and the digits are the batch.
+  const pb = session.pendingBare;
+  if(pb && !review.classList.contains('show') && !confirmBar.classList.contains('show')){
+    if(waeSignal([])){
+      session.pendingBare = null;
+      put('Mat', pb.value, 'bc', pb.box, pb.tick);
+      evaluate();
+    } else if(Date.now() - pb.t > BARE_PARK_MS){
+      session.pendingBare = null;
+      put('Char', pb.value, 'bc', pb.box, pb.tick);
+      evaluate();
+    } else {
+      setStatus('Read ' + pb.value + ' \u2014 looking for the second barcode\u2026','busy');
+    }
+  }
+
   const busyUi = review.classList.contains('show') || confirmBar.classList.contains('show');
   const incomplete = !MANDATORY.every(function(k){ return heldField(k); });
   const overdue = (Date.now()-attemptStart) > HINT_MS;
@@ -809,14 +837,23 @@ async function nativeLoop(){
         let codes = await nativeDetector.detect(cv);
         let boxScale = 1;
         fails = 0;
-        if((!codes || !codes.length) && (++enhanceTick % ENHANCE_EVERY === 0)){
-          const en = drawCrop(2,true);
-          // The enhanced crop is drawn at 2x, so every box the detector returns
-          // is in 2x pixels. LATENT BUG FOUND v7.2: those boxes were handed on
-          // unscaled, so boxesCohere() compared a 2x box against a 1x one and
-          // the new revision band would have been aimed at twice its distance.
-          // Bring them back to crop pixels before anything uses them.
-          if(en){ codes = await nativeDetector.detect(en); boxScale = 2; }
+        // HUNTING: a code has been seen but the MATERIAL is still missing. The
+        // material barcode is the denser of the two on a WAE label - in the
+        // aim-box crop it sits at roughly 1.4 pixels per module, right at the
+        // edge of decodable. This is the one moment the expensive pass is worth
+        // running on EVERY frame and at 3x instead of 2x: it is the difference
+        // between reading the number and asking the operator to type it.
+        const hunting = !heldField('Mat') && !session.pendingBare
+                     && Object.keys(session.codes||{}).length > 0;
+        if((!codes || !codes.length) && (hunting || (++enhanceTick % ENHANCE_EVERY === 0))){
+          const k = hunting ? 3 : 2;
+          const en = drawCrop(k,true);
+          // The enhanced crop is drawn magnified, so every box the detector
+          // returns is in magnified pixels. LATENT BUG FOUND v7.2: those boxes
+          // were handed on unscaled, so boxesCohere() compared a 2x box against
+          // a 1x one and the revision band would have been aimed at twice its
+          // distance. Bring them back to crop pixels before anything uses them.
+          if(en){ codes = await nativeDetector.detect(en); boxScale = k; }
         }
         if(codes && codes.length){
           frameTick++;
@@ -882,16 +919,27 @@ async function zxingCropLoop(){
   while(scanning){
     const cv = scanBusy ? null : drawCrop(1,false);
     if(cv){
-      try{
-        const res = codeReader.decodeFromCanvas(cv);
-        if(res && res.getText){
-          frameTick++;
-          const bx = pointsToBox(res.getResultPoints && res.getResultPoints());
-          lastRaw = res.getText().trim()
-                  + (res.getBarcodeFormat ? '  ['+res.getBarcodeFormat()+']' : '');
-          onCodes([{value:res.getText().trim(), box:bx}], frameTick);
+      let read = null;
+      try{ read = codeReader.decodeFromCanvas(cv); }catch(_){ /* NotFound on most frames: normal */ }
+      // v7.3: this path had NO enhanced retry at all - on a phone without
+      // BarcodeDetector the dense material barcode got exactly one attempt per
+      // frame at native size and nothing else. It now gets the same magnified
+      // second look the fast path gets.
+      if(!read){
+        const hunting = !heldField('Mat') && !session.pendingBare
+                     && Object.keys(session.codes||{}).length > 0;
+        if(hunting || (++enhanceTick % ENHANCE_EVERY === 0)){
+          const en = drawCrop(hunting ? 3 : 2, true);
+          if(en){ try{ read = codeReader.decodeFromCanvas(en); }catch(_){} }
         }
-      }catch(_){ /* NotFoundException on most frames: normal */ }
+      }
+      if(read && read.getText){
+        frameTick++;
+        const bx = pointsToBox(read.getResultPoints && read.getResultPoints());
+        lastRaw = read.getText().trim()
+                + (read.getBarcodeFormat ? '  ['+read.getBarcodeFormat()+']' : '');
+        onCodes([{value:read.getText().trim(), box:bx}], frameTick);
+      }
     }
     await new Promise(function(r){ setTimeout(r,100); });
   }
@@ -976,6 +1024,12 @@ function waeSignal(codes){
 function applyBarcodes(codes, tick){
   let changed = false;
   const wae = waeSignal(codes);
+  // the second barcode has arrived: whatever was parked is the MATERIAL
+  if(wae && session.pendingBare){
+    const pb = session.pendingBare;
+    session.pendingBare = null;
+    changed = put('Mat', pb.value, 'bc', pb.box, pb.tick) || changed;
+  }
   for(const c of codes){
     const s = (c.value||'').trim(); if(!s) continue;
     session.codes[s] = 1;                 // for the two-barcode family test
@@ -1005,35 +1059,29 @@ function applyBarcodes(codes, tick){
     }
 
     // A BARE 6-7 DIGIT NUMBER IS AMBIGUOUS BY ITSELF. On a WAE label it is the
-    // material; on the MSL label it is the BATCH. Digit count cannot separate
-    // them - but THE LABEL CAN, and it tells us before any text is read:
+    // material; on the MSL label it is the BATCH.
     //
-    //   a CH- or EQ- barcode in view  ->  this is a WAE label  ->  MATERIAL
-    //   no such barcode               ->  MSL family           ->  ask the master
+    // v7.3 BUG THIS FIXES - AND IT WAS MINE. v7.2 decided the family from the
+    // codes present in ONE FRAME. The detector returns one code per frame, so
+    // when the bare digits arrived first the family still looked like MSL and
+    // the MATERIAL WAS COMMITTED TO THE CHARGE. A frame later the real CH- code
+    // arrived, found the Charge already taken by a different barcode value, and
+    // raised a two-labels-in-view CONFLICT on a single clean label - the red
+    // card that appeared "super fast" and asked for the number by hand.
     //
-    // v7.0 BUG THIS FIXES: the old rule asked the master FIRST. A material that
-    // is not in the master (a loose item from another assembly - which is most
-    // of them) therefore fell through to "it must be the batch", and the
-    // MATERIAL BARCODE WAS FILED AS THE CHARGE. Material then looked missing,
-    // so the tool started taking still photographs of a number it had already
-    // read perfectly. On the CH- labels it was worse: the charge was already
-    // held from the CH- code, so the material arrived as a SECOND, different
-    // charge and raised a two-labels-in-view conflict on a single clean label.
-    //
-    // The master no longer decides the FIELD, only whether the value is ML or
-    // RV - which is all it was ever qualified to judge.
+    // Nothing is guessed while the answer is still in flight. The value is
+    // PARKED and filed only once the family is actually known:
+    //   a second barcode appears   -> WAE      -> Material
+    //   the number is in the master -> Material immediately, no waiting
+    //   BARE_PARK_MS with one code and no master hit -> MSL -> Charge
     if(/^\d{6,7}$/.test(s)){
       if(wae){
         changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
       } else if(MASTER && matIndex.has(normId(s))){
         changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
-      } else if(MASTER){
-        changed = put('Char', s,'bc',box,tick) || changed;
       } else {
-        // no master and no family signal: refuse to guess, show it, let the
-        // operator place it by hand
-        rawUnplaced = s;
-        changed = false;
+        session.pendingBare = {value:s.toUpperCase(), box:box||null, tick:tick||0, t:Date.now()};
+        changed = true;
       }
       continue;
     }
@@ -1162,9 +1210,10 @@ function evaluate(){
   // optional-but-wanted fields their chance: on a WAE label the Revision is
   // printed, not encoded, so it needs its own read. The voting loops below
   // call evaluate() again when they finish or give up.
-  if(isWae() && !heldField('Rev') && revTries < REV_MAX_TRIES && scanning){
+  if(isWae() && !heldField('Rev') && scanning
+     && revTries < REV_MAX_TRIES && revLooks < REV_MAX_LOOKS){
     startRevVoting();
-    setStatus('Reading the revision\u2026 (' + revTries + '/' + REV_MAX_TRIES + ')','busy');
+    setStatus('Reading the revision\u2026 (' + revTries + '/' + REV_MAX_TRIES + ' votes)','busy');
     return;
   }
 
@@ -1175,6 +1224,29 @@ function evaluate(){
 function presentForConfirm(){
   const proof = proveSameLabel();
   openConfirm(proof);
+}
+
+// ============================================================================
+//  NOBODY ENDS ANYBODY ELSE'S READ  -  v7.5
+//  ---------------------------------------------------------------------------
+//  There are three reading loops and ONE card. Whichever ran out of attempts
+//  first used to open the card or the strip directly - and opening either one
+//  calls stopAllVoting(). So the revision giving up killed the material read
+//  mid-flight, and the material giving up killed the revision read mid-flight.
+//  Adriele: "when read material already gives up on revision, when read
+//  revision gives up on material".
+//
+//  Every give-up now comes through here instead. If any loop is still working,
+//  this does nothing and the loop that called it simply stops - the others keep
+//  their attempts. The LAST one to finish is the one that opens the card.
+// ============================================================================
+function readingDone(){
+  if(matVoteRunning || revVoteRunning || chgVoteRunning) return false;
+  if(scanBusy || ocrActive) return false;
+  if(review.classList.contains('show') || confirmBar.classList.contains('show')) return true;
+  if(heldField('Mat') && heldField('Char')) presentForConfirm();
+  else openReview(proveSameLabel());
+  return true;
 }
 
 // Source is recorded per field, so the export always says where each value
@@ -1391,15 +1463,19 @@ function vote(field, value){
   const f = session.fields;
   if(f[field] && f[field].src==='bc') return;          // a barcode is never overruled
 
-  // The REVISION is a 26-letter vocabulary, so it is filed on agreement like
-  // the material, not on a clean win. Two passes reading B is proof enough;
-  // demanding it beat the runner-up by two left it blank on every real label.
+  // The REVISION pools into ONE tally, wherever the read came from.
+  // v7.5: there used to be two - session.votes.Rev for whole-label reads (which
+  // filed at 2 agreeing) and revVotes for band reads (which filed at 4). So the
+  // deep scan could file a revision on two votes while the band loop was still
+  // being held to four, and neither could help the other reach a total.
+  // One tally, one threshold: Adriele's 4 must agree, whichever reads produced
+  // them. That also means the still photo taken for the material now COUNTS
+  // TOWARDS the revision instead of interrupting it.
   if(field === 'Rev'){
     const rv = fixRevChar(value);
     if(!rv) return;
-    session.votes.Rev = session.votes.Rev || {};
-    session.votes.Rev[rv] = (session.votes.Rev[rv]||0)+1;
-    if(session.votes.Rev[rv] >= NEED_VOTES) put('Rev', rv, 'ocr', null, 0);
+    revVotes[rv] = (revVotes[rv]||0)+1;
+    if(revVotes[rv] >= REV_LOCK_VOTES) put('Rev', rv, 'ocr', null, 0);
     return;
   }
 
@@ -1972,9 +2048,13 @@ function parseOcr(text){
   //   Rev.  B        one line
   //   Rev.\n B       column mode split them
   // A "Rev" with nothing readable after it yields nothing, on purpose.
+  // All three are case-insensitive. v7.4 CAUGHT THIS: the capitals-only band
+  // whitelist means the word arrives as "REV." or, mangled, "PEV." - and the
+  // first two patterns spelt their letter classes in lowercase with no /i, so
+  // they could not match the very text the new whitelist produces.
   const REV_PATTERNS = [
-    /\b[PRFB8][e€o][vyu][.,:]?\s{0,40}([A-Z0-9])\b/,
-    /\b[PRFB8][e€o][vyu][.,:]?\s*\n\s*([A-Z0-9])\b/,
+    /\b[PRFB8][e€o][vyu][.,:]?\s{0,40}([A-Z0-9])\b/i,
+    /\b[PRFB8][e€o][vyu][.,:]?\s*\n\s*([A-Z0-9])\b/i,
     /\bRev(?:ision)?[.,:]?\s{0,40}([A-Z0-9])\b/i
   ];
   for(let i=0;i<REV_PATTERNS.length && !out.Rev;i++){
@@ -2336,8 +2416,8 @@ clearBtn.addEventListener('click', function(){
 // ============================================================================
 const MAT_POLL_MS    = 450;
 const MAT_LOCK_VOTES = 2;
-const MAT_DEEP_AFTER = 6;    // quick band misses -> escalate to the deep scan
-const MAT_MAX_TRIES  = 10;   // absolute ceiling before the card opens
+const MAT_DEEP_AFTER = 10;   // quick band misses -> escalate to the deep scan
+const MAT_MAX_TRIES  = 24;   // absolute ceiling before the card opens
 
 let matVoteRunning = false;
 let matVotes = {};
@@ -2404,7 +2484,12 @@ async function materialTick(){
           }
         }
       }
-      matTries++;
+      // v7.5: a read that recognised NOTHING does not burn a try. With two
+      // loops sharing one Tesseract worker the material band regularly comes
+      // back empty simply because the revision read was in front of it in the
+      // queue - that is contention, not a failed attempt, and it was eating the
+      // material's whole allowance.
+      if(raw) matTries++;
       setStatus('Reading material\u2026 ' + (filed
         ? filed + '  (\u00d7' + matVotes[filed] + ')'
         : 'try ' + matTries + '/' + MAT_MAX_TRIES), 'busy');
@@ -2427,12 +2512,13 @@ async function materialTick(){
       }
 
       // ESCALATE. This is the "try harder" step: full still, four rotations.
-      // v7.2: it must NOT fire while the revision is still being read - the
-      // still freezes every loop, and Adriele saw the camera reach for a photo
-      // the moment the charge landed, killing the revision read before it had
-      // taken a single look. The material barcode is also still being tried by
-      // the live loop, so patience here costs nothing.
-      if(revVoteRunning){ matVoteTimer = setTimeout(materialTick, MAT_POLL_MS); return; }
+      // v7.2 held this back while the revision was reading, so the two would
+      // not fight. v7.5 removes that block, because the deep scan no longer
+      // competes with the revision - IT FEEDS IT. It reads the whole label at
+      // four rotations and every pass votes into the SAME revision tally the
+      // band reads use, so a still that finds the material usually settles the
+      // revision in the same breath. revTick sits out while scanBusy is set and
+      // loses no looks doing it.
       if(!matDeepFired && matTries >= MAT_DEEP_AFTER){
         matDeepFired = true;
         stopMaterialVoting();
@@ -2445,7 +2531,7 @@ async function materialTick(){
         });
         matSuggestions = nearestMasters((matVoteText.join('\n') + '\n' + lastOcrText), 3, notMat);
         setStatus('Material not read \u2014 tap it or type it','bad');
-        openReview(proveSameLabel());
+        readingDone();
         return;
       }
 
@@ -2458,7 +2544,7 @@ async function materialTick(){
         });
         matSuggestions = nearestMasters(matVoteText.join('\n'), 3, notMat);
         setStatus('Material not read \u2014 tap it or type it','bad');
-        openReview(proveSameLabel());
+        readingDone();
         return;
       }
     }
@@ -2470,7 +2556,10 @@ async function materialTick(){
 function startMaterialVoting(){
   if(matVoteRunning) return;
   matVoteRunning = true;
-  matVotes = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
+  // v7.5: the tallies and the try counters are NOT reset here any more. The
+  // 600 ms pulse restarts a stopped loop, so resetting on start handed out a
+  // brand-new allowance every time and threw away votes already gathered.
+  // They belong to the label, and resetSession() clears them.
   clearTimeout(matVoteTimer);
   matVoteTimer = setTimeout(materialTick, MAT_POLL_MS);
 }
@@ -2497,13 +2586,36 @@ function stopMaterialVoting(){
 //  Running out of attempts does NOT block the label - it goes to the confirm
 //  strip with the Revision shown blank, which is the operator's cue to look.
 // ============================================================================
-const REV_POLL_MS   = 450;
-const REV_MAX_TRIES = 8;
-const REV_LOCK_VOTES = 2;
+const REV_POLL_MS    = 450;
+// Adriele's rule: FIVE votes, and FOUR of them must agree. Much stricter than
+// the material's two, and deliberately so - the material has 399 numbers to be
+// checked against, the revision has nothing. Four out of five is the only
+// evidence available that the letter is real.
+//
+// A read that recognises NOTHING does not consume a vote. It is not a
+// dissenting opinion, it is silence - burning a vote on it would mean one
+// blurred frame could sink a letter that four later reads all agree on.
+// REV_MAX_LOOKS stops it looking forever when the band is aimed at nothing.
+const REV_MAX_TRIES  = 5;    // votes collected
+const REV_LOCK_VOTES = 4;    // votes that must agree
+const REV_MAX_LOOKS  = 30;   // band reads allowed while gathering those votes
+
+// The revision is a CAPITAL. Always. Rev. A / B / C / D ...
+// v7.4: the whitelist used to include lowercase AND digits, which let Tesseract
+// return 'b' for B and '8' for B and made every read compete with itself -
+// Adriele: "revision is reading super bad". Restricting it to capitals means
+// the engine CANNOT return a lowercase letter or a digit; it must choose one of
+// 26 capitals. Same controlled-vocabulary principle that makes the material
+// number trustworthy, applied to the smallest vocabulary on the label.
+// The dot stays so the word "Rev." survives as an anchor.
+// REV_FIX is still the safety net for the whole-crop path, where no whitelist
+// is applied and an 8 or a 4 can still come back.
+const REV_WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ.';
 
 let revVoteRunning = false;
 let revVotes = {};
-let revTries = 0;
+let revTries = 0;     // votes collected (a blank read does not count)
+let revLooks = 0;     // band reads attempted
 let revVoteTimer = null;
 
 const rbCv = document.createElement('canvas');
@@ -2575,45 +2687,61 @@ async function revTick(){
   try{
     const band = grabRevBand();
     if(band){
-      // PSM 7 = one line. The whitelist keeps letters and the digits that
-      // repair into letters, and drops the punctuation that turns "Rev. B"
-      // into a two-token mess. bandRead guarantees these settings are the ones
-      // in force when THIS recognize runs.
-      const raw = await bandRead('7',
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.', band);
+      // PSM 6, not 7. The band is anchored to the barcode and is generous on
+      // purpose, so it usually holds "Verfallsdatum:" as well as "Rev. X".
+      // PSM 7 promises Tesseract a SINGLE LINE; handed two or three it returns
+      // mush, which is the other half of "reading super bad". PSM 6 reads a
+      // small block and the pattern picks the revision out of whatever lines
+      // come back.
+      const raw = await bandRead('6', REV_WHITELIST, band);
+      revLooks++;
 
       let rv = '';
       const p = parseOcr(raw);
       if(p.Rev) rv = p.Rev;
       if(!rv){
-        // the band holds almost nothing else, so a lone character in it after
-        // the word has been stripped is the revision
-        const m = raw.toUpperCase().replace(/[^A-Z0-9 ]/g,' ')
-                     .replace(/\b[PRFB8][EO][VYU]\b/g,' ')
-                     .match(/\b([A-Z0-9])\b/);
+        // With capitals forced, "Rev." reads as "REV." - strip the word, then a
+        // lone capital left in the band is the revision. Words are ignored: a
+        // single letter standing on its own is the only thing accepted.
+        const m = raw.toUpperCase().replace(/[^A-Z ]/g,' ')
+                     .replace(/\bREV\b|\bVERFALLSDATUM\b|\bPES\b|\bWAE\b/g,' ')
+                     .match(/(?:^|\s)([A-Z])(?:\s|$)/);
         if(m) rv = fixRevChar(m[1]);
       }
-      if(rv){ revVotes[rv] = (revVotes[rv]||0) + 1; }
-      revTries++;
+
+      // A read that recognised nothing is silence, not a vote.
+      if(rv){
+        revVotes[rv] = (revVotes[rv]||0) + 1;
+        revTries++;
+      }
 
       let best='', bestN=0;
       for(const k in revVotes){ if(revVotes[k]>bestN){ bestN=revVotes[k]; best=k; } }
-      setStatus('Reading revision\u2026 ' + (best ? 'Rev '+best+'  (\u00d7'+bestN+')'
-                                                 : 'try '+revTries+'/'+REV_MAX_TRIES), 'busy');
+      setStatus('Reading revision\u2026 ' + (best
+        ? 'Rev ' + best + '  (' + bestN + '/' + REV_LOCK_VOTES + ' agree)'
+        : 'look ' + revLooks + '/' + REV_MAX_LOOKS), 'busy');
 
+      // FOUR AGREEING READS. Nothing less is filed.
       if(bestN >= REV_LOCK_VOTES){
         put('Rev', best, 'ocr', null, 0);
         stopRevVoting();
         evaluate();
         return;
       }
-      if(revTries >= REV_MAX_TRIES){
-        // Out of attempts. The Revision stays BLANK and the label still goes to
-        // the strip - blank is the message. Nothing is guessed from one read.
+
+      // Five votes cast and no letter reached four, or the band has been looked
+      // at long enough. Either way the Revision stays BLANK and the label still
+      // goes to the strip - blank is the message, and it is the operator's cue
+      // to read the letter off the label and type it.
+      if(revTries >= REV_MAX_TRIES || revLooks >= REV_MAX_LOOKS){
         stopRevVoting();
-        presentForConfirm();
+        setStatus('Revision not certain \u2014 read it off the label','bad');
+        readingDone();
         return;
       }
+    } else {
+      revLooks++;
+      if(revLooks >= REV_MAX_LOOKS){ stopRevVoting(); readingDone(); return; }
     }
   }catch(e){ console.warn('revTick', e); }
 
@@ -2623,7 +2751,8 @@ async function revTick(){
 function startRevVoting(){
   if(revVoteRunning) return;
   revVoteRunning = true;
-  revVotes = {}; revTries = 0;
+  // tallies and counters are cleared per LABEL in resetSession(), not here -
+  // see startMaterialVoting. Votes gathered by a deep scan survive a restart.
   clearTimeout(revVoteTimer);
   revVoteTimer = setTimeout(revTick, REV_POLL_MS);
 }
@@ -2726,7 +2855,7 @@ async function chargeTick(){
         } else {
           charSuggestions = tally('Char').slice(0,4);
           setStatus('Charge not read \u2014 read it off the label','bad');
-          openReview(proveSameLabel());
+          readingDone();
         }
         return;
       }
@@ -2738,7 +2867,6 @@ async function chargeTick(){
 function startChargeVoting(){
   if(chgVoteRunning) return;
   chgVoteRunning = true;
-  chgVotes = {}; chgTries = 0;
   clearTimeout(chgVoteTimer);
   chgVoteTimer = setTimeout(chargeTick, CHG_POLL_MS);
 }
@@ -2770,7 +2898,8 @@ setInterval(function(){
   // time it was allowed to start the label had usually gone. It now starts as
   // soon as the label is identified as WAE and anything at all has been read
   // off it, and runs alongside the charge instead of behind it.
-  if(!revVoteRunning && !heldField('Rev') && revTries < REV_MAX_TRIES
+  if(!revVoteRunning && !heldField('Rev')
+     && revTries < REV_MAX_TRIES && revLooks < REV_MAX_LOOKS
      && isWae() && (heldField('Mat') || heldField('Char'))) startRevVoting();
 }, 600);
 
