@@ -79,6 +79,13 @@
   button:active{transform:scale(.98);}
   button:disabled{opacity:.4;}
   button.primary{background:var(--signal);color:#08130E;border-color:var(--signal);}
+  /* v8.8: the card's confirm is AMBER, not green. Green says "done"; this
+     button does not finish anything - it hands the label to the confirm strip,
+     which is amber. Same colour, same meaning: look before you commit. */
+  button.warnbtn{background:var(--warn);color:#241703;border-color:var(--warn);}
+  /* v8.8: "Check & confirm" is not a finish button - it hands the label to the
+     amber confirm strip. Green said "done"; orange says "now look at it". */
+  button.warnbtn{background:var(--warn);color:#241703;border-color:var(--warn);}
   button.ghost{background:transparent;}
   button.wide{grid-column:1/-1;}
   input[type=file]{display:none;}
@@ -206,9 +213,11 @@
   <div class="rawline" id="rawLine"></div>
   <div class="masterline" id="masterLine">Checking master list&hellip;</div>
 
+  <!-- v8.8: Upload photo removed at Adriele's request - it was slow and is not
+       part of the hands-free flow. The reader behind it is untouched, so the
+       button can come back by restoring this line. -->
   <div class="controls">
-    <button class="ghost" id="fileBtn">Upload photo</button>
-    <button class="ghost" id="focusBtn">Refocus</button>
+    <button class="ghost wide" id="focusBtn">Refocus</button>
     <button class="ghost wide" id="freshBtn">Get latest version (fresh reload)</button>
     <input type="file" id="fileInput" accept="image/*" capture="environment">
   </div>
@@ -224,7 +233,7 @@
     </div>
     <div class="controls" style="margin:12px 10px 4px;">
       <button class="ghost" id="discardBtn">Discard</button>
-      <button class="primary" id="addBtn">Check &amp; confirm</button>
+      <button class="warnbtn" id="addBtn">Check &amp; confirm</button>
     </div>
   </div>
 
@@ -297,7 +306,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v8.7';
+const VERSION = 'v8.9';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -331,6 +340,7 @@ const statusEl=document.getElementById('status'), statusTxt=document.getElementB
 const reticle=document.getElementById('reticle'), banner=document.getElementById('banner');
 const idlePanel=document.getElementById('idle'), authBtn=document.getElementById('authBtn'), idleTxt=document.getElementById('idleTxt');
 const fileBtn=document.getElementById('fileBtn'), focusBtn=document.getElementById('focusBtn'), fileInput=document.getElementById('fileInput');
+// fileBtn may not exist (the Upload photo button is off) - guard every use.
 const scanChip=document.getElementById('scanChip'), torchChip=document.getElementById('torchChip');
 const refreshChip=document.getElementById('refreshChip'), clearChip=document.getElementById('clearChip');
 const rawLine=document.getElementById('rawLine');
@@ -372,6 +382,7 @@ function bestVote(tally){
 function showProgress(){
   if(review.classList.contains('show') || confirmBar.classList.contains('show')) return;
   const parts = [];
+  if(session.family) parts.push(session.family);
 
   const m = heldVal('Mat');
   if(m) parts.push('Mat ' + m + ' \u2713');
@@ -395,7 +406,10 @@ function showProgress(){
   if(c) parts.push('Charge ' + c + ' \u2713');
   else {
     const w = bestVote(chgVotes);
-    parts.push('Charge ' + (w.value ? w.value + ' ' + w.n + '/' + CHG_LOCK_VOTES : '\u2026'));
+    // on an EQ label the charge is printed, not encoded - say so rather than
+    // leaving a bare "..." that looks like nothing is happening
+    const eq = hasEqCode() ? '(printed) ' : '';
+    parts.push('Charge ' + eq + (w.value ? w.value + ' ' + w.n + '/' + CHG_LOCK_VOTES : '\u2026'));
   }
 
   if(isWae()){
@@ -407,6 +421,7 @@ function showProgress(){
     }
   }
 
+  if(session.family) parts.push(session.family === 'msl' ? 'MSL' : 'WAE');
   const line = parts.join('   ');
   if(line === lastProgress) return;        // nothing changed: leave the screen alone
   lastProgress = line;
@@ -874,7 +889,7 @@ function fixRevChar(raw){
 // ============================================================================
 let session = newSession();
 let attemptStart = Date.now();
-function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null, locked:{}, stray:null}; }
+function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null, locked:{}, stray:null, family:''}; }
 
 function resetSession(reason){
   matSuggestions = [];
@@ -912,6 +927,69 @@ function lockedBy(field){ return session.locked[field] || ''; }
 // Is there anything on this label worth protecting?
 function holdingSomething(){
   return KEY_COLS.some(function(c){ return isLocked(c); });
+}
+
+// ============================================================================
+//  READ THE LABEL AND KNOW WHICH ONE IT IS  -  v8.9
+//  ---------------------------------------------------------------------------
+//  Adriele: "the scanner should know to navigate different labels ... it should
+//  identify the name and should see that it doesn't have another barcode."
+//
+//  Counting barcodes was never the right primary test. It cannot tell "this
+//  label has one code" from "the second code has not decoded yet", so the only
+//  way to distinguish them was to WAIT - and waiting is exactly what felt
+//  broken. The labels say what they are. The MSL label prints the word MSL, and
+//  its field names are its own: Mat.No, Prod no, Qty, Expiry Date, Batch. The
+//  WAE label prints Beyond Gravity, Verfallsdatum, Char., L-Char., WAE.
+//
+//  So one cheap read of the aim box answers the question outright, and the
+//  timer becomes a fallback for when the text cannot be read at all rather than
+//  the mechanism. On the MSL label the batch is then filed at once - it is the
+//  batch, the label said so - instead of waiting on a second barcode that is
+//  never coming.
+// ============================================================================
+const FAMILY_MSL = /\bMSL\b|\bBatch\b|\bProd\s*n[o0]\b|\bExpiry\s*Date\b|\bMat\.?\s*N[o0]\b/i;
+const FAMILY_WAE = /\bWAE\b|ZPP.?LABEL|Verfallsdatum|\bL\s*-?\s*Char\b|\bChar\s*\.|Beyond\s*Gravity/i;
+
+function detectFamily(text){
+  const t = String(text||'');
+  const wae = FAMILY_WAE.test(t), msl = FAMILY_MSL.test(t);
+  if(wae && !msl) return 'wae';
+  if(msl && !wae) return 'msl';
+  // Both, or neither: say nothing. A guess here would put a batch in the
+  // material column, which is the worst thing this tool can do.
+  return '';
+}
+
+const famCv = document.createElement('canvas');
+const famCtx = famCv.getContext('2d', {willReadFrequently:true});
+let familyBusy = false;
+
+// One read of the whole aim box, at modest size, looking only for the words
+// that name the label. Cheap: it runs at most once per label, on the material
+// worker, which is idle while a bare barcode is parked.
+async function detectFamilyOnce(){
+  if(familyBusy || session.family || !scanning) return;
+  if(scanBusy || ocrActive) return;
+  const r = reticleRect();
+  if(!r || r.w < 20 || r.h < 20) return;
+  familyBusy = true;
+  try{
+    const k = Math.max(1, Math.min(2.5, 1400 / r.w));
+    const w = Math.round(r.w*k), h = Math.round(r.h*k);
+    if(famCv.width !== w || famCv.height !== h){ famCv.width = w; famCv.height = h; }
+    famCtx.filter = 'grayscale(1) contrast(1.3)';
+    famCtx.drawImage(vid, r.x, r.y, r.w, r.h, 0, 0, w, h);
+    const raw = await readBand('mat', famCv);
+    if(!raw) return;
+    if(!lastOcrText) lastOcrText = raw;
+    const f = detectFamily(raw);
+    if(f){
+      session.family = f;
+      setStatus(f === 'msl' ? 'MSL label' : 'WAE label', 'busy');
+    }
+  }catch(e){ console.warn('detectFamilyOnce', e); }
+  finally{ familyBusy = false; }
 }
 
 function put(field, value, src, box, tick){
@@ -1025,18 +1103,31 @@ setInterval(function(){
 
   // A parked barcode whose wait has run out: one code only, nothing in the
   // master, so this is the MSL family and the digits are the batch.
+  // A parked barcode is now resolved by READING THE LABEL, not by waiting out a
+  // timer. The probe runs once, costs one look, and answers outright: on the
+  // MSL label the bare number is the Batch and there is no second barcode to
+  // wait for; on a WAE label it is the Material. The 1.5 s wait survives only
+  // as a last resort for a label that names itself as neither.
   const pb = session.pendingBare;
   if(pb && !review.classList.contains('show') && !confirmBar.classList.contains('show')){
     if(waeSignal([])){
       session.pendingBare = null;
       put('Mat', pb.value, 'bc', pb.box, pb.tick);
       evaluate();
+    } else if(session.family === 'MSL'){
+      session.pendingBare = null;
+      put('Char', pb.value, 'bc', pb.box, pb.tick);
+      setStatus('MSL label \u2014 batch ' + pb.value + ', reading the material','busy');
+      evaluate();
     } else if(Date.now() - pb.t > BARE_PARK_MS){
       session.pendingBare = null;
       put('Char', pb.value, 'bc', pb.box, pb.tick);
       evaluate();
     } else {
-      setStatus('Read ' + pb.value + ' \u2014 looking for the second barcode\u2026','busy');
+      if(!session.family && !session.familyTried){
+        setStatus('Read ' + pb.value + ' \u2014 checking which label this is\u2026','busy');
+        probeFamily();
+      }
     }
   }
 
@@ -1158,6 +1249,9 @@ if(!secureContextOk()){
 
 authBtn.addEventListener('click', startCamera);
 
+// the upload path only appears where live scanning cannot happen
+if(!secureContextOk()) fileBtn.style.display = '';
+
 const CONSTRAINTS = [
   {video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false},
   {video:{facingMode:'environment'},audio:false},
@@ -1191,6 +1285,38 @@ function waitForVideo(ms){
   });
 }
 
+// ============================================================================
+//  IS THERE A NEWER VERSION?  -  v8.8
+//  ---------------------------------------------------------------------------
+//  Adriele: "the camera button should always try to get the latest version."
+//
+//  It must NOT just reload - a reload in the middle of a tray throws away the
+//  label being read and interrupts the work. So it ASKS instead: fetch this
+//  same page with the cache bypassed, read the VERSION out of it, and if the
+//  published one differs from the one running, say so and leave the choice to
+//  the operator. The rows are safe either way (they live in localStorage), but
+//  a half-read label is not, and that is the one thing worth protecting.
+//
+//  Runs when the camera starts and again on every Refresh camera, so pressing
+//  that button now genuinely does check.
+// ============================================================================
+let versionNoticeShown = false;
+
+async function checkForNewVersion(){
+  if(versionNoticeShown) return;
+  try{
+    const res = await fetch(location.pathname + '?vcheck=' + Date.now(), {cache:'no-store'});
+    if(!res.ok) return;
+    const txt = await res.text();
+    const m = txt.match(/const VERSION = '([^']+)'/);
+    if(!m || m[1] === VERSION) return;
+    versionNoticeShown = true;
+    showBanner('A newer version is published: <b>' + m[1].replace(/</g,'&lt;')
+      + '</b> (you are running <b>' + VERSION + '</b>). Your rows are saved \u2014 '
+      + 'finish the label you are on, then tap <b>Get latest version</b>.', 'warn');
+  }catch(_){ /* offline or blocked: not worth saying anything about */ }
+}
+
 async function startCamera(){
   stopCamera();
   banner.className = 'banner';
@@ -1219,11 +1345,10 @@ async function startCamera(){
     setStatus('Point at ONE label' + (gateActive ? '' : ' (aim box cannot filter on this device)'), 'live');
 
     warmWorker();
-    // the revision and charge bands are needed on every WAE label, so start
-    // their workers now in the background rather than paying for it mid-read
     getBandWorker('rev').catch(function(){});
     getBandWorker('chg').catch(function(){});
     audioUnlock();
+    checkForNewVersion();
   }catch(e){
     stopCamera();
     idlePanel.classList.remove('hide');
@@ -1424,13 +1549,29 @@ focusBtn.addEventListener('click',function(){ if(!track) return;
 });
 
 manualChip.addEventListener('click', openManual);
-refreshChip.addEventListener('click', function(){ startCamera(); });
+// v8.8: Refresh camera now also picks up the latest published version. People
+// were restarting the camera and still running a cached build from days ago,
+// then reporting bugs that had already been fixed.
+refreshChip.addEventListener('click', async function(){
+  setStatus('Getting the latest version\u2026','busy');
+  try{ if(window.caches){ const k=await caches.keys(); await Promise.all(k.map(x=>caches.delete(x))); } }catch(_){}
+  try{ if(navigator.serviceWorker){ const r=await navigator.serviceWorker.getRegistrations(); await Promise.all(r.map(x=>x.unregister())); } }catch(_){}
+  location.href = location.pathname + '?fresh=' + Date.now();
+});
 
 clearChip.addEventListener('click', function(){
   stopAllVoting();
   hideConfirm();
+  manualCarry = null;
+  // v8.8: also forget the row just written. Without this, deliberately scanning
+  // the SAME label again is blocked forever by the already-added guard, with no
+  // way out. Clear label is that way out.
+  lastConfirmed = null;
   resetSession('Label cleared');
   showRaw();
+  // and give the camera a fresh start - a stream that has gone to sleep is the
+  // usual reason someone reaches for this button
+  if(scanning) startCamera();
 });
 
 // ============================================================================
@@ -1444,7 +1585,64 @@ clearChip.addEventListener('click', function(){
 //  the native detector often returns one code per frame - the CH- code may have
 //  landed a frame before the material code, or a frame after it.
 // ============================================================================
+// ============================================================================
+//  READ THE LABEL'S NAME  -  v8.9
+//  ---------------------------------------------------------------------------
+//  Adriele: "the scan should know to navigate different labels ... it should
+//  identify the name and should see that it doesn't have another barcode."
+//
+//  Counting barcodes works, but it can only ever answer by WAITING - a second
+//  code has not arrived YET is not the same as there isn't one. So on an MSL
+//  label the tool sat for a second and a half saying "looking for the second
+//  barcode" before concluding what the label had printed on it the whole time.
+//
+//  These two families do not look alike, and each names itself:
+//    MSL   prints MSL, and Mat.No / Prod no / Qty / Expiry Date / Batch
+//    WAE   prints WAE and ZPP_LABEL, and Char. / L-Char. / Verfallsdatum /
+//          Auftr. / SerNr. / Rev.
+//  One cheap look at the words settles it outright, with no waiting and no
+//  guessing, and it settles everything downstream at the same time: whether a
+//  bare number is a material or a batch, whether a revision is expected, and
+//  whether a second barcode is worth waiting for at all.
+// ============================================================================
+const FAMILY_WORDS = {
+  MSL: [/\bMSL\b/, /MAT\.?\s*NO\b/, /PROD\.?\s*NO\b/, /EXPIRY\s*DATE/, /\bBATCH\b/, /\bQTY\b/],
+  WAE: [/\bWAE\b/, /ZPP.?LABEL/, /VERFALLSDATUM/, /\bCHAR\s*\./, /L-?CHAR/, /AUFTR/, /SERNR/, /\bREV\s*\./]
+};
+
+function familyFromText(text){
+  const T = String(text||'').toUpperCase();
+  let msl = 0, wae = 0;
+  FAMILY_WORDS.MSL.forEach(function(r){ if(r.test(T)) msl++; });
+  FAMILY_WORDS.WAE.forEach(function(r){ if(r.test(T)) wae++; });
+  if(msl === wae) return '';               // no opinion is better than a coin toss
+  return msl > wae ? 'MSL' : 'WAE';
+}
+
+// One look at the whole label, only when it would actually decide something.
+async function probeFamily(){
+  if(session.family || session.familyTried) return session.family;
+  if(scanBusy || ocrActive || !scanning || !vid.videoWidth) return '';
+  session.familyTried = true;
+  try{
+    const cv = drawCrop(0.6, true);        // small on purpose: these are big words
+    if(!cv) { session.familyTried = false; return ''; }
+    const txt = await readBand('mat', cv);
+    const fam = familyFromText(txt);
+    if(fam){
+      session.family = fam;
+      if(!lastOcrText) lastOcrText = txt;
+    } else {
+      session.familyTried = false;         // nothing readable yet: try again later
+    }
+    return fam;
+  }catch(_){ session.familyTried = false; return ''; }
+}
+
 function waeSignal(codes){
+  // The label said so itself. Nothing counted beats something printed.
+  if(session.family) return session.family === 'WAE';
+
   // SIGNAL 1 - TWO BARCODES. Adriele's rule, and the plain physical fact:
   // the WAE / ZPP label prints two codes (material on the left, CH- or EQ- on
   // the right). The MSL label prints one. Counting them identifies the family
@@ -1543,7 +1741,23 @@ function applyBarcodes(codes, tick){
       } else if(MASTER && matIndex.has(normId(s))){
         changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
       } else {
-        session.pendingBare = {value:s.toUpperCase(), box:box||null, tick:tick||0, t:Date.now()};
+        // v8.9: THE CLOCK STARTS ONCE. This used to build a brand-new park
+        // object on every decode, and the live loop decodes the same barcode
+        // about twelve times a second - so the age was reset to zero before it
+        // could ever reach BARE_PARK_MS. On a one-barcode MSL label the tool
+        // sat on "looking for the second barcode" for ever, the Charge never
+        // landed, and because material voting only starts once the Charge is in
+        // hand, the entire label stalled. Adriele's screenshot is that exact
+        // state. Re-decoding now only refreshes WHERE the code is, never when
+        // it was first seen.
+        const pb0 = session.pendingBare;
+        if(pb0 && pb0.value === s.toUpperCase()){
+          if(box){ pb0.box = box; }
+          pb0.tick = tick || pb0.tick;
+        } else {
+          session.pendingBare = {value:s.toUpperCase(), box:box||null,
+                                 tick:tick||0, t:Date.now()};
+        }
         changed = true;
       }
       continue;
@@ -1834,6 +2048,7 @@ function openConfirm(proof){
           + 'placeholder="' + CONFIRM_HINT[c] + '"></div>';
   });
   html += '<div class="crowf tagrow"><div class="k">check</div><div class="v">'
+        + (session.family ? session.family + '  \u00b7  ' : '')
         + tag + (tag==='RV' ? '  \u00b7 not in the master list' : '  \u00b7 in the master list')
         + (proof && !proof.ok ? '  \u00b7 ' + proof.kind : '')
         + '</div></div>';
@@ -2310,6 +2525,70 @@ function scaleCanvas(src, factor, grey){
   return c;
 }
 
+// ============================================================================
+//  RESISTANT TO LIGHT  -  v8.8
+//  ---------------------------------------------------------------------------
+//  Adriele: "can be more resistant to light".
+//
+//  Otsu picks ONE threshold for the whole picture from its histogram. That is
+//  the right tool for an evenly lit label and the wrong one for a shiny poly
+//  bag, where a specular highlight blows out one corner while the rest sits in
+//  shadow: any single cut-off either loses the bright half or floods the dark
+//  half. Look at the third photo - the whole left side of the bag is a mirror.
+//
+//  This thresholds every pixel against the average of ITS OWN NEIGHBOURHOOD
+//  instead, so bright and dark parts of the same label are each judged on their
+//  own terms and the highlight simply stops mattering. An integral image makes
+//  the local average O(1) per pixel, so the whole thing is one pass and cheap
+//  enough to run on every look.
+//
+//  Otsu is kept - it is still better on a clean, evenly lit label, and the two
+//  disagreeing is exactly the signal the two-view rule uses.
+// ============================================================================
+function binariseAdaptive(src, winFrac, bias){
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d', {willReadFrequently:true});
+  ctx.drawImage(src, 0, 0);
+  let img;
+  try{ img = ctx.getImageData(0,0,c.width,c.height); }catch(_){ return c; }
+  const d = img.data, W = c.width, H = c.height;
+
+  // grey + integral image (one extra row/column of zeros to avoid edge tests)
+  const sum = new Float64Array((W+1)*(H+1));
+  for(let y=0;y<H;y++){
+    let rowSum = 0;
+    for(let x=0;x<W;x++){
+      const i = (y*W+x)*4;
+      const g = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114);
+      d[i]=d[i+1]=d[i+2]=g|0;
+      rowSum += g;
+      sum[(y+1)*(W+1)+(x+1)] = sum[y*(W+1)+(x+1)] + rowSum;
+    }
+  }
+
+  // window about an eighth of the short side, and never smaller than 7px
+  const win = Math.max(7, Math.round(Math.min(W,H) * (winFrac || 0.14)));
+  const r = win >> 1;
+  const C = (bias === undefined ? 7 : bias);   // how far below local mean is ink
+
+  for(let y=0;y<H;y++){
+    const y0 = Math.max(0, y-r), y1 = Math.min(H-1, y+r);
+    for(let x=0;x<W;x++){
+      const x0 = Math.max(0, x-r), x1 = Math.min(W-1, x+r);
+      const area = (x1-x0+1) * (y1-y0+1);
+      const tot = sum[(y1+1)*(W+1)+(x1+1)] - sum[y0*(W+1)+(x1+1)]
+                - sum[(y1+1)*(W+1)+x0]     + sum[y0*(W+1)+x0];
+      const mean = tot / area;
+      const i = (y*W+x)*4;
+      const v = (d[i] < mean - C) ? 0 : 255;
+      d[i]=d[i+1]=d[i+2]=v;
+    }
+  }
+  ctx.putImageData(img,0,0);
+  return c;
+}
+
 // Otsu: picks the threshold from the image's own histogram instead of a fixed
 // 128, which is what makes it survive uneven lighting and the glare off a bag.
 function binarise(src){
@@ -2342,6 +2621,80 @@ function binarise(src){
   return c;
 }
 
+// ============================================================================
+//  SURVIVING GLARE  -  v8.8, local thresholding
+//  ---------------------------------------------------------------------------
+//  Adriele: "can be more resistant to light".
+//
+//  binarise() above picks ONE threshold for the whole image. That is right when
+//  the lighting is even and wrong the moment it is not - and on a shiny poly
+//  bag under a workshop lamp it never is. Half the label is a bright specular
+//  patch, half is in shadow; one threshold makes the bright half solid white
+//  and the dark half solid black, and the text disappears from both.
+//
+//  This judges every pixel against the average of its OWN NEIGHBOURHOOD
+//  instead. A dark letter is darker than the paper beside it whether that paper
+//  is glaring or shaded, so the comparison holds everywhere on the label.
+//
+//  Done with an integral image so each window average is four lookups no matter
+//  how big the window - the cost is one pass over the pixels, not one pass per
+//  pixel. The buffers are kept and reused, because this runs several times a
+//  second and allocating megabytes each time would cost more than the work.
+// ============================================================================
+let _adBuf = null;
+function adaptiveBinarise(src, winFrac, cVal){
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d', {willReadFrequently:true});
+  ctx.drawImage(src, 0, 0);
+  let img;
+  try{ img = ctx.getImageData(0,0,c.width,c.height); }catch(_){ return c; }
+
+  const d = img.data, W = c.width, H = c.height, N = W*H;
+  if(!_adBuf || _adBuf.n < N){
+    _adBuf = {n:N, g:new Uint8Array(N), I:new Uint32Array((W+1)*(H+1)), w:W, h:H};
+  }
+  if(_adBuf.w !== W || _adBuf.h !== H){
+    _adBuf.I = new Uint32Array((W+1)*(H+1));
+    _adBuf.w = W; _adBuf.h = H;
+    if(_adBuf.g.length < N) _adBuf.g = new Uint8Array(N);
+  }
+  const g = _adBuf.g, I = _adBuf.I, S = W+1;
+
+  for(let i=0,p=0;p<N;i+=4,p++) g[p] = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114)|0;
+
+  for(let y=0;y<H;y++){
+    let row = 0;
+    const o = (y+1)*S, po = y*S;
+    for(let x=0;x<W;x++){
+      row += g[y*W+x];
+      I[o+x+1] = I[po+x+1] + row;
+    }
+  }
+
+  // the window has to be bigger than a letter, or the letter becomes its own
+  // background and vanishes
+  let win = Math.round(Math.min(W,H) * (winFrac || 0.30));
+  if(win < 7) win = 7;
+  if((win & 1) === 0) win++;
+  const r = win >> 1, C = (cVal === undefined ? 10 : cVal);
+
+  for(let y=0;y<H;y++){
+    const y0 = y>r ? y-r : 0, y1 = (y+r) < H ? (y+r) : H-1;
+    const a = y0*S, b = (y1+1)*S;
+    for(let x=0;x<W;x++){
+      const x0 = x>r ? x-r : 0, x1 = (x+r) < W ? (x+r) : W-1;
+      const area = (x1-x0+1)*(y1-y0+1);
+      const sum = I[b+x1+1] - I[a+x1+1] - I[b+x0] + I[a+x0];
+      const p = (y*W+x)<<2;
+      const v = (g[y*W+x] * area < sum - C*area) ? 0 : 255;
+      d[p] = d[p+1] = d[p+2] = v;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
 function rotateCanvas(src,deg){
   if(deg===0) return src;
   const c=document.createElement('canvas'), ctx=c.getContext('2d');
@@ -2366,6 +2719,9 @@ async function decodeLadder(base){
   try{ variants.push(['upscaled', scaleCanvas(base, 2, true)]); }catch(_){}
   try{ variants.push(['contrast', scaleCanvas(base, 3, true)]); }catch(_){}
   try{ variants.push(['black & white', binarise(scaleCanvas(base, 2, true))]); }catch(_){}
+  // last rung: glare-corrected. A barcode half-lost under a highlight decodes
+  // here when nothing above it will.
+  try{ variants.push(['glare corrected', adaptiveBinarise(scaleCanvas(base, 2, true), 0.20, 8)]); }catch(_){}
   let reader = null;
   try{ reader = new ZXing.BrowserMultiFormatReader(hints, 200); }catch(_){}
 
@@ -2501,9 +2857,10 @@ async function deepMaterialScan(){
     if(long < OCR_MIN_PX) f = Math.min(4, OCR_MIN_PX/long);
     else if(long > OCR_MAX_PX) f = OCR_MAX_PX/long;
     const grey = scaleCanvas(crop, f, true);
-    let bw = null;
-    try{ bw = binarise(grey); }catch(_){}
-    const bases = bw ? [['sharpened',grey],['cleaned',bw]] : [['sharpened',grey]];
+    const bases = [['sharpened',grey]];
+    // both cleanings: Otsu for an even label, local for one with a highlight
+    try{ bases.push(['cleaned', binarise(grey)]); }catch(_){}
+    try{ bases.push(['glare-flattened', binariseAdaptive(grey)]); }catch(_){}
 
     for(const deg of [0,90,180,270]){
       for(let b=0;b<bases.length;b++){
@@ -2821,6 +3178,8 @@ function parseOcr(text){
 // same session. There is now one answer: waeSignal(), plus the text evidence
 // that only becomes available after something has been read.
 function isWae(){
+  if(session.family === 'msl') return false;           // the label said so
+  if(session.family === 'wae') return true;
   if(waeSignal([])) return true;                       // two barcodes, or a CH-/EQ- code
   if(heldField('L-Char') || heldField('SerNr')) return true;
   return /WAE|ZPP.?LABEL|Verfallsdatum|Char\s*\./i.test(lastOcrText||'');
@@ -2829,7 +3188,7 @@ function isWae(){
 // ============================================================================
 //  UPLOAD  (works with no camera, so it also works on http://)
 // ============================================================================
-fileBtn.addEventListener('click', function(){ fileInput.click(); });
+if(fileBtn) fileBtn.addEventListener('click', function(){ fileInput.click(); });
 fileInput.addEventListener('change', function(e){
   const file = e.target.files[0]; if(!file) return;
   stopAllVoting(); hideConfirm(); resetSession();
@@ -2914,10 +3273,39 @@ const PROOF_TEXT = {
   'stale-pair':'These values are still held from an earlier read, not from the label being read right now. Nothing was thrown away \u2014 check they belong together.'
 };
 
+// What the camera was holding when Add manually was pressed. Kept aside, not
+// inherited - see below.
+let manualCarry = null;
+
 function openManual(){
   stopAllVoting();
   hideConfirm();
   scanBusy = false;
+
+  // ==========================================================================
+  //  ADD MANUALLY STARTS A CLEAN LABEL  -  v8.8
+  //  ------------------------------------------------------------------------
+  //  Adriele: "when we add manually it can get confused."
+  //
+  //  It inherited whatever the camera happened to be holding - and since v8.4
+  //  those values are held indefinitely, so the card could open showing a
+  //  charge read half a minute ago off a different bag. You then type a
+  //  material next to it and press add, and a wrong pairing goes into the table
+  //  WITH A HUMAN SIGNATURE ON IT. That is the worst kind this tool can make,
+  //  because everything downstream trusts a confirmed row.
+  //
+  //  Typing a label by hand means the label is in your hand. So the card starts
+  //  blank. Nothing is lost: whatever the camera had is put aside and offered
+  //  back on one tap, clearly labelled with where each value came from.
+  // ==========================================================================
+  const had = {};
+  COLS.forEach(function(c){
+    const f = heldField(c);
+    if(f) had[c] = {value:f.value, src:f.src};
+  });
+  manualCarry = Object.keys(had).length ? had : null;
+
+  resetSession();
   openReview({ok:false, kind:'manual'});
 }
 
@@ -2967,10 +3355,46 @@ function openReview(proof){
                + '<span style="color:var(--ink-dim)"> \u00d7'+s.n+'</span></button>';
         }).join(' '));
   }
-  if(isWae() && !String(current.Rev.value||'').trim()){
-    msgs.push('This looks like a <b>WAE</b> label, and the Revision could not be read. '
-      + 'It is the single letter next to <b>Rev.</b> \u2014 type it.');
+  // what the camera had when you pressed Add manually - offered, never assumed
+  if(manualCarry){
+    msgs.push('This is a NEW label, so nothing was carried over. The camera was '
+      + 'holding ' + Object.keys(manualCarry).map(function(c){
+          return '<b>'+c+' '+String(manualCarry[c].value).replace(/</g,'&lt;')+'</b>'; }).join(', ')
+      + ' \u2014 use it only if it belongs to the label in your hand:<br>'
+      + '<button class="sugg" data-carry="1">Use what the camera read</button>');
   }
+  // the revision letters, on the card as well as the strip. Typing a single
+  // letter is exactly where a mistake is invisible, so it gets buttons here too.
+  if(!String(current.Rev.value||'').trim()){
+    const ro = revOptions();
+    msgs.push('Revision \u2014 read it off the label and tap it:<br>'
+      + ro.letters.map(function(L,i){
+          return '<button class="sugg" data-rev="'+L+'"'
+               + (i < ro.voted ? ' style="border-color:var(--warn);color:var(--warn)"' : '')
+               + '>'+L+'</button>';
+        }).join(' '));
+  }
+  // v8.8: what the camera had, offered back rather than inherited
+  if(manualCarry){
+    const bits = Object.keys(manualCarry).map(function(c){
+      return c + ' <b>' + String(manualCarry[c].value).replace(/</g,'&lt;') + '</b>';
+    }).join(' &middot; ');
+    msgs.push('This card starts blank on purpose \u2014 you are reading the label in '
+      + 'your hand, not what the camera last saw.<br>The camera had: ' + bits
+      + '<br><button class="sugg" data-carry="1">Use these</button>');
+  }
+
+  // v8.8: the A-E buttons belong here too. Typing a single letter into a box is
+  // exactly where a revision gets mistyped, and the vocabulary is five letters
+  // long - so it fits on the screen and one tap is safer than one keystroke.
+  if(isWae() || manualCarry || proof.kind === 'manual'){
+    const cur = String(current.Rev.value||'').trim();
+    msgs.push('Revision \u2014 tap the letter on the label:<br>'
+      + REV_LETTERS.split('').map(function(L){
+          return '<button class="sugg' + (L===cur?' on':'') + '" data-rev="'+L+'">'+L+'</button>';
+        }).join(' '));
+  }
+
   const missing = MANDATORY.filter(function(k){ return !String(current[k].value||'').trim(); });
   if(missing.length && lastOcrText){
     msgs.push('The text reader saw this &mdash; read it out if the number is wrong:<br>'
@@ -3021,9 +3445,17 @@ function openReview(proof){
 // in the input box: openReview rebuilds the card from the session.
 rnote.addEventListener('click', function(e){
   if(!current || !e.target || !e.target.dataset) return;
-  const m = e.target.dataset.mat, c = e.target.dataset.char;
-  if(m){ put('Mat', m, 'typed', null, 0); matSuggestions = []; }
-  else if(c){ put('Char', c, 'typed', null, 0); charSuggestions = []; }
+  const d = e.target.dataset;
+  if(d.carry){
+    // put back exactly what the camera had, with its original source intact
+    for(const c in manualCarry){
+      put(c, manualCarry[c].value, manualCarry[c].src, null, 0);
+    }
+    manualCarry = null;
+  }
+  else if(d.rev){ put('Rev', fixRevChar(d.rev) || d.rev, 'typed', null, 0); }
+  else if(d.mat){ put('Mat', d.mat, 'typed', null, 0); matSuggestions = []; }
+  else if(d.char){ put('Char', d.char, 'typed', null, 0); charSuggestions = []; }
   else return;
   openReview(current._proof);
 });
@@ -3064,13 +3496,13 @@ addBtn.addEventListener('click', function(){
   });
 
   const p = current._proof;
-  current = null;
+  current = null; manualCarry = null;
   review.className = 'review';
   openConfirm(p && p.ok ? p : {ok:false, kind:(p && p.kind) || 'manual'});
 });
 
 discardBtn.addEventListener('click', function(){
-  current=null; stopAllVoting(); resetSession(); review.className='review';
+  current=null; manualCarry=null; stopAllVoting(); resetSession(); review.className='review';
   scanBusy = false;
   setStatus(scanning?'Point at ONE label':'Camera off', scanning?'live':'');
 });
@@ -3224,17 +3656,27 @@ async function materialTick(){
       // what fixes the O-for-0 reads that dominate on these labels. Every token
       // from both is judged against the master, so a pass that produces
       // nothing costs nothing.
+      // Two passes on the picture, and - v8.8 - a third on a glare-corrected
+      // copy of it. The material line is the one most often washed out by a
+      // highlight on the bag, and it is the field that costs the most to lose.
       const rawA = await readBand('mat', band);
       const rawB = await readBand('mat', band, '0123456789');
+      let rawC = '';
+      try{
+        const flat = adaptiveBinarise(band, 0.30, 10);
+        rawC = await readBand('mat', flat);
+      }catch(_){}
       const raw = rawA;
       if(rawA) matVoteText.push(rawA);
       if(rawB && rawB !== rawA) matVoteText.push(rawB);
+      if(rawC && rawC !== rawA && rawC !== rawB) matVoteText.push(rawC);
+      if(rawC) addMaterialEvidence(rawC);
       // EVERY read narrows the vocabulary, whether or not it produced a token
       // that is valid on its own. This is the accumulation that was missing.
       addMaterialEvidence(rawA);
       if(rawB && rawB !== rawA) addMaterialEvidence(rawB);
 
-      const toks = (rawA + '\n' + rawB).toUpperCase().match(MAT_TOKEN_RE) || [];
+      const toks = (rawA + '\n' + rawB + '\n' + rawC).toUpperCase().match(MAT_TOKEN_RE) || [];
       if(raw) matTries++;
       showProgress();
 
@@ -3510,8 +3952,21 @@ async function revTick(){
       //  this frame", and acting on it is much stronger than repairing the
       //  answer afterwards.
       // ====================================================================
+      // v8.8: the second view is now the LOCAL threshold, not the global one.
+      // On a bag with a highlight across it the two disagree far more often -
+      // and disagreement is not noise here, it is the rule that stops a
+      // half-lit glyph being voted on at all.
       let bw = null;
-      try{ bw = binarise(band); }catch(_){}
+      // The second view is the LOCAL threshold. On an evenly lit label the two
+      // views agree; under glare the local one is the only one that still has a
+      // letter in it, so the agreement rule turns a glared frame into silence
+      // rather than a wrong letter.
+      // v8.8 also fixes a call to binariseAdaptive() - a function that does not
+      // exist. It threw a ReferenceError on every single look, the catch
+      // swallowed it, and the revision has been reading from the plain global
+      // threshold ever since without anything saying so.
+      try{ bw = adaptiveBinarise(band, 0.30, 10); }
+      catch(_){ try{ bw = binarise(band); }catch(_2){} }
 
       let rawA = '', rawB = '';
       if(bw){
@@ -3627,18 +4082,51 @@ let chgVoteTimer = null;
 const cbCv = document.createElement('canvas');
 const cbCtx = cbCv.getContext('2d', {willReadFrequently:true});
 
+// WHERE THE CHARGE IS WHEN THE BARCODE DOES NOT CARRY IT
+// ---------------------------------------------------------------------------
+// Adriele: "WAE needs to read two barcodes - differentiate: when it is EQ, the
+// barcode of the charge... it needs to be read from the camera."
+//
+//   CH-883220  ->  the charge IS the barcode. Nothing to read.
+//   EQ-10405042 ->  an equipment number, NOT a charge. The charge is printed in
+//                   the text, lower-left, as "Char. 579371" - and it can only
+//                   come from the camera.
+//
+// v8.8 anchors this band to the barcode like the other two. It was cut from the
+// aim box, so it only landed on the right lines when the label happened to fill
+// the box - and moving closer, which is what you do to read small print, made
+// it worse. Measured on both real labels the SerNr / Char. / L-Char. block sits
+// 4.2 to 6.0 barcode-heights below the barcode's top edge, on the left.
 function grabChargeBand(){
   const r = reticleRect();
   if(!r || !vid.videoWidth) return null;
-  const sx = r.x;
-  const sy = r.y + r.h * 0.52;          // lower part: SerNr, Char., L-Char.
-  const sw = r.w * 0.70;
-  const sh = r.h * 0.34;
-  const f = 3;
-  const w = Math.round(sw*f), h = Math.round(sh*f);
+
+  let sx, sy, sw, sh;
+  const f = heldField('CH-Nr');
+  const b = f && f.box;
+  if(b && b.width > 8 && b.height > 4){
+    const bx = r.x + b.x, by = r.y + b.y;
+    const stale = (Date.now() - (f.boxAt || 0)) > BOX_FRESH_MS;
+    const grow = stale ? 1.5 : 1.0;
+    const cy = b.height * (4.2 + 6.0) / 2;
+    const hh = b.height * (6.0 - 4.2) / 2 * grow;
+    sy = Math.max(r.y, by + cy - hh);
+    sh = Math.min(r.y + r.h, by + cy + hh) - sy;
+    sx = r.x;
+    sw = Math.min(r.x + r.w, bx + b.width * 0.35) - sx;
+  } else {
+    sx = r.x;
+    sy = r.y + r.h * 0.52;
+    sw = r.w * 0.70;
+    sh = r.h * 0.34;
+  }
+  if(sw < 20 || sh < 8) return null;
+
+  const k = Math.max(2, Math.min(6, 1800/sw));
+  const w = Math.round(sw*k), h = Math.round(sh*k);
   if(w < 30 || h < 12) return null;
   if(cbCv.width!==w || cbCv.height!==h){ cbCv.width=w; cbCv.height=h; }
-  cbCtx.filter = 'grayscale(1) contrast(1.35)';
+  cbCtx.filter = 'grayscale(1) contrast(1.4)';
   cbCtx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, h);
   return cbCv;
 }
