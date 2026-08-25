@@ -297,7 +297,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v8.4';
+const VERSION = 'v8.7';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -617,13 +617,18 @@ function masterCandidates(text){
 
   const lines = String(text||'').split(/\n/)
                   .filter(function(l){ return !OTHER_FIELD_LINE.test(l); });
-  const toks = lines.join(' ').toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+  const toks = lines.join(' ').toUpperCase().match(MAT_TOKEN_RE) || [];
 
   for(let i=0;i<toks.length;i++){
-    const t = cleanMatToken(toks[i]);
-    if(t.length < 5) continue;
+    const t0 = cleanMatToken(toks[i]);
+    if(t0.length < 5) continue;
 
-    if(matIndex.has(t)){ bump(t, W_EXACT); continue; }
+    // as printed, and with the dots removed - the vocabulary picks
+    const forms = matForms(t0);
+    let exact = '';
+    for(let f=0; f<forms.length && !exact; f++) if(matIndex.has(forms[f])) exact = forms[f];
+    if(exact){ bump(exact, W_EXACT); continue; }
+    const t = t0;
 
     // one entry, and only one, overlaps this token
     const hits = [];
@@ -712,22 +717,51 @@ function confusionVariants(s){
   return out;
 }
 
+// v8.7: THE DOT IS PART OF THE NUMBER. Materials on these labels are printed
+// 2219.3794 / 2219.8831 - four digits, a dot, four digits - and this function
+// used to delete the dot before the master list ever saw the value, so
+// 2219.3794 arrived as 22193794 and could never match. But a dot is ALSO a
+// common OCR artefact inside a plain number ("3001.195"), which is why it was
+// being stripped in the first place.
+// Both are true, so both forms are kept and both are offered to the master.
+// Whichever one the vocabulary recognises is the right one - the list decides,
+// which is the same rule the rest of the tool already follows.
 function cleanMatToken(raw){
-  return String(raw||'').toUpperCase().replace(/[\s.]/g,'').replace(/[^A-Z0-9-]/g,'');
+  return String(raw||'').toUpperCase().replace(/\s/g,'').replace(/[^A-Z0-9.\-]/g,'')
+                        .replace(/^[.\-]+|[.\-]+$/g,'');
 }
+
+// The forms of one token worth testing against the vocabulary: as read, and
+// with the dots taken out.
+function matForms(t){
+  const out = [t];
+  const nd = String(t||'').replace(/\./g,'');
+  if(nd && nd !== t) out.push(nd);
+  return out;
+}
+
+// Material tokens as they appear in OCR text. Dots included - see above.
+const MAT_TOKEN_RE = /[A-Z0-9][A-Z0-9.\-]{4,15}/g;
 
 function resolveMat(raw){
   const t = cleanMatToken(raw);
   if(!t) return {tier:'review', value:'', original:''};
   if(!MASTER) return {tier:'review', value:t, original:''};
-  if(matIndex.has(t)) return {tier:'confirmed', value:t, original:''};
 
-  const vs = confusionVariants(t);
-  for(let i=1;i<vs.length;i++){
-    if(matIndex.has(vs[i])) return {tier:'corrected', value:vs[i], original:t};
+  const forms = matForms(t);
+  for(let i=0;i<forms.length;i++){
+    if(matIndex.has(forms[i])) return {tier:'confirmed', value:forms[i], original:''};
   }
-  const fx = masterFix(t);
-  if(fx.tier === 'corrected') return fx;
+  for(let f=0; f<forms.length; f++){
+    const vs = confusionVariants(forms[f]);
+    for(let i=1;i<vs.length;i++){
+      if(matIndex.has(vs[i])) return {tier:'corrected', value:vs[i], original:t};
+    }
+  }
+  for(let f=0; f<forms.length; f++){
+    const fx = masterFix(forms[f]);
+    if(fx.tier === 'corrected') return fx;
+  }
   // v7.8: the scored match against the whole vocabulary, as a LAST step. Purely
   // additive - everything that resolved before still resolves the same way, and
   // reads that used to be thrown away now get one properly-reasoned chance.
@@ -739,7 +773,7 @@ function resolveMat(raw){
 function nearestMasters(text, howMany, notMat){
   if(!MASTER) return [];
   const lines = String(text||'').split(/\n/).filter(function(l){ return !OTHER_FIELD_LINE.test(l); });
-  const toks = lines.join(' ').toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+  const toks = lines.join(' ').toUpperCase().match(MAT_TOKEN_RE) || [];
   const scored = [];
   for(let i=0;i<toks.length;i++){
     const t = cleanMatToken(toks[i]);
@@ -772,12 +806,15 @@ const OTHER_FIELD_LINE =
 function matFromTokens(text, exclude, exclude2){
   if(!MASTER) return '';
   const lines = String(text||'').split(/\n/).filter(function(l){ return !OTHER_FIELD_LINE.test(l); });
-  const toks = lines.join(' ').toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+  const toks = lines.join(' ').toUpperCase().match(MAT_TOKEN_RE) || [];
   for(let i=0;i<toks.length;i++){
     const t = cleanMatToken(toks[i]);
     if(!t || t === exclude || t === exclude2) continue;
-    const vs = confusionVariants(t);
-    for(let v=0;v<vs.length;v++) if(matIndex.has(vs[v])) return vs[v];
+    const forms = matForms(t);
+    for(let f=0; f<forms.length; f++){
+      const vs = confusionVariants(forms[f]);
+      for(let v=0;v<vs.length;v++) if(matIndex.has(vs[v])) return vs[v];
+    }
   }
   return '';
 }
@@ -848,6 +885,7 @@ function resetSession(reason){
   chgVotes = {}; chgTries = 0;
   lastProgress = '';
   lastBandSig.mat = lastBandSig.rev = lastBandSig.chg = 0;
+  lastRevRect = null;
   const had = Object.keys(session.fields).length;
   session = newSession();
   reticle.classList.remove('partial','reject');
@@ -883,6 +921,33 @@ function put(field, value, src, box, tick){
   const prev = session.fields[field];
 
   // ==========================================================================
+  //  THE SAME CODE, SEEN AGAIN, TELLS US WHERE IT IS NOW  -  v8.5
+  //  ------------------------------------------------------------------------
+  //  THIS WAS THE "GETS WORSE WITH TIME" BUG. The revision band is measured in
+  //  barcode-widths from the CH-/EQ- barcode's box - and that box was stored on
+  //  the FIRST decode and never touched again. The old line here refreshed the
+  //  timestamp and dropped the new position on the floor; once the field was
+  //  locked it did not even get that far.
+  //
+  //  So the band kept aiming where the barcode USED TO BE. The first read was
+  //  right because the box had just been taken; every read after it was aimed
+  //  at a staler position, and moving closer - which is exactly what you do to
+  //  read a small letter - made it worse fastest.
+  //
+  //  A repeat decode is not a duplicate to be discarded. It is a fresh fix on
+  //  the label's position, and it is the only thing that lets the band track.
+  //  This runs BEFORE the lock check on purpose: a locked value is not allowed
+  //  to CHANGE, but it must still be allowed to say where it is.
+  // ==========================================================================
+  if(prev && prev.value === value){
+    prev.t = now;
+    if(box){ prev.box = box; prev.boxAt = now; }
+    if(tick) prev.tick = tick;
+    session.lastAt = now;
+    return false;
+  }
+
+  // ==========================================================================
   //  A LOCKED FIELD IS HELD UNTIL THE OPERATOR SAYS OTHERWISE  -  v8.4
   //  ------------------------------------------------------------------------
   //  Adriele: "once it takes the material and batch and revision, do not change
@@ -913,7 +978,6 @@ function put(field, value, src, box, tick){
 
   // A barcode outranks OCR - but NOT the operator.
   if(prev && prev.src==='bc' && src!=='bc' && src!=='typed') return false;
-  if(prev && prev.value===value){ prev.t=now; session.lastAt=now; return false; }
 
   // TWO BARCODES, SAME FIELD, DIFFERENT VALUES, and neither is locked yet:
   // more than one label is genuinely in view. Keep the first, flag it.
@@ -923,8 +987,29 @@ function put(field, value, src, box, tick){
     return true;
   }
 
-  session.fields[field] = {value:value, src:src, t:now, box:box||null, tick:(tick||0)};
-  if(src === 'bc' || src === 'typed') session.locked[field] = src;
+  session.fields[field] = {value:value, src:src, t:now, box:box||null, boxAt:(box?now:0), tick:(tick||0)};
+
+  // ==========================================================================
+  //  ANYTHING FILED IS FILED  -  v8.6
+  //  ------------------------------------------------------------------------
+  //  Values were being written in twenty places and protected in five. The gaps
+  //  were the ones nobody remembers: the material off the STILL PHOTO, the
+  //  material off the magnified line reader, the serial off the charge band.
+  //  Unprotected, a later OCR pass could quietly overwrite them - and they did
+  //  not count as "holding something", so a stray barcode could still wipe the
+  //  whole label. Adriele: "when it takes the material still, once I move the
+  //  material gets re-read - need to stop that."
+  //
+  //  put() is only ever called when a DECISION has been made: votes reached
+  //  their threshold, the vocabulary settled, a barcode decoded, a person
+  //  typed. Accumulating evidence goes to the tallies, never here. So locking
+  //  on every successful write is right, and it covers the sites I would
+  //  otherwise have to remember - including the ones added later.
+  //
+  //  A locked value is still correctable by better evidence: a barcode may
+  //  overrule OCR, and the operator may overrule anything.
+  // ==========================================================================
+  session.locked[field] = src;
   session.lastAt = now;
   return true;
 }
@@ -1169,6 +1254,27 @@ function stopCamera(){
   if(stream){ try{ stream.getTracks().forEach(function(t){ t.stop(); }); }catch(_){} stream=null; }
 }
 
+// ============================================================================
+//  ONLY THE REVISION LEFT? THEN GET OUT OF ITS WAY.  -  v8.5
+//  ---------------------------------------------------------------------------
+//  Adriele: "once it reads material and charge it should only try to read Rev
+//  ... if the person gets the camera close it should be even more effective".
+//
+//  The barcode loop runs twelve times a second, and once the material and the
+//  charge are both in hand every one of those passes is wasted work competing
+//  with the revision for the same CPU. It is also what drags a neighbouring
+//  label into view in the first place.
+//
+//  It cannot stop entirely: re-decoding the CH-/EQ- barcode is the ONLY thing
+//  that keeps the revision band aimed at the right part of the label. So it
+//  slows to about three passes a second - still tracking the label, a quarter
+//  of the cost, and far less likely to catch a stray code while you move.
+// ============================================================================
+function barcodeLoopGap(){
+  const onlyRev = heldField('Mat') && heldField('Char') && !heldField('Rev');
+  return onlyRev ? 320 : 80;
+}
+
 async function nativeLoop(){
   let fails = 0;
   while(scanning){
@@ -1184,6 +1290,8 @@ async function nativeLoop(){
         // edge of decodable. This is the one moment the expensive pass is worth
         // running on EVERY frame and at 3x instead of 2x: it is the difference
         // between reading the number and asking the operator to type it.
+        // the expensive magnified pass is only for finding a material that has
+        // not decoded yet - never once it is in hand
         const hunting = !heldField('Mat') && !session.pendingBare
                      && Object.keys(session.codes||{}).length > 0;
         if((!codes || !codes.length) && (hunting || (++enhanceTick % ENHANCE_EVERY === 0))){
@@ -1221,7 +1329,7 @@ async function nativeLoop(){
         return;
       }
     }
-    await new Promise(function(r){ setTimeout(r,80); });
+    await new Promise(function(r){ setTimeout(r, barcodeLoopGap()); });
   }
 }
 
@@ -1267,6 +1375,8 @@ async function zxingCropLoop(){
       // frame at native size and nothing else. It now gets the same magnified
       // second look the fast path gets.
       if(!read){
+        // the expensive magnified pass is only for finding a material that has
+        // not decoded yet - never once it is in hand
         const hunting = !heldField('Mat') && !session.pendingBare
                      && Object.keys(session.codes||{}).length > 0;
         if(hunting || (++enhanceTick % ENHANCE_EVERY === 0)){
@@ -1282,7 +1392,7 @@ async function zxingCropLoop(){
         onCodes([{value:read.getText().trim(), box:bx}], frameTick);
       }
     }
-    await new Promise(function(r){ setTimeout(r,100); });
+    await new Promise(function(r){ setTimeout(r, Math.max(100, barcodeLoopGap())); });
   }
 }
 
@@ -1388,6 +1498,18 @@ function applyBarcodes(codes, tick){
       changed = put('CH-Nr', s.toUpperCase(),'bc',box,tick) || changed;
       continue;
     }
+    // 2219.3794 - DIGITS, A DOT, DIGITS. v8.7: this is a real material format
+    // on Beyond Gravity labels and no rule matched it, so a barcode that
+    // decoded perfectly every single time was dropped on the floor and the
+    // screen said "Material not read - tap it or type it". Nothing else on
+    // these labels is printed with a dot in it: not the charge, not the lot,
+    // not the order. So a dotted number is unambiguously the material, and it
+    // does not need to be parked waiting for a second barcode to prove it.
+    if(/^\d{3,6}\.\d{2,6}$/.test(s)){
+      changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
+      continue;
+    }
+
     // exactly 10 digits -> L-Char. Checked BEFORE the general material shape.
     if(/^\d{10}$/.test(s)){
       changed = put('L-Char', s,'bc',box,tick) || changed;
@@ -1450,6 +1572,7 @@ function barcodeMandatory(s, wae){
   s = String(s||'').trim();
   if(/^CH-?\d+$/i.test(s))  return {field:'Char', value:s.replace(/^CH-?/i,'')};
   if(/^EQ-?\d+$/i.test(s))  return null;
+  if(/^\d{3,6}\.\d{2,6}$/.test(s)) return {field:'Mat', value:s.toUpperCase()};
   if(/^\d{10}$/.test(s))    return null;
   if(/^[A-Z]{1,2}\d{4,}[A-Z0-9-]{0,6}$/i.test(s)) return {field:'Mat', value:s.toUpperCase()};
   if(/^\d{6,7}$/.test(s)){
@@ -2321,7 +2444,7 @@ async function readMaterialLine(crop, box, token){
         const txt = ((out && out.data && out.data.text) || '').trim();
         if(!txt) continue;
         found.push(txt);
-        const toks = txt.toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+        const toks = txt.toUpperCase().match(MAT_TOKEN_RE) || [];
         for(let i=0;i<toks.length;i++){
           const res = resolveMat(toks[i]);
           if(res.tier === 'confirmed' || res.tier === 'corrected'){
@@ -3111,14 +3234,14 @@ async function materialTick(){
       addMaterialEvidence(rawA);
       if(rawB && rawB !== rawA) addMaterialEvidence(rawB);
 
-      const toks = (rawA + '\n' + rawB).toUpperCase().match(/[A-Z0-9][A-Z0-9-]{4,15}/g) || [];
+      const toks = (rawA + '\n' + rawB).toUpperCase().match(MAT_TOKEN_RE) || [];
       if(raw) matTries++;
       showProgress();
 
       const verdict = materialVerdict();
       if(verdict.value){
         put('Mat', verdict.value, 'ocr', null, 0);
-        lock('Mat');                      // frozen: no later read can move it
+        lock('Mat','ocr');                // frozen: no later read can move it
         stopMaterialVoting();
         showProgress();
         evaluate();
@@ -3273,6 +3396,12 @@ const rbCtx = rbCv.getContext('2d', {willReadFrequently:true});
 //
 // With no barcode box - the compatibility reader gives no positions on some
 // phones - it falls back to the old reticle slice, which is better than nothing.
+// BOX_FRESH_MS  how long a barcode position is still worth trusting. Past this
+//               the label has probably moved and the band widens rather than
+//               aiming confidently at a place the letter may have left.
+const BOX_FRESH_MS = 1200;
+let lastRevRect = null;
+
 function grabRevBand(){
   const r = reticleRect();
   if(!r || !vid.videoWidth) return null;
@@ -3281,15 +3410,20 @@ function grabRevBand(){
   const f = heldField('CH-Nr');
   const b = f && f.box;
   if(b && b.width > 8 && b.height > 4){
-    // v8.1: TIGHTER. The old band ran 1.1 to 4.0 barcode-heights down, which
-    // swallowed "Verfallsdatum:" and whatever sat under it - three lines for
-    // Tesseract to lay out when only one of them matters. Measured on both real
-    // labels the revision line sits between 1.6 and 2.4 barcode-heights down,
-    // so the band is now 1.50 to 2.60: the line itself, with a margin, and
-    // little else. Less to read, read much bigger.
+    // v8.5: how old is this position? A fix taken a moment ago can be aimed at
+    // tightly. One taken seconds ago - because the barcode has left the frame,
+    // which is exactly what happens when you move in close - cannot, so the
+    // band grows to cover where the letter has probably drifted to. Guessing
+    // wide beats aiming precisely at the wrong place.
+    const age = Date.now() - (f.boxAt || 0);
+    const grow = age > BOX_FRESH_MS ? 1.6 : 1.0;
+    const cx = b.width  * (0.85 + 3.10) / 2;
+    const cy = b.height * (1.50 + 2.60) / 2;
+    const hw = b.width  * (3.10 - 0.85) / 2 * grow;
+    const hh = b.height * (2.60 - 1.50) / 2 * grow;
     const bx = r.x + b.x, by = r.y + b.y;
-    const x1 = bx + b.width * 0.85, x2 = bx + b.width * 3.10;
-    const y1 = by + b.height * 1.50, y2 = by + b.height * 2.60;
+    const x1 = bx + cx - hw, x2 = bx + cx + hw;
+    const y1 = by + cy - hh, y2 = by + cy + hh;
     sx = Math.max(r.x, x1);
     sy = Math.max(r.y, y1);
     sw = Math.min(r.x + r.w, x2) - sx;
@@ -3301,6 +3435,22 @@ function grabRevBand(){
     sh = r.h * 0.20;
   }
   if(sw < 12 || sh < 6) return null;
+
+  // VOTES BELONG TO A PLACE. If the band has jumped a long way - the camera
+  // moved, or the barcode was re-found somewhere new - then everything counted
+  // so far was read off a different patch of the label and is not evidence
+  // about what is under the band now. This is the other half of "it gets worse
+  // with time": bad readings taken from a drifting band used to accumulate and
+  // out-vote the good first one. They are dropped instead.
+  if(lastRevRect){
+    const dx = Math.abs((sx + sw/2) - (lastRevRect.x + lastRevRect.w/2));
+    const dy = Math.abs((sy + sh/2) - (lastRevRect.y + lastRevRect.h/2));
+    if(dx > sw * 0.45 || dy > sh * 0.45){
+      revVotes = {}; revTries = 0;
+      lastBandSig.rev = 0;
+    }
+  }
+  lastRevRect = {x:sx, y:sy, w:sw, h:sh};
 
   const w = Math.round(sw*REV_ZOOM), h = Math.round(sh*REV_ZOOM);
   if(w < 30 || h < 12) return null;
