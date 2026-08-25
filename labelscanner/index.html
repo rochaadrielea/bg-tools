@@ -43,6 +43,15 @@
      is still moving. Corners plus a centre cross give the eye something to line
      the label up against, and the colour says how it is going without a word
      being read: white nothing yet, amber something held, green everything. */
+  /* v9.6: a message ACROSS THE PICTURE, for the one thing the operator must
+     notice while looking at the bag rather than at the screen. Deliberately
+     rationed - if everything shouted, nothing would be heard. */
+  .saybar{position:absolute;left:6%;right:6%;top:38%;z-index:6;pointer-events:none;
+    background:rgba(8,19,14,.93);border:2px solid var(--signal);border-radius:12px;
+    padding:16px 14px;text-align:center;font-family:var(--mono);font-size:15px;
+    font-weight:700;line-height:1.45;color:var(--signal);opacity:0;
+    transform:scale(.94);transition:opacity .16s,transform .16s;}
+  .saybar.show{opacity:1;transform:scale(1);}
   .alvo{position:absolute;inset:14% 8%;pointer-events:none;}
   .alvo i{position:absolute;width:26px;height:26px;border:3px solid var(--signal);opacity:.95;transition:border-color .25s;}
   .alvo i.tl{top:-2px;left:-2px;border-right:0;border-bottom:0;border-radius:10px 0 0 0;}
@@ -160,6 +169,13 @@
   td{padding:6px 8px;border-top:1px solid var(--line);white-space:nowrap;font-size:11px;}
   tr:nth-child(even) td{background:rgba(255,255,255,.015);}
   td.del{color:var(--bad);cursor:pointer;text-align:center;width:34px;}
+  td.edit{color:var(--warn);cursor:pointer;text-align:center;width:34px;font-size:15px;}
+  tr.editing{background:rgba(255,180,84,.10);}
+  tr.editing td.edit{color:var(--warn);background:rgba(255,180,84,.18);border-radius:6px;}
+  td.cell-edit{padding:0;}
+  td.cell-edit input{width:100%;min-width:88px;background:rgba(255,180,84,.12);
+    border:1px solid var(--warn);border-radius:6px;color:#fff;font-family:var(--mono);
+    font-size:12px;padding:6px 7px;outline:none;}
   td.flag{color:var(--warn);}
   .empty{color:var(--ink-dim);font-family:var(--mono);font-size:12px;text-align:center;padding:22px;}
 
@@ -209,16 +225,22 @@
      tap - a non-input cannot summon the keyboard, which is what was hiding the
      buttons entirely in the screenshot. */
   .revpickinline{grid-column:1/-1;padding:10px 12px 12px;background:#3A2A12;}
-  .revpickinline .rp-hint{font-family:var(--mono);font-size:11px;color:#D8B87C;
-    margin:0 0 9px;line-height:1.5;}
-  .revpickinline .rp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
-  .revpickinline button{font-family:var(--mono);font-size:34px;font-weight:700;
-    padding:20px 0;background:#4A3617;color:#fff;border:2px solid #8A6B2E;
-    border-radius:12px;cursor:pointer;line-height:1;-webkit-tap-highlight-color:transparent;}
-  .revpickinline button:active{background:var(--warn);color:#241703;}
+  .revpickinline .rp-hint{font-family:var(--mono);font-size:12px;color:#D8B87C;
+    margin:0 0 11px;line-height:1.5;}
+  /* v9.7: BIGGER. Two across instead of three - most of the size comes from
+     the width, not the type. Six letters make three clean rows, each button
+     roughly half again as wide as before and a full 76px tall, which is well
+     past the 48px minimum for a reliable thumb tap and readable at arm's
+     length with the phone on the bench. The revision is now the only thing the
+     operator does by hand, so it gets the room. */
+  .revpickinline .rp-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+  .revpickinline button{font-family:var(--mono);font-size:46px;font-weight:700;
+    padding:0;height:76px;background:#4A3617;color:#fff;border:2px solid #8A6B2E;
+    border-radius:14px;cursor:pointer;line-height:1;-webkit-tap-highlight-color:transparent;}
+  .revpickinline button:active{background:var(--warn);color:#241703;transform:scale(.97);}
   .revpickinline button.hot{border-color:var(--warn);color:var(--warn);background:#5A431E;}
   .revpickinline button.rp-none{grid-column:1/-1;font-size:15px;font-weight:600;
-    padding:15px 0;background:transparent;color:#D8B87C;border-style:dashed;}
+    height:auto;padding:16px 0;background:transparent;color:#D8B87C;border-style:dashed;}
   .revpicked{grid-column:1/-1;padding:12px;font-family:var(--mono);font-size:17px;
     color:#fff;display:flex;align-items:center;gap:10px;background:#4A3617;}
   .revpicked .chg{margin-left:auto;font-size:13px;color:#D8B87C;
@@ -278,6 +300,7 @@
   <div class="stage">
     <video id="vid" playsinline muted autoplay></video>
     <div class="reticle" id="reticle"></div>
+    <div class="saybar" id="sayBar"></div>
     <div class="alvo" id="alvo"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i><b></b></div>
     <div id="foundLayer" style="position:absolute;inset:0;pointer-events:none"></div>
     <div class="splash" id="splash"><div class="mark" id="splashMark"></div><div class="what" id="splashTxt"></div></div>
@@ -390,7 +413,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v9.5';
+const VERSION = 'v9.7';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -500,6 +523,7 @@ function metricSummary(){
 }
 
 const rows = loadRows();
+let editRow = -1;              // which line of the list is open for editing
 let current = null;
 function loadRows(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY))||[] }catch(_){ return [] } }
 function saveRows(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(rows)) }catch(_){} }
@@ -563,6 +587,19 @@ function bestVote(tally){
 //  reports them and ZXing usually does; where they are missing no box is drawn
 //  and the colours carry on alone. A box in the wrong place is worse than none.
 // ============================================================================
+const sayBar = document.getElementById('sayBar');
+let sayTimer = null;
+// Rationed on purpose: it only ever carries something the operator has to act
+// on, and it clears itself so it can never sit there going stale.
+function sayOverCamera(msg, ms){
+  if(!sayBar) return;
+  sayBar.textContent = msg;
+  sayBar.classList.add('show');
+  clearTimeout(sayTimer);
+  sayTimer = setTimeout(function(){ sayBar.classList.remove('show'); }, ms || 1800);
+}
+function hideSay(){ if(sayBar){ clearTimeout(sayTimer); sayBar.classList.remove('show'); } }
+
 const alvoEl = document.getElementById('alvo');
 const foundLayer = document.getElementById('foundLayer');
 const FIELD_SHOWN = {Mat:'MATERIAL', Char:'CHARGE', 'CH-Nr':'CHARGE CODE',
@@ -1138,6 +1175,7 @@ function resetSession(reason){
   lastRevRect = null;
   strayWatch = null;
   clearFound();
+  hideSay();
   const had = Object.keys(session.fields).length;
   session = newSession();
   reticle.classList.remove('partial','reject');
@@ -2126,6 +2164,12 @@ function onCodes(codes, tick){
 
   // Still looking at the row that was just added.
   if(isJustConfirmed(codes)){
+    // v9.6: SAY IT WHERE THEY ARE LOOKING. Adriele: "when you see that you
+    // already read it, write in front of the camera - already read this label,
+    // please next label." The status line under the frame is easy to miss when
+    // the eye is on the bag, so a second scan of the same label felt like the
+    // tool had simply stopped responding. Now it says so across the picture.
+    sayOverCamera('Already read this label \u2014 point at the NEXT one');
     setStatus('Already added \u2014 point at the NEXT label','live');
     return;
   }
@@ -4104,27 +4148,78 @@ discardBtn.addEventListener('click', function(){
 // ============================================================================
 function renderTable(){
   document.getElementById('cnt').textContent = rows.length;
-  document.getElementById('head').innerHTML = '<th></th>'
+  document.getElementById('head').innerHTML = '<th></th><th></th>'
     + ALL_COLS.map(function(c){ return '<th>'+c+'</th>'; }).join('');
   const body = document.getElementById('body');
   if(!rows.length){
-    body.innerHTML = '<tr><td class="empty" colspan="'+(ALL_COLS.length+1)+'">No rows yet.</td></tr>';
+    body.innerHTML = '<tr><td class="empty" colspan="'+(ALL_COLS.length+2)+'">No rows yet.</td></tr>';
     return;
   }
+  // v9.6: EVERY LINE CAN BE FIXED, NOT ONLY ERASED. Adriele: "we can edit in
+  // the list - no need just to erase, put an edit button at the beginning of
+  // every line." Deleting a row and re-scanning the bag is the slowest possible
+  // way to correct one wrong character, and on a tray of ninety labels the bag
+  // may already be back in the box. The pencil opens that row for editing in
+  // place; the cross still deletes.
   body.innerHTML = rows.map(function(r,i){
-    return '<tr><td class="del" data-i="'+i+'">&#10005;</td>' + ALL_COLS.map(function(c){
+    return '<tr'+(editRow===i?' class="editing"':'')+'>'
+      + '<td class="edit" data-edit="'+i+'" title="edit this line">&#9998;</td>'
+      + '<td class="del" data-i="'+i+'" title="delete this line">&#10005;</td>'
+      + ALL_COLS.map(function(c){
       const v = (r[c]||'').toString().replace(/</g,'&lt;');
       const cls = ((c==='Check' && r.Check!=='ML')
                 || (c==='Proof' && /split|time-only|manual|stale-pair/.test(r[c]||'')))
                   ? ' class="flag"' : '';
+      // in edit mode the KEY fields become editable in place; the rest stay
+      // read-only so a stray tap cannot quietly rewrite Source or Proof
+      if(editRow === i && KEY_COLS.indexOf(c) >= 0){
+        return '<td class="cell-edit"><input data-row="'+i+'" data-col="'+c+'" '
+             + 'value="'+v.replace(/"/g,'&quot;')+'" spellcheck="false"></td>';
+      }
       return '<td'+cls+'>'+v+'</td>';
     }).join('') + '</tr>';
   }).join('');
 }
 
 document.getElementById('body').addEventListener('click', function(e){
-  const i = e.target.dataset.i;
-  if(i!==undefined){ rows.splice(+i,1); saveRows(); renderTable(); }
+  const d = e.target.dataset || {};
+
+  // the pencil opens a line for editing, and closes it again
+  if(d.edit !== undefined){
+    const n = +d.edit;
+    editRow = (editRow === n) ? -1 : n;
+    renderTable();
+    return;
+  }
+
+  // the cross still deletes. Deleting the line being edited closes the editor
+  // rather than leaving it pointing at whatever moved up into that slot.
+  if(d.i !== undefined){
+    const n = +d.i;
+    rows.splice(n,1);
+    if(editRow === n) editRow = -1;
+    else if(editRow > n) editRow--;
+    saveRows(); renderTable();
+  }
+});
+
+// Typing in an open line writes straight through to the row and is saved as it
+// is typed - there is no OK button to forget to press, and the Check tag is
+// recomputed so a corrected material stops being flagged RV immediately.
+document.getElementById('body').addEventListener('input', function(e){
+  const d = e.target.dataset || {};
+  if(d.row === undefined || !d.col) return;
+  const r = rows[+d.row];
+  if(!r) return;
+  let v = String(e.target.value||'').trim();
+  if(d.col === 'Rev' && v && v !== REV_NONE) v = (fixRevChar(v) || v.toUpperCase()).slice(0,1);
+  r[d.col] = v;
+  if(d.col === 'Mat'){
+    r.Check = checkTag(v);
+    r.Proof = /edited/.test(r.Proof||'') ? r.Proof : ((r.Proof||'') + ' (edited by hand)').trim();
+  }
+  saveRows();
+  document.getElementById('cnt').textContent = rows.length;
 });
 
 exportBtn.addEventListener('click', function(){
@@ -4766,6 +4861,17 @@ function grabChargeBand(){
   const f = heldField('CH-Nr');
   const b = f && f.box;
   if(b && b.width > 8 && b.height > 4){
+    // THE WAE LABEL'S LAYOUT, AS IT IS ACTUALLY PRINTED  -  v9.6
+    // Adriele: "in WAE the charge is ALWAYS on the right, the material on the
+    // left, and when the right-hand barcode is EQ the serial and charge are
+    // BELOW it."
+    //
+    // That is a fact about the paper and it narrows the search enormously. The
+    // band used to start at the LEFT EDGE of the frame and run across to the
+    // barcode - sweeping the entire material column looking for a charge that
+    // is never printed there. It now sits UNDER the right-hand barcode, which
+    // is where the charge is, reaching just far enough left to catch the
+    // "Char." caption and far enough right for the number itself.
     const bx = r.x + b.x, by = r.y + b.y;
     const stale = (Date.now() - (f.boxAt || 0)) > BOX_FRESH_MS;
     const grow = stale ? 1.5 : 1.0;
@@ -4773,8 +4879,8 @@ function grabChargeBand(){
     const hh = b.height * (6.0 - 4.2) / 2 * grow;
     sy = Math.max(r.y, by + cy - hh);
     sh = Math.min(r.y + r.h, by + cy + hh) - sy;
-    sx = r.x;
-    sw = Math.min(r.x + r.w, bx + b.width * 0.35) - sx;
+    sx = Math.max(r.x, bx - b.width * 1.25);
+    sw = Math.min(r.x + r.w, bx + b.width * 1.60) - sx;
   } else {
     sx = r.x;
     sy = r.y + r.h * 0.52;
