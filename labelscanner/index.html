@@ -155,15 +155,23 @@
     font-family:var(--mono);font-size:17px;color:#fff;padding:11px 12px;}
   .crowf input.v:focus{background:rgba(255,180,84,.14);}
   .crowf input.v::placeholder{color:#C9A464;font-size:13px;}
-  .crevpick{display:none;margin:0 0 10px;}
-  .crevpick.show{display:block;}
-  .crevpick .cp-label{font-family:var(--mono);font-size:11px;color:#D8B87C;
-    margin:0 0 8px;text-align:center;line-height:1.5;}
-  .crevpick .cp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
-  .crevpick button{font-family:var(--mono);font-size:26px;font-weight:700;
-    padding:18px 0;background:#4A3617;color:#fff;border:1px solid #8A6B2E;
-    border-radius:11px;cursor:pointer;}
-  .crevpick button.hot{border-color:var(--warn);color:var(--warn);background:#5A431E;}
+  /* v9.1: the revision picker sits INSIDE the grid, directly under the
+     Revision row - where Adriele drew it. Big enough to hit without looking,
+     and in a serif-free face at a size where B, D, E and F cannot be confused
+     with each other at arm's length on a workshop floor. */
+  .crevrow{grid-column:1/-1;background:#3F2E13;padding:12px 12px 14px;}
+  .crevrow .cp-label{font-family:var(--mono);font-size:11px;color:#D8B87C;
+    margin:0 0 10px;text-align:center;line-height:1.5;}
+  .crevrow .cp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .crevrow button{font-family:-apple-system,"Segoe UI",Arial,Helvetica,sans-serif;
+    font-size:38px;font-weight:700;line-height:1;letter-spacing:1px;
+    padding:22px 0;background:#5A431E;color:#fff;border:2px solid #8A6B2E;
+    border-radius:12px;cursor:pointer;}
+  .crevrow button:active{background:var(--warn);color:#241703;}
+  .crevrow button.hot{border-color:var(--warn);color:var(--warn);}
+  .crevrow button.none{grid-column:1/-1;font-size:17px;font-weight:600;
+    padding:16px 0;background:transparent;color:#D8B87C;border-style:dashed;}
+  .crevpick{display:none;}
   .crowf.tagrow .v{font-size:13px;color:var(--warn);}
   .confirmbar .crow{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .confirmbar .crow.three{grid-template-columns:1fr 1fr 1.4fr;}
@@ -171,6 +179,25 @@
     border-radius:11px;padding:14px 8px;cursor:pointer;border:1px solid var(--line);}
   .confirmbar .cdismiss{background:transparent;color:#D8B87C;}
   .confirmbar .cok{background:var(--warn);color:#241703;border-color:var(--warn);}
+
+  /* v9.0 developer panel. Long-press the version chip. Workers never find it
+     by accident and never need to - it is a window for Adriele, not a feature. */
+  .devpanel{position:fixed;inset:0;z-index:60;background:rgba(8,11,15,.97);
+    overflow:auto;padding:16px 14px calc(16px + env(safe-area-inset-bottom));display:none;}
+  .devpanel.show{display:block;}
+  .devpanel h3{font-family:var(--mono);font-size:12px;letter-spacing:1px;
+    color:var(--signal);margin:16px 0 6px;text-transform:uppercase;}
+  .devpanel h3:first-child{margin-top:0;}
+  .devpanel pre{font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--ink);
+    background:var(--panel);border:1px solid var(--line);border-radius:9px;
+    padding:10px 12px;margin:0;white-space:pre-wrap;word-break:break-word;}
+  .devpanel .arrow{color:var(--ink-dim);}
+  .devpanel .yes{color:var(--signal);} .devpanel .no{color:var(--bad);}
+  .devpanel .mid{color:var(--warn);}
+  .devclose{position:sticky;top:0;float:right;background:var(--panel-2);
+    border:1px solid var(--line);color:var(--ink);border-radius:9px;
+    padding:8px 14px;font-family:var(--mono);font-size:12px;cursor:pointer;}
+  header .ver{cursor:pointer;user-select:none;}
 
   .exportbar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 22%);display:flex;gap:10px;max-width:640px;margin:0 auto;}
   .exportbar button{flex:1;}
@@ -243,6 +270,11 @@
   </div>
 </div>
 
+<div class="devpanel" id="devPanel">
+  <button class="devclose" id="devClose">close</button>
+  <div id="devBody"></div>
+</div>
+
 <div class="confirmbar" id="confirmBar">
   <div class="ctitle">Check against the label in your hand</div>
   <div class="cgrid" id="confirmGrid"></div>
@@ -306,7 +338,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v8.9';
+const VERSION = 'v9.2';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -329,6 +361,91 @@ const MANDATORY = ["Mat","Char"];
 // offers. The rest still travel with the row - they are just not typed.
 const KEY_COLS = ["Mat","Char","Rev","SerNr"];
 const STORE_KEY = 'wae_label_rows_v5';   // unchanged on purpose: keeps rows already on the phone
+
+// ============================================================================
+//  MEASURING THE TOOL  -  v9.0
+//  ---------------------------------------------------------------------------
+//  This is going to production, used by people who are not Adriele and are in a
+//  hurry. "It feels better" is not something you can take to a meeting, and it
+//  is not something you can debug from. So every label records how it went.
+//
+//  WHAT IS RECORDED IS THE SHAPE OF THE WORK, NEVER THE VALUES:
+//  which field, where it came from, how long it took, how many attempts, what
+//  the operator had to fix. No material numbers, no charges, no batches. The
+//  metrics sheet therefore carries no aerospace data at all and can be shown to
+//  anyone without a review - the values are already in the Labels sheet if they
+//  are needed, and the row number links the two.
+//
+//  It stays on the phone. Nothing is uploaded; there is no backend to upload
+//  to. It travels out inside the .xlsx the operator already exports.
+// ============================================================================
+const METRIC_KEY = 'wae_metrics_v1';
+
+function loadMetrics(){
+  try{ return JSON.parse(localStorage.getItem(METRIC_KEY)) || {sessions:[]}; }
+  catch(_){ return {sessions:[]}; }
+}
+function saveMetrics(){
+  try{
+    // keep the file small: the last 500 labels is months of work
+    if(metrics.sessions.length > 500) metrics.sessions = metrics.sessions.slice(-500);
+    localStorage.setItem(METRIC_KEY, JSON.stringify(metrics));
+  }catch(_){}
+}
+const metrics = loadMetrics();
+
+// the label currently being read
+let mLabel = null;
+function metricStart(){
+  mLabel = {t0:Date.now(), tFirst:0, family:'', revLooks:0, revVotes:0,
+            matDeep:0, strays:0, edits:[], outcome:'', ms:0, rev:'', ver:VERSION};
+}
+function metricNote(k, v){
+  if(!mLabel) metricStart();
+  if(k === 'first' && !mLabel.tFirst) mLabel.tFirst = Date.now() - mLabel.t0;
+  else if(k === 'edit'){ if(mLabel.edits.indexOf(v) < 0) mLabel.edits.push(v); }
+  else mLabel[k] = v;
+}
+function metricEnd(outcome, srcOf){
+  if(!mLabel) return;
+  mLabel.outcome = outcome;
+  mLabel.ms = Date.now() - mLabel.t0;
+  mLabel.family = session.family || '';
+  mLabel.revLooks = revLooks;
+  mLabel.revVotes = revTries;
+  mLabel.matDeep = matDeepFired ? 1 : 0;
+  mLabel.strays = session.stray ? 1 : 0;
+  if(srcOf) KEY_COLS.forEach(function(c){ mLabel['src_'+c] = srcOf(c) || ''; });
+  mLabel.row = rows.length;                 // links to the Labels sheet, no values
+  metrics.sessions.push(mLabel);
+  saveMetrics();
+  mLabel = null;
+}
+
+// The numbers worth putting in front of somebody.
+function metricSummary(){
+  const S = metrics.sessions;
+  const done = S.filter(function(x){ return x.outcome === 'added'; });
+  const n = done.length || 1;
+  const handsFree = done.filter(function(x){ return !x.edits.length; }).length;
+  const editsPer = {};
+  KEY_COLS.forEach(function(c){
+    editsPer[c] = done.filter(function(x){ return x.edits.indexOf(c) >= 0; }).length;
+  });
+  const times = done.map(function(x){ return x.ms; }).sort(function(a,b){ return a-b; });
+  const med = times.length ? times[times.length>>1] : 0;
+  return {
+    labels: S.length,
+    added: done.length,
+    rejected: S.filter(function(x){ return x.outcome === 'rejected'; }).length,
+    handsFreePct: Math.round(handsFree*100/n),
+    medianSec: Math.round(med/100)/10,
+    editsPer: editsPer,
+    revGaveUp: done.filter(function(x){ return !x.rev; }).length,
+    strays: S.filter(function(x){ return x.strays; }).length,
+    stillPhotos: S.filter(function(x){ return x.matDeep; }).length
+  };
+}
 
 const rows = loadRows();
 let current = null;
@@ -430,8 +547,19 @@ function showProgress(){
 function showBanner(html,kind){ banner.innerHTML=html; banner.className='banner show '+(kind||'warn'); }
 
 document.getElementById('freshBtn').addEventListener('click', async()=>{
-  try{ if(window.caches){ const k=await caches.keys(); await Promise.all(k.map(x=>caches.delete(x))); } }catch(_){}
-  try{ if(navigator.serviceWorker){ const r=await navigator.serviceWorker.getRegistrations(); await Promise.all(r.map(x=>x.unregister())); } }catch(_){}
+  // v9.0: this used to delete every cache and unregister the service worker.
+  // That is no longer right - the worker holds ONLY the three pinned CDN
+  // libraries and never this page, so it cannot be the reason you are on an old
+  // build, and throwing it away just means re-downloading 20 MB over the
+  // workshop's signal for nothing. The page is what needs to be fresh, and the
+  // cache-busting reload below is what makes it fresh.
+  try{
+    if(window.caches){
+      const k = await caches.keys();
+      await Promise.all(k.filter(function(n){ return n.indexOf('wae-libs') < 0; })
+                         .map(function(n){ return caches.delete(n); }));
+    }
+  }catch(_){}
   location.href = location.pathname + '?fresh=' + Date.now();
 });
 
@@ -1045,7 +1173,9 @@ function put(field, value, src, box, tick){
   // ==========================================================================
   const lk = lockedBy(field);
   if(lk){
-    const mayChange = (src === 'typed') || (src === 'bc' && lk === 'ocr');
+    const mayChange = (src === 'typed')
+                   || (src === 'bc' && (lk === 'ocr' || lk === 'auto'))
+                   || (src === 'ocr' && lk === 'auto');
     if(!mayChange){
       if(prev && prev.value !== value && src === 'bc'){
         session.stray = {field:field, kept:prev.value, other:value};
@@ -1705,6 +1835,10 @@ function applyBarcodes(codes, tick){
     // does not need to be parked waiting for a second barcode to prove it.
     if(/^\d{3,6}\.\d{2,6}$/.test(s)){
       changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
+      // purchased part: it has no revision by design, so fill the dash now and
+      // never send the reader after one. Only if the Rev is not already held -
+      // a value the operator typed always wins.
+      if(!heldField('Rev')){ put('Rev', REV_NONE, 'auto', null, 0); lock('Rev','auto'); }
       continue;
     }
 
@@ -1858,6 +1992,7 @@ function onCodes(codes, tick){
     if(holdingSomething()){
       const m = barcodeMandatory(codes[0] && codes[0].value, waeSignal(codes));
       if(m) session.stray = {field:m.field, kept:heldVal(m.field), other:m.value};
+      metricNote('strays', (mLabel ? (mLabel.strays||0) : 0) + 1);
       setStatus('Another label came into view \u2014 keeping what is already read','busy');
       return;                       // hold everything, ignore the stray entirely
     }
@@ -1867,6 +2002,8 @@ function onCodes(codes, tick){
   }
 
   rawUnplaced = '';
+  if(!mLabel) metricStart();
+  metricNote('first');
   const changed = applyBarcodes(codes, tick);
   showRaw();
   if(!changed) return;
@@ -1913,7 +2050,7 @@ function evaluate(){
   // optional-but-wanted fields their chance: on a WAE label the Revision is
   // printed, not encoded, so it needs its own read. The voting loops below
   // call evaluate() again when they finish or give up.
-  if(isWae() && !heldField('Rev') && scanning
+  if(isWae() && !heldField('Rev') && !isPurchasedPart(heldVal('Mat')) && scanning
      && revTries < REV_MAX_TRIES && revLooks < REV_MAX_LOOKS){
     startRevVoting();
     setStatus('Reading the revision\u2026 (' + revTries + '/' + REV_MAX_TRIES + ' votes)','busy');
@@ -1955,6 +2092,7 @@ function readingDone(){
 // Source is recorded per field, so the export always says where each value
 // came from: a barcode, the text reader, or the operator's fingers.
 function sourceLine(get){
+  // 'auto' is the tool deciding a purchased part has no revision - label it so
   const bc=[], oc=[], ty=[];
   COLS.forEach(function(c){
     const s = get(c);
@@ -2039,11 +2177,15 @@ function openConfirm(proof){
   const wae = isWae();
   const tag = checkTag(heldVal('Mat'));
   let html = '';
+  const purchased = isPurchasedPart(heldVal('Mat'));
   KEY_COLS.forEach(function(c){
-    const v = heldVal(c);
+    let v = heldVal(c);
     if(!v && !wae && (c === 'SerNr' || c === 'Rev')) return;
+    // purchased part with the auto dash: show it as n/a, gently, so the operator
+    // reads it as "accounted for" not "type here"
     html += '<div class="crowf"><div class="k">' + CONFIRM_LABELS[c] + '</div>'
           + '<input class="v" data-col="' + c + '" spellcheck="false" '
+          + (c === 'Rev' ? 'maxlength="1" ' : '')
           + 'value="' + String(v||'').replace(/"/g,'&quot;') + '" '
           + 'placeholder="' + CONFIRM_HINT[c] + '"></div>';
   });
@@ -2066,7 +2208,7 @@ function openConfirm(proof){
   // BIG BUTTONS FOR THE REVISION. Only when the material and the charge are
   // both in hand and the revision is the one thing missing - that is exactly
   // the moment a person can glance at the label and answer in one tap.
-  if(wae && !heldVal('Rev') && heldVal('Mat') && heldVal('Char')){
+  if(wae && !heldVal('Rev') && !isPurchasedPart(heldVal('Mat')) && heldVal('Mat') && heldVal('Char')){
     const o = revOptions();
     confirmRevPick.innerHTML =
       '<div class="cp-label">Revision not read after ' + revTries + ' tries \u2014 '
@@ -2076,6 +2218,8 @@ function openConfirm(proof){
       + o.letters.map(function(L,i){
           return '<button data-rev="' + L + '"' + (i < o.voted ? ' class="hot"' : '') + '>' + L + '</button>';
         }).join('')
+      + '<button class="cp-none" data-rev="' + REV_NONE + '">'
+      + 'This label has no revision printed</button>'
       + '</div>';
     confirmRevPick.className = 'crevpick show';
   } else {
@@ -2114,13 +2258,14 @@ function harvestConfirmEdits(){
   Array.prototype.forEach.call(confirmGrid.querySelectorAll('input[data-col]'), function(inp){
     const c = inp.dataset.col;
     let v = String(inp.value||'').trim();
-    if(c === 'Rev' && v) v = fixRevChar(v) || v.toUpperCase().slice(0,1);
+    if(c === 'Rev' && v && v !== REV_NONE) v = fixRevChar(v) || v.toUpperCase().slice(0,1);
     if(c === 'Mat' && v){
       const fx = masterFix(v);
       if(fx.tier === 'corrected'){ session.matOriginal = fx.original; v = fx.value; }
     }
     if(!v){ delete session.fields[c]; delete session.locked[c]; return; }
     if(heldVal(c) === v) return;                       // unchanged
+    metricNote('edit', c);
     session.fields[c] = {value:v, src:'typed', t:Date.now(), box:null, tick:0};
     session.locked[c] = 1;
   });
@@ -2145,6 +2290,8 @@ confirmOk.addEventListener('click', function(){
     return;
   }
 
+  metricNote('rev', row.Rev || '');
+  metricEnd('added', function(c){ const f = heldField(c); return f ? f.src : ''; });
   lastConfirmed = {Mat:row.Mat, Char:row.Char};
   writeRow(row);
   resetSession();
@@ -2156,6 +2303,7 @@ confirmOk.addEventListener('click', function(){
 
 // "Not this" throws the whole reading away. Nothing is written.
 confirmDismiss.addEventListener('click', function(){
+  metricEnd('rejected');
   scanBusy = false;
   hideConfirm();
   resetSession('Cleared \u2014 point at the label again');
@@ -2267,13 +2415,13 @@ function bandRead(psm, whitelist, canvas){
 //  still fits. The revision is ONE character, and with 26 candidates there was
 //  no spare information at all. A wrong B looked exactly like a right B.
 //
-//  Five candidates gives the revision its own redundancy for the first time.
+//  Six candidates gives the revision its own redundancy for the first time.
 //  It also deletes the two errors reported by name: I is gone, R is gone.
 //
 //  TO EXTEND IT: add letters to REV_LETTERS. Nothing else changes - the
 //  whitelist, the repairs, the confirm-strip buttons and the rejection rule
 //  are all derived from this one string.
-const REV_LETTERS = 'ABCDE';
+const REV_LETTERS = 'ABCDEF';
 
 //  R and V are in the WHITELIST but never accepted as an ANSWER. The engine has
 //  to be able to spell the word "Rev." to anchor on it; it is simply not
@@ -2282,6 +2430,38 @@ const REV_WHITELIST = REV_LETTERS + 'RV.';
 
 //  Is this a revision this label family can actually carry?
 function isRevLetter(c){ return REV_LETTERS.indexOf(c) >= 0; }
+
+// v9.1: THE LABEL HAS NO REVISION ON IT.
+// Some labels print "Rev." and leave it empty - the 2219.3794 bag is one. That
+// is not a failure to read, it is THE ANSWER, and it has to be recordable as
+// such. A blank cell would be indistinguishable from "we could not read it",
+// and nobody downstream could tell those two apart. A dash says "this label
+// carries no revision" - the same mark the KIP documents already use for
+// "not applicable, and that is accounted for".
+const REV_NONE = '-';
+function isRevAnswer(c){ return c === REV_NONE || isRevLetter(c); }
+
+// ============================================================================
+//  PURCHASED PARTS CARRY NO REVISION  -  v9.2
+//  ---------------------------------------------------------------------------
+//  Adriele noticed it and the label proves the reason: a dotted material number
+//  (2219.3794, 2219.8831) is a BOUGHT-IN part - the 2219.3794 bag prints
+//  "Lieferant: DISTEC AG". Beyond Gravity revision-controls what it DESIGNS
+//  (the 300xxxx numbers), not what it buys. So a dotted material has no Rev line
+//  by design, and every second spent hunting for one is wasted.
+//
+//  Dotted material -> the revision is NOT APPLICABLE: filled with the dash at
+//  once, the reader never starts, the label goes straight to the strip.
+//  Recorded as the dash so the export says WHY it is empty, not just that it is.
+//
+//  SAFETY VALVE: this is "every dotted part seen SO FAR". Nothing is locked
+//  shut - it is pre-filled, and the operator can type over it on the strip.
+//  A hint, not a law.
+// ============================================================================
+function isPurchasedPart(mat){
+  return /^\d{3,6}\.\d{2,6}/.test(String(mat||''));
+}
+
 
 // How hard the revision band is magnified. It is one short line, so the cost is
 // small and the gain is large: B and D differ only in the left-hand bowl, and
@@ -2693,6 +2873,189 @@ function adaptiveBinarise(src, winFrac, cVal){
   }
   ctx.putImageData(img, 0, 0);
   return c;
+}
+
+// ============================================================================
+//  READING THE REVISION BY ITS SHAPE  -  v9.0
+//  ---------------------------------------------------------------------------
+//  Tesseract is a general OCR engine: it loads a language model, analyses page
+//  layout, runs a neural network and applies a dictionary. Using it to decide
+//  between A, B, C, D and E is the wrong tool by a wide margin - it is why the
+//  revision has been the slowest and least reliable field in the whole app.
+//
+//  The revision is a shape-matching problem against FIVE KNOWN SHAPES, printed
+//  in Arial capitals. So: render A-E once, cut the letter out of the band,
+//  scale both to the same little grid, and count how much ink they share.
+//  Sub-millisecond, no model, no worker, no whitelist, nothing to download.
+//
+//  It also reports something Tesseract cannot: HOW MUCH better the winner is
+//  than the runner-up. "B 0.91, D 0.89" is visibly a coin toss and is refused;
+//  Tesseract would just say D and sound certain.
+//
+//  It does not replace the engine, it stands beside it. Tesseract reads one
+//  view, this reads the other, and the existing rule still applies: exactly one
+//  valid letter between the two views, or no vote at all.
+// ============================================================================
+const TPL = 28;                 // both the templates and the cut-out end up this size
+let revTemplates = null;
+
+// -> Uint8Array(TPL*TPL), 1 where there is ink, cropped to the glyph and scaled
+function normaliseGlyph(data, W, H, sx, sy, sw, sh){
+  // tighten to the ink actually present
+  let x0=sx+sw, y0=sy+sh, x1=sx-1, y1=sy-1;
+  for(let y=sy;y<sy+sh;y++){
+    for(let x=sx;x<sx+sw;x++){
+      if(data[(y*W+x)<<2] < 128){
+        if(x<x0)x0=x; if(x>x1)x1=x;
+        if(y<y0)y0=y; if(y>y1)y1=y;
+      }
+    }
+  }
+  if(x1<x0 || y1<y0) return null;
+  const gw = x1-x0+1, gh = y1-y0+1;
+
+  // scale into the grid keeping the aspect ratio, centred - a squashed B looks
+  // like a squashed D, so the proportions have to survive
+  const k = Math.min(TPL/gw, TPL/gh) * 0.92;
+  const ow = Math.max(1, Math.round(gw*k)), oh = Math.max(1, Math.round(gh*k));
+  const offX = ((TPL-ow)/2)|0, offY = ((TPL-oh)/2)|0;
+
+  const bits = new Uint8Array(TPL*TPL);
+  for(let oy=0; oy<oh; oy++){
+    const syy = y0 + Math.min(gh-1, ((oy+0.5)*gh/oh)|0);
+    for(let ox=0; ox<ow; ox++){
+      const sxx = x0 + Math.min(gw-1, ((ox+0.5)*gw/ow)|0);
+      if(data[(syy*W+sxx)<<2] < 128) bits[(offY+oy)*TPL + (offX+ox)] = 1;
+    }
+  }
+  return bits;
+}
+
+function buildRevTemplates(){
+  if(revTemplates) return revTemplates;
+  revTemplates = {};
+  const S = 200;
+  REV_LETTERS.split('').forEach(function(L){
+    try{
+      const c = document.createElement('canvas');
+      c.width = S; c.height = S;
+      const x = c.getContext('2d', {willReadFrequently:true});
+      x.fillStyle = '#fff'; x.fillRect(0,0,S,S);
+      x.fillStyle = '#000';
+      // Arial capitals, as printed on the label
+      x.font = 'bold ' + Math.round(S*0.72) + 'px Arial, Helvetica, sans-serif';
+      x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.fillText(L, S/2, S/2);
+      const d = x.getImageData(0,0,S,S).data;
+      const bits = normaliseGlyph(d, S, S, 0, 0, S, S);
+      if(bits) revTemplates[L] = bits;
+    }catch(_){}
+  });
+  return revTemplates;
+}
+
+// How much ink two glyphs share, ignoring the paper: intersection over union.
+// Counting matching background instead would score every pair above 0.8,
+// because most of the grid is empty in both.
+function inkAgreement(a, b){
+  let inter = 0, uni = 0;
+  for(let i=0;i<a.length;i++){
+    const x = a[i], y = b[i];
+    if(x & y) inter++;
+    if(x | y) uni++;
+  }
+  return uni ? inter/uni : 0;
+}
+
+const TPL_ACCEPT = 0.62;    // below this it is not really any of them
+const TPL_MARGIN = 0.07;    // and it must beat the runner-up by this much
+
+// -> {letter, score, margin} - letter is '' when nothing wins clearly
+function matchRevGlyph(bits){
+  const T = buildRevTemplates();
+  let best='', bestS=-1, second=-1;
+  for(const L in T){
+    const s = inkAgreement(bits, T[L]);
+    if(s > bestS){ second = bestS; bestS = s; best = L; }
+    else if(s > second){ second = s; }
+  }
+  if(bestS < TPL_ACCEPT || (bestS - second) < TPL_MARGIN){
+    return {letter:'', score:bestS, margin:bestS-second, top:best};
+  }
+  return {letter:best, score:bestS, margin:bestS-second, top:best};
+}
+
+// ============================================================================
+//  CUTTING THE LETTER OUT OF THE BAND
+//  ---------------------------------------------------------------------------
+//  The band holds "Rev.  B", usually with "Verfallsdatum:" above it. The letter
+//  wanted is the rightmost mark on the line that reaches furthest right - on
+//  both real labels the revision line extends past everything above it, which
+//  makes "rightmost" a reliable way in rather than a guess about layout.
+//    1. threshold locally, so glare does not decide what counts as ink
+//    2. find the rightmost ink pixel in the whole band
+//    3. take the row band it belongs to - that is the revision line
+//    4. inside that line, take the rightmost group of columns
+// ============================================================================
+function isolateRevGlyph(band){
+  let bw;
+  try{ bw = adaptiveBinarise(band, 0.30, 10); }catch(_){ return null; }
+  let d, W, H;
+  try{
+    const ctx = bw.getContext('2d', {willReadFrequently:true});
+    const img = ctx.getImageData(0,0,bw.width,bw.height);
+    d = img.data; W = bw.width; H = bw.height;
+  }catch(_){ return null; }
+  if(W < 8 || H < 8) return null;
+
+  // 2. the rightmost ink in the band
+  let rx = -1, ry = -1;
+  for(let x=W-1; x>=0 && rx<0; x--){
+    for(let y=0; y<H; y++){
+      if(d[(y*W+x)<<2] < 128){ rx = x; ry = y; break; }
+    }
+  }
+  if(rx < 0) return null;
+
+  // 3. the row band around it, grown while rows still carry ink
+  const rowHas = new Uint8Array(H);
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){ if(d[(y*W+x)<<2] < 128){ rowHas[y]=1; break; } }
+  }
+  let y0 = ry, y1 = ry;
+  while(y0 > 0   && rowHas[y0-1]) y0--;
+  while(y1 < H-1 && rowHas[y1+1]) y1++;
+  if(y1 - y0 < 4) return null;
+
+  // 4. the rightmost group of columns inside that line
+  const colHas = new Uint8Array(W);
+  for(let x=0;x<W;x++){
+    for(let y=y0;y<=y1;y++){ if(d[(y*W+x)<<2] < 128){ colHas[x]=1; break; } }
+  }
+  let x1 = -1;
+  for(let x=W-1; x>=0; x--){ if(colHas[x]){ x1 = x; break; } }
+  if(x1 < 0) return null;
+  let x0 = x1;
+  while(x0 > 0 && colHas[x0-1]) x0--;
+
+  const gw = x1-x0+1, gh = y1-y0+1;
+  // a single capital is roughly as tall as it is wide, give or take. Anything
+  // much wider is two letters run together and is not safe to match.
+  const ratio = gw/gh;
+  if(ratio < 0.25 || ratio > 1.35) return null;
+  if(gh < 8) return null;
+
+  return normaliseGlyph(d, W, H, x0, y0, gw, gh);
+}
+
+// The whole thing, band in, letter out. '' means it declined to answer.
+function readRevByShape(band){
+  const bits = isolateRevGlyph(band);
+  if(!bits) return {letter:'', why:'no clean glyph'};
+  const m = matchRevGlyph(bits);
+  return {letter: isRevLetter(m.letter) ? m.letter : '',
+          score: m.score, margin: m.margin, top: m.top,
+          why: m.letter ? 'matched' : 'too close to call'};
 }
 
 function rotateCanvas(src,deg){
@@ -3483,7 +3846,7 @@ addBtn.addEventListener('click', function(){
     const f = heldField(c);
     if(f && f.value === v) return;                 // unchanged, keep its source
     let out = v;
-    if(c === 'Rev'){ out = fixRevChar(v) || v.toUpperCase(); }
+    if(c === 'Rev'){ out = (v === REV_NONE) ? REV_NONE : (fixRevChar(v) || v.toUpperCase()); }
     if(c === 'Mat'){
       const fx = masterFix(v);
       if(fx.tier === 'corrected'){ out = fx.value; session.matOriginal = fx.original; }
@@ -3502,6 +3865,7 @@ addBtn.addEventListener('click', function(){
 });
 
 discardBtn.addEventListener('click', function(){
+  metricEnd('discarded');
   current=null; manualCarry=null; stopAllVoting(); resetSession(); review.className='review';
   scanBusy = false;
   setStatus(scanning?'Point at ONE label':'Camera off', scanning?'live':'');
@@ -3537,9 +3901,43 @@ document.getElementById('body').addEventListener('click', function(e){
 
 exportBtn.addEventListener('click', function(){
   if(!rows.length){ setStatus('Nothing to export yet'); return; }
-  const ws = XLSX.utils.json_to_sheet(rows, {header: ALL_COLS});
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Labels');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows, {header: ALL_COLS}), 'Labels');
+
+  // Sheet 2: the headline numbers, in plain words.
+  const q = metricSummary();
+  const summary = [
+    {Measure:'App version',                 Value:VERSION},
+    {Measure:'Labels attempted',            Value:q.labels},
+    {Measure:'Rows added',                  Value:q.added},
+    {Measure:'Rejected (Not this)',         Value:q.rejected},
+    {Measure:'Hands-free (added with no correction) %', Value:q.handsFreePct},
+    {Measure:'Median seconds per label',    Value:q.medianSec},
+    {Measure:'Material corrected by hand',  Value:q.editsPer.Mat},
+    {Measure:'Charge corrected by hand',    Value:q.editsPer.Char},
+    {Measure:'Revision corrected by hand',  Value:q.editsPer.Rev},
+    {Measure:'Serial corrected by hand',    Value:q.editsPer.SerNr},
+    {Measure:'Rows added with no revision', Value:q.revGaveUp},
+    {Measure:'Second label seen mid-read',  Value:q.strays},
+    {Measure:'Needed a still photo',        Value:q.stillPhotos}
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Metrics');
+
+  // Sheet 3: one row per label. NO material, charge, batch or serial values -
+  // only how the reading went. Row links back to the Labels sheet.
+  const det = metrics.sessions.map(function(x){
+    return {Row:x.row, Version:x.ver, Family:x.family, Outcome:x.outcome,
+            Seconds:Math.round(x.ms/100)/10, 'First read ms':x.tFirst,
+            'Rev looks':x.revLooks, 'Rev votes':x.revVotes,
+            'Rev found':x.rev ? 'yes' : 'no',
+            'Still photo':x.matDeep ? 'yes' : 'no',
+            'Stray label':x.strays ? 'yes' : 'no',
+            'Corrected by hand':(x.edits||[]).join(' '),
+            'Mat from':x.src_Mat||'', 'Char from':x.src_Char||'',
+            'Rev from':x.src_Rev||'', 'SerNr from':x.src_SerNr||''};
+  });
+  if(det.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(det), 'Sessions');
+
   XLSX.writeFile(wb, 'WAE_labels_' + new Date().toISOString().slice(0,10) + '.xlsx');
 });
 
@@ -3792,7 +4190,13 @@ const REV_POLL_MS    = 150;
 // dissenting opinion, it is silence - burning a vote on it would mean one
 // blurred frame could sink a letter that four later reads all agree on.
 // REV_MAX_LOOKS stops it looking forever when the band is aimed at nothing.
-const REV_MAX_TRIES  = 10;   // votes collected (Adriele: at least 10 tries)
+// v9.1: GUESS ONCE, THEN ASK. Adriele: "try to guess only once then give the
+// buttons". Grinding for ten votes was worth it when reading was all we had;
+// now the shape matcher answers in under a millisecond AND says how sure it is,
+// so either it is confident on the first proper look or a human should just
+// tap the letter. Waiting longer does not make a doubtful glyph clearer - it
+// only makes the operator wait.
+const REV_MAX_TRIES  = 2;    // attempts that actually produced a letter
 // THREE agreeing, not four. Four was the right number when the answer could be
 // any of 26 letters and nothing vouched for it. With a five-letter vocabulary
 // doing its own filtering - and every invalid reading discarded rather than
@@ -3803,8 +4207,14 @@ const REV_MAX_TRIES  = 10;   // votes collected (Adriele: at least 10 tries)
 // two agreeing looks is four consistent readings across two different frames.
 // Adriele asked for 2 and for speed; the vocabulary and the two-view rule are
 // what make 2 safe here where it would have been reckless at 26 letters.
-const REV_LOCK_VOTES = 2;    // votes that must agree
-const REV_MAX_LOOKS  = 40;   // band reads allowed while gathering those votes
+const REV_LOCK_VOTES = 2;    // two agreeing attempts lock it
+// ...OR one attempt that is unmistakable. The shape matcher reports how far
+// ahead the winning letter is, and a glyph this clean is not a coin toss - it
+// is a good photograph of an unambiguous letter. Demanding a second opinion on
+// it just costs half a second for nothing.
+const REV_SURE_SCORE  = 0.78;
+const REV_SURE_MARGIN = 0.14;
+const REV_MAX_LOOKS  = 4;    // looks allowed to get those attempts (blur costs nothing)
 
 // (REV_WHITELIST is declared up with BAND_CFG - the band workers are
 //  configured with it at creation, which happens earlier in the file.)
@@ -3814,6 +4224,7 @@ let revVotes = {};
 let revTries = 0;     // votes collected (a blank read does not count)
 let revLooks = 0;     // band reads attempted
 let revVoteTimer = null;
+let lastRevShape = null;   // what the shape matcher last saw, for the dev panel
 
 const rbCv = document.createElement('canvas');
 const rbCtx = rbCv.getContext('2d', {willReadFrequently:true});
@@ -3957,33 +4368,16 @@ async function revTick(){
       // and disagreement is not noise here, it is the rule that stops a
       // half-lit glyph being voted on at all.
       let bw = null;
-      // The second view is the LOCAL threshold. On an evenly lit label the two
-      // views agree; under glare the local one is the only one that still has a
-      // letter in it, so the agreement rule turns a glared frame into silence
-      // rather than a wrong letter.
-      // v8.8 also fixes a call to binariseAdaptive() - a function that does not
-      // exist. It threw a ReferenceError on every single look, the catch
-      // swallowed it, and the revision has been reading from the plain global
-      // threshold ever since without anything saying so.
-      try{ bw = adaptiveBinarise(band, 0.30, 10); }
-      catch(_){ try{ bw = binarise(band); }catch(_2){} }
-
-      let rawA = '', rawB = '';
-      if(bw){
-        // Both views at once when a second worker exists; one after the other
-        // when it does not. Either way the rule below is identical - this is
-        // purely how long the look takes.
-        const w2 = await getBandWorker('rev2');
-        if(w2){
-          const both = await Promise.all([readBand('rev', band), readBand('rev2', bw)]);
-          rawA = both[0]; rawB = both[1];
-        } else {
-          rawA = await readBand('rev', band);
-          rawB = await readBand('rev', bw);
-        }
-      } else {
-        rawA = await readBand('rev', band);
-      }
+      // VIEW ONE: the engine, reading the band as text.
+      // VIEW TWO: the shape matcher, comparing the letter against Arial A-E.
+      // Two genuinely different ways of looking - one reads, one measures - so
+      // when they agree it is real corroboration and not the same mistake made
+      // twice. The shape matcher costs well under a millisecond, so this view
+      // is effectively free and the look is now as fast as a single read.
+      const rawA = await readBand('rev', band);
+      const shape = readRevByShape(band);
+      revLooks++;
+      lastRevShape = shape;
 
       // ONE VALID READING BETWEEN THE TWO VIEWS IS ENOUGH  -  v8.2
       // With only five letters possible, a view that comes back R or V or G has
@@ -3997,10 +4391,9 @@ async function revTick(){
       // This is what makes B-read-as-R stop costing anything: the wrong answer
       // is not in the vocabulary, so it cannot compete with the right one.
       const seenNow = [];
-      [extractRev(rawA), bw ? extractRev(rawB) : ''].forEach(function(c){
+      [extractRev(rawA), shape.letter].forEach(function(c){
         if(c && seenNow.indexOf(c) < 0) seenNow.push(c);
       });
-      revLooks++;
 
       const rv = (seenNow.length === 1) ? seenNow[0] : '';
 
@@ -4008,6 +4401,19 @@ async function revTick(){
       if(rv){
         revVotes[rv] = (revVotes[rv]||0) + 1;
         revTries++;
+
+        // ONE UNMISTAKABLE LOOK IS ENOUGH. The shape matched cleanly, it beat
+        // every other letter by a wide margin, and the engine did not contradict
+        // it. Nothing a second look could add.
+        if(shape.letter === rv && shape.score >= REV_SURE_SCORE
+           && shape.margin >= REV_SURE_MARGIN){
+          put('Rev', rv, 'ocr', null, 0);
+          lock('Rev','ocr');
+          stopRevVoting();
+          showProgress();
+          evaluate();
+          return;
+        }
       }
 
       let best='', bestN=0;
@@ -4234,11 +4640,167 @@ setInterval(function(){
   // reading the moment it lands, instead of waiting for the material or the
   // charge to arrive first. On the EQ label the charge comes from text and
   // takes seconds; the revision no longer waits behind it.
-  if(!revVoteRunning && !heldField('Rev')
+  if(!revVoteRunning && !heldField('Rev') && !isPurchasedPart(heldVal('Mat'))
      && revTries < REV_MAX_TRIES && revLooks < REV_MAX_LOOKS
      && isWae() && (heldField('CH-Nr') || heldField('Mat') || heldField('Char')))
     startRevVoting();
 }, 600);
+
+
+// ============================================================================
+//  THE DEVELOPER PANEL  -  v9.0
+//  ---------------------------------------------------------------------------
+//  Long-press the version chip in the header. Nothing on screen advertises it,
+//  so a worker will not find it by accident and never needs to.
+//
+//  It answers the question Adriele asked: exactly what happened to that
+//  barcode? It shows the decode, every rule it was tested against, which one
+//  claimed it, where it was filed, what the master list said - and the whole
+//  state of the label being read. When something fails on the floor, this is
+//  the difference between a fix and a guess.
+//
+//  It reads state, it never changes it.
+// ============================================================================
+const devPanel = document.getElementById('devPanel');
+const devBody  = document.getElementById('devBody');
+const devClose = document.getElementById('devClose');
+
+// Walk the barcode rules exactly as applyBarcodes does, but decide nothing.
+function explainCode(v){
+  const s = String(v||'').trim();
+  if(!s) return [];
+  const wae = waeSignal([]);
+  const tests = [
+    ['CH- charge',        /^CH-?\d+$/i,                       'Char + CH-Nr'],
+    ['EQ- equipment',     /^EQ-?\d+$/i,                       'CH-Nr only (charge is in the text)'],
+    ['digits . digits',   /^\d{3,6}\.\d{2,6}$/,               'Material'],
+    ['exactly 10 digits', /^\d{10}$/,                         'L-Char'],
+    ['letters + digits',  /^[A-Z]{1,2}\d{4,}[A-Z0-9-]{0,6}$/i, 'Material'],
+    ['bare 6-7 digits',   /^\d{6,7}$/,                        null]
+  ];
+  const out = [];
+  let claimed = false;
+  for(let i=0;i<tests.length;i++){
+    const hit = tests[i][1].test(s);
+    let what = tests[i][2];
+    if(hit && tests[i][0] === 'bare 6-7 digits'){
+      what = wae ? 'Material (label is WAE)'
+           : (MASTER && matIndex.has(normId(s))) ? 'Material (in the master list)'
+           : (session.family === 'MSL') ? 'Char / batch (label is MSL)'
+           : MASTER ? 'PARKED - waiting to learn which label this is'
+                    : 'not filed - no master list loaded';
+    }
+    out.push((hit && !claimed ? '  <span class="yes">MATCHED</span>  ' : '  <span class="arrow">.......</span>  ')
+             + tests[i][0] + (hit && !claimed ? '   \u2192  ' + what : ''));
+    if(hit) claimed = true;
+  }
+  if(!claimed) out.push('  <span class="no">NO RULE MATCHED</span> \u2014 shown on screen, not filed');
+  return out;
+}
+
+function devRender(){
+  const esc = function(x){ return String(x===undefined||x===null?'':x).replace(/</g,'&lt;'); };
+  let h = '';
+
+  h += '<h3>this build</h3><pre>' + VERSION
+     + '\nmaster list   ' + (MASTER ? matIndex.size + ' materials' : 'NOT LOADED')
+     + '\nrevisions     ' + REV_LETTERS + '   (' + REV_LOCK_VOTES + ' agreeing to lock)'
+     + '\nbarcode loop  ' + barcodeLoopGap() + ' ms'
+     + '\nreaders       ' + Object.keys(bandWorkers).join(', ')
+     + (bandPoolOk ? '' : '  (extra workers unavailable, sharing one)') + '</pre>';
+
+  h += '<h3>last barcode</h3><pre>' + (lastRaw ? esc(lastRaw) : '(nothing decoded yet)');
+  if(lastRaw){
+    const val = String(lastRaw).split('  [')[0].split('  |')[0].trim();
+    h += '\n\nrules, in the order they are tried:\n' + explainCode(val).join('\n');
+    if(MASTER && val){
+      const r = resolveMat(val);
+      h += '\n\nmaster list  \u2192  ' + r.tier.toUpperCase()
+         + (r.value ? '  as ' + esc(r.value) : '')
+         + (r.original ? '   (read as ' + esc(r.original) + ')' : '');
+    }
+  }
+  h += '</pre>';
+
+  h += '<h3>this label</h3><pre>';
+  h += 'family        ' + (session.family || '(not identified yet)') + '\n';
+  h += 'codes seen    ' + (Object.keys(session.codes||{}).join(', ') || '(none)') + '\n';
+  h += 'parked        ' + (session.pendingBare ? session.pendingBare.value : '(nothing)') + '\n';
+  h += 'stray label   ' + (session.stray ? session.stray.field + ' ' + esc(session.stray.other) : 'no') + '\n';
+  KEY_COLS.concat(['CH-Nr','L-Char','Auftr']).forEach(function(c){
+    const f = heldField(c);
+    h += (c + '            ').slice(0,14)
+       + (f ? esc(f.value) + '   from ' + f.src + (isLocked(c) ? '  [locked]' : '') : '\u2014') + '\n';
+  });
+  h += '</pre>';
+
+  h += '<h3>material - what the vocabulary thinks</h3><pre>';
+  const sl = materialShortlist(5);
+  if(!sl.length) h += '(no candidates yet)';
+  else sl.forEach(function(m){
+    h += (m + '                ').slice(0,16) + (matCand[m]||0).toFixed(2)
+       + (matCand[m] >= MAT_CAND_LOCK ? '   \u2190 enough to settle' : '') + '\n';
+  });
+  h += '\ntries ' + matTries + '/' + MAT_MAX_TRIES
+     + '   still photo ' + (matDeepFired ? 'used' : 'not used') + '</pre>';
+
+  h += '<h3>revision</h3><pre>';
+  h += 'votes         ' + (JSON.stringify(revVotes) === '{}' ? '(none)' : JSON.stringify(revVotes)) + '\n';
+  h += 'looks/votes   ' + revLooks + '/' + REV_MAX_LOOKS + '  \u00b7  ' + revTries + '/' + REV_MAX_TRIES + '\n';
+  if(lastRevShape){
+    h += 'shape match   ' + (lastRevShape.letter || '(refused)')
+       + '   score ' + (lastRevShape.score||0).toFixed(2)
+       + '   margin ' + (lastRevShape.margin||0).toFixed(2)
+       + '\n              ' + lastRevShape.why + '\n';
+  }
+  h += '</pre>';
+
+  const q = metricSummary();
+  h += '<h3>how it has been going</h3><pre>';
+  h += 'labels        ' + q.labels + '   added ' + q.added + '   rejected ' + q.rejected + '\n';
+  h += 'hands-free    ' + q.handsFreePct + '%\n';
+  h += 'median time   ' + q.medianSec + ' s\n';
+  h += 'corrected     Mat ' + q.editsPer.Mat + '  Char ' + q.editsPer.Char
+     + '  Rev ' + q.editsPer.Rev + '  SerNr ' + q.editsPer.SerNr + '\n';
+  h += 'no revision   ' + q.revGaveUp + '\n';
+  h += 'still photos  ' + q.stillPhotos + '   strays ' + q.strays + '</pre>';
+
+  h += '<h3>last text the reader saw</h3><pre>'
+     + (lastOcrText ? esc(lastOcrText).slice(0,600) : '(nothing)') + '</pre>';
+
+  devBody.innerHTML = h;
+}
+
+// long-press, so it cannot be opened by a stray tap
+(function(){
+  const ver = document.getElementById('ver');
+  let timer = null;
+  const start = function(){ timer = setTimeout(function(){
+    devRender(); devPanel.classList.add('show');
+  }, 700); };
+  const stop = function(){ clearTimeout(timer); };
+  ver.addEventListener('touchstart', start, {passive:true});
+  ver.addEventListener('mousedown', start);
+  ['touchend','touchcancel','touchmove','mouseup','mouseleave'].forEach(function(e){
+    ver.addEventListener(e, stop);
+  });
+})();
+devClose.addEventListener('click', function(){ devPanel.classList.remove('show'); });
+
+// ============================================================================
+//  OFFLINE LIBRARIES  -  v9.0
+//  The service worker keeps ONLY the three pinned CDN libraries (~20 MB) so the
+//  second start is instant and works with no signal. It deliberately never
+//  caches this page, so a new version is always picked up. See sw.js.
+//  Registration is best-effort: if it fails the app behaves exactly as before.
+// ============================================================================
+if('serviceWorker' in navigator && secureContextOk()){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').catch(function(e){
+      console.warn('offline cache unavailable:', e);
+    });
+  });
+}
 
 renderTable();
 loadMaster();
