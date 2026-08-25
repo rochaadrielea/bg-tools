@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v10.1';
+const VERSION = 'v10.2';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -1573,6 +1573,48 @@ setInterval(function(){
 const RET_INSET_X = 0.08, RET_INSET_Y = 0.14;   // must match .reticle CSS inset
 let retCache = null;
 
+// ============================================================================
+//  BARCODES ARE SEARCHED FOR IN THE WHOLE PICTURE  -  v10.2
+//  ---------------------------------------------------------------------------
+//  Adriele: "why is it taking so long to read the material - it was supposed to
+//  read the barcode in this case, no?" It was. Her photo shows the material
+//  barcode sitting plainly in view while the tool ground away at OCR.
+//
+//  Every barcode search ran on the RETICLE CROP - inset 8% across and 14% down.
+//  On a WAE label the material barcode is at the very top-left, so as soon as
+//  the label filled the frame that barcode fell outside the crop and could
+//  never be decoded. MOVING CLOSER PUSHED IT FURTHER OUT, which is why getting
+//  nearer made it worse rather than better.
+//
+//  The reticle exists to aim the OCR bands, which genuinely need a tight
+//  target. A barcode needs no such help: it carries its own checksum, so a
+//  successful decode is self-proving wherever it happens to be. Searching the
+//  whole picture cannot produce a wrong answer, only an earlier one.
+//
+//  Boxes come back in full-frame coordinates and are converted to crop-relative
+//  ones here, so every band that measures itself from a barcode keeps working
+//  unchanged - and a barcode found OUTSIDE the crop still reports a sensible
+//  (negative, or over-wide) offset rather than silently landing at zero.
+// ============================================================================
+function drawFull(scale, enhance){
+  if(!vid.videoWidth) return null;
+  const k = scale || 1;
+  const w = Math.round(vid.videoWidth * k), h = Math.round(vid.videoHeight * k);
+  if(fullCv.width !== w || fullCv.height !== h){ fullCv.width = w; fullCv.height = h; }
+  fullCtx.filter = enhance ? 'grayscale(1) contrast(1.5)' : 'none';
+  fullCtx.drawImage(vid, 0, 0, vid.videoWidth, vid.videoHeight, 0, 0, w, h);
+  return fullCv;
+}
+
+// full-frame box -> crop-relative box, so everything downstream is untouched
+function boxToCrop(box, scale){
+  const r = reticleRect();
+  if(!box || !r) return box;
+  const k = scale || 1;
+  return {x: box.x/k - r.x, y: box.y/k - r.y,
+          width: box.width/k, height: box.height/k};
+}
+
 function reticleRect(){
   const vw=vid.videoWidth, vh=vid.videoHeight, W=vid.clientWidth, H=vid.clientHeight;
   if(!vw || !vh || !W || !H) return null;
@@ -1592,10 +1634,64 @@ window.addEventListener('orientationchange', function(){ retCache=null; });
 const cropCv = document.createElement('canvas');
 const cropCtx = cropCv.getContext('2d');
 
-function drawCrop(scale, grey){
+// ============================================================================
+//  LOOK OUTSIDE THE BOX FOR A BARCODE THAT WILL NOT DECODE  -  v10.2
+//  ---------------------------------------------------------------------------
+//  Adriele: "it was supposed to read the barcode in this case, no?" - and it
+//  was. Her screenshot shows the material barcode (Q531419781) clipped by the
+//  TOP EDGE of the aim box, and every barcode pass draws only from
+//  reticleRect(). Half a barcode never decodes, however long you hold it there
+//  and however well the camera focuses - so the tool fell back to OCR and spent
+//  the whole time guessing Q531419771? and Q531419783? at a number that was
+//  printed as a perfectly good barcode two centimetres away.
+//
+//  So when the MATERIAL is still missing, alternate frames widen the search to
+//  most of the picture. It costs one pass in two and only while something is
+//  actually missing; the moment the material lands it goes back to the box.
+//  The box is still the right default - it is what stops a neighbouring label
+//  being read - but it must not be a wall when the thing we need is on the edge.
+// ============================================================================
+const WIDEN = 0.55;             // how far outside the box to reach, as a fraction
+let wideTurn = false;
+
+function shouldWiden(){
+  return !heldField('Mat') && !scanBusy;
+}
+
+function scanRect(){
   const r = reticleRect();
+  if(!r) return null;
+  if(!shouldWiden()) return r;
+  wideTurn = !wideTurn;
+  if(!wideTurn) return r;         // every other frame stays tight
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  const gx = r.w * WIDEN / 2, gy = r.h * WIDEN / 2;
+  const x = Math.max(0, r.x - gx), y = Math.max(0, r.y - gy);
+  return {x:x, y:y,
+          w: Math.min(vw - x, r.w + gx*2),
+          h: Math.min(vh - y, r.h + gy*2)};
+}
+
+// The rectangle the last crop was actually taken from, and how far it sits
+// from the aim box. Every barcode position that comes back is measured against
+// the crop, and the reading bands are measured against the AIM BOX - so on a
+// widened frame the two disagree by exactly this offset. Without correcting it
+// a widened decode would push every band up and to the left, and the material
+// reader would end up looking at the wrong part of the label. This is the one
+// thing that could have made a helpful change quietly harmful.
+let lastCrop = null;
+
+function cropOffset(){
+  const r = reticleRect();
+  if(!lastCrop || !r) return {dx:0, dy:0, k:1};
+  return {dx: lastCrop.x - r.x, dy: lastCrop.y - r.y, k: lastCrop.k || 1};
+}
+
+function drawCrop(scale, grey){
+  const r = scanRect();
   if(!r || r.w < 8 || r.h < 8) return null;
   const s = scale || 1;
+  lastCrop = {x:r.x, y:r.y, w:r.w, h:r.h, k:s};
   const w = Math.round(r.w*s), h = Math.round(r.h*s);
   if(cropCv.width!==w || cropCv.height!==h){ cropCv.width=w; cropCv.height=h; }
   cropCtx.filter = grey ? 'grayscale(1) contrast(1.3)' : 'none';
@@ -1836,10 +1932,14 @@ async function nativeLoop(){
   let fails = 0;
   while(scanning){
     try{
-      let cv = scanBusy ? null : drawCrop(1,false);
+      // v10.2: the NATIVE detector reads the WHOLE PICTURE. It is hardware
+      // accelerated, so a full frame costs it no more than a crop, and it is
+      // the only way the material barcode at the top-left corner of a WAE label
+      // ever gets seen once the label fills the view.
+      let cv = scanBusy ? null : drawFull(1,false);
       if(cv){
         let codes = await nativeDetector.detect(cv);
-        let boxScale = 1;
+        let boxScale = 1, fullFrame = true;
         fails = 0;
         // HUNTING: a code has been seen but the MATERIAL is still missing. The
         // material barcode is the denser of the two on a WAE label - in the
@@ -1852,14 +1952,16 @@ async function nativeLoop(){
         const hunting = !heldField('Mat') && !session.pendingBare
                      && Object.keys(session.codes||{}).length > 0;
         if((!codes || !codes.length) && (hunting || (++enhanceTick % ENHANCE_EVERY === 0))){
-          const k = hunting ? 3 : 2;
-          const en = drawCrop(k,true);
           // The enhanced crop is drawn magnified, so every box the detector
-          // returns is in magnified pixels. LATENT BUG FOUND v7.2: those boxes
-          // were handed on unscaled, so boxesCohere() compared a 2x box against
-          // a 1x one and the revision band would have been aimed at twice its
-          // distance. Bring them back to crop pixels before anything uses them.
-          if(en){ codes = await nativeDetector.detect(en); boxScale = k; }
+          // returns is in magnified pixels - they are brought back to crop
+          // pixels below before anything uses them (latent bug found in v7.2).
+          // v10.2: this magnified fallback stays on the CROP. Magnifying the
+          // whole frame would be several times the pixels for no extra reach -
+          // the full-frame pass above has already covered the reach problem,
+          // and this pass is about resolution, not area.
+          const k = hunting ? 3 : 2;
+          const enc = drawCrop(k,true);
+          if(enc){ codes = await nativeDetector.detect(enc); boxScale = k; fullFrame = false; }
         }
         if(codes && codes.length){
           frameTick++;
@@ -1867,9 +1969,11 @@ async function nativeLoop(){
                   + (codes[0].format ? '  ['+codes[0].format+']' : '');
           onCodes(codes.map(function(c){
             let b = c.boundingBox || null;
-            if(b && boxScale !== 1){
-              b = {x:b.x/boxScale, y:b.y/boxScale,
-                   width:b.width/boxScale, height:b.height/boxScale};
+            if(b){
+              b = fullFrame ? boxToCrop(b, boxScale)
+                            : (boxScale === 1 ? b
+                               : {x:b.x/boxScale, y:b.y/boxScale,
+                                  width:b.width/boxScale, height:b.height/boxScale});
             }
             return {value:(c.rawValue||'').trim(), box:b};
           }), frameTick);
@@ -1890,6 +1994,16 @@ async function nativeLoop(){
   }
 }
 
+// Any box from a decoder is in CROP pixels. toAimBox converts it to the aim
+// box's own coordinates - undoing the magnification of an enhanced pass and
+// the offset of a widened one - which is what the reading bands expect.
+function toAimBox(b){
+  if(!b) return null;
+  const o = cropOffset(), k = o.k || 1;
+  return {x: b.x/k + o.dx, y: b.y/k + o.dy,
+          width: b.width/k, height: b.height/k};
+}
+
 function pointsToBox(pts){
   if(!pts || !pts.length) return null;
   let x1=Infinity,y1=Infinity,x2=-Infinity,y2=-Infinity;
@@ -1899,7 +2013,7 @@ function pointsToBox(pts){
     if(x<x1)x1=x; if(y<y1)y1=y; if(x>x2)x2=x; if(y>y2)y2=y;
   }
   if(!isFinite(x1)) return null;
-  return {x:x1, y:y1, width:Math.max(1,x2-x1), height:Math.max(1,y2-y1)};
+  return toAimBox({x:x1, y:y1, width:Math.max(1,x2-x1), height:Math.max(1,y2-y1)});
 }
 
 function startZxing(){
@@ -1931,6 +2045,18 @@ async function zxingCropLoop(){
       // BarcodeDetector the dense material barcode got exactly one attempt per
       // frame at native size and nothing else. It now gets the same magnified
       // second look the fast path gets.
+      let fullFrame = false;
+      // v10.2: THE WHOLE PICTURE, when the material is still missing. ZXing is
+      // pure JavaScript so a full frame genuinely costs more than a crop - it
+      // is therefore only tried while the material is outstanding, which is the
+      // one situation where the barcode is probably sitting just outside the
+      // aim box. Once the material is in hand this never runs.
+      if(!read && !heldField('Mat')){
+        const fu = drawFull(1,false);
+        if(fu){
+          try{ read = codeReader.decodeFromCanvas(fu); fullFrame = !!read; }catch(_){}
+        }
+      }
       if(!read){
         // the expensive magnified pass is only for finding a material that has
         // not decoded yet - never once it is in hand
@@ -1943,7 +2069,8 @@ async function zxingCropLoop(){
       }
       if(read && read.getText){
         frameTick++;
-        const bx = pointsToBox(read.getResultPoints && read.getResultPoints());
+        let bx = pointsToBox(read.getResultPoints && read.getResultPoints());
+        if(bx && fullFrame) bx = boxToCrop(bx, 1);
         lastRaw = read.getText().trim()
                 + (read.getBarcodeFormat ? '  ['+read.getBarcodeFormat()+']' : '');
         onCodes([{value:read.getText().trim(), box:bx}], frameTick);
@@ -3613,7 +3740,7 @@ async function decodeLadder(base){
           const codes = await nativeDetector.detect(cv);
           if(codes && codes.length){
             return {codes:codes.map(function(c){
-              return {value:(c.rawValue||'').trim(), box:c.boundingBox||null,
+              return {value:(c.rawValue||'').trim(), box:toAimBox(c.boundingBox)||null,
                       format:c.format||''};
             }), how:variants[v][0]+(deg?' rotated '+deg:'')};
           }
@@ -4585,6 +4712,8 @@ let matVoteTimer = null;
 let matVoteText = [];
 let matDeepFired = false;
 
+const fullCv = document.createElement('canvas');
+const fullCtx = fullCv.getContext('2d', {willReadFrequently:true});
 const mbCv = document.createElement('canvas');
 const mbCtx = mbCv.getContext('2d', {willReadFrequently:true});
 
@@ -4611,6 +4740,20 @@ const mbCtx = mbCv.getContext('2d', {willReadFrequently:true});
 // "where are you looking?" - and so the alvo pointed at the middle of the frame
 // while the reader looked at the left-hand side, and the operator lined the
 // label up against a cross that meant nothing.
+// Keep a band inside the picture and big enough to read. v10.2: needed the
+// moment barcodes started being found OUTSIDE the aim box - a box to the left
+// of the reticle gives a NEGATIVE width, the band was rejected as too small,
+// and the reader went silent exactly when the operator had finally got the
+// barcode in view. Clamping keeps a usable band instead of none.
+function clampBand(sx, sy, sw, sh, r, fallback){
+  const x0 = Math.max(r.x, Math.min(sx, r.x + r.w - 20));
+  const y0 = Math.max(r.y, Math.min(sy, r.y + r.h - 8));
+  let w = Math.min(sw, r.x + r.w - x0);
+  let h = Math.min(sh, r.y + r.h - y0);
+  if(!(w > 20) || !(h > 8)) return fallback ? fallback() : null;
+  return {x:x0, y:y0, w:w, h:h};
+}
+
 function materialBandRect(){
   const r = reticleRect();
   if(!r || !vid.videoWidth) return null;
@@ -4630,8 +4773,10 @@ function materialBandRect(){
     sy = r.y + r.h * 0.15;
     sh = r.h * 0.42;
   }
-  if(sw < 20 || sh < 8) return null;
-  return {x:sx, y:sy, w:sw, h:sh};
+  return clampBand(sx, sy, sw, sh, r, function(){
+    // the barcode is out of the picture entirely: cover the middle of the box
+    return {x:r.x, y:r.y + r.h*0.15, w:r.w, h:r.h*0.42};
+  });
 }
 
 function grabMaterialBand(){
@@ -5203,8 +5348,9 @@ function chargeBandRect(){
     sw = r.w * 0.70;
     sh = r.h * 0.34;
   }
-  if(sw < 20 || sh < 8) return null;
-  return {x:sx, y:sy, w:sw, h:sh};
+  return clampBand(sx, sy, sw, sh, r, function(){
+    return {x:r.x, y:r.y + r.h*0.52, w:r.w*0.70, h:r.h*0.34};
+  });
 }
 
 function grabChargeBand(){
