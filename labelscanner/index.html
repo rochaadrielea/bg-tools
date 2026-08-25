@@ -390,7 +390,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v9.4';
+const VERSION = 'v9.5';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -590,8 +590,12 @@ function clearFound(){ if(foundLayer) foundLayer.innerHTML = ''; }
 // white / amber / green - readable from across the bench, no text needed
 function paintAim(){
   if(!alvoEl || !reticle) return;
+  // Green means "the camera has done everything it can". With the reader off
+  // the revision is not the camera's job, so waiting for it would leave the
+  // frame amber on every good label and the colour would stop meaning anything.
   const haveAll = MANDATORY.every(function(c){ return !!heldVal(c); })
-               && (!isWae() || !!heldVal('Rev') || isPurchasedPart(heldVal('Mat')));
+               && (!REV_AUTOREAD || !isWae() || !!heldVal('Rev')
+                   || isPurchasedPart(heldVal('Mat')));
   const haveSome = KEY_COLS.some(function(c){ return !!heldVal(c); });
   const state = haveAll ? 'ready' : (haveSome ? 'hold' : '');
   alvoEl.className = 'alvo' + (state ? ' ' + state : '');
@@ -2211,7 +2215,9 @@ function evaluate(){
   // optional-but-wanted fields their chance: on a WAE label the Revision is
   // printed, not encoded, so it needs its own read. The voting loops below
   // call evaluate() again when they finish or give up.
-  if(isWae() && !heldField('Rev') && !isPurchasedPart(heldVal('Mat')) && scanning
+  // With the reader off this is skipped entirely, so a WAE label goes straight
+  // to the strip the moment material and charge are in - buttons already there.
+  if(REV_AUTOREAD && isWae() && !heldField('Rev') && !isPurchasedPart(heldVal('Mat')) && scanning
      && revTries < REV_MAX_TRIES && revLooks < REV_MAX_LOOKS){
     startRevVoting();
     setStatus('Reading the revision\u2026 (' + revTries + '/' + REV_MAX_TRIES + ' votes)','busy');
@@ -2354,7 +2360,7 @@ function openConfirm(proof){
       const o = revOptions();
       html += '<div class="crowf"><div class="k">' + CONFIRM_LABELS.Rev + '</div>'
             + '<div class="revpickinline">'
-            + '<div class="rp-hint">read it off the label and tap it'
+            + '<div class="rp-hint">Revision \u2014 read it off the label and tap it'
             + (o.voted ? '  \u00b7  ' + (o.voted>1?'the first '+o.voted+' are':'the first is')
                        + ' what the camera saw' : '') + '</div>'
             + '<div class="rp-grid">'
@@ -3975,7 +3981,7 @@ function openReview(proof){
         + (cur
             ? '<div class="revpicked">' + (cur===REV_NONE ? 'no revision' : cur)
               + '<span class="chg" data-revchange="1">change</span></div>'
-            : '<div class="rp-hint">read it off the label and tap it</div>'
+            : '<div class="rp-hint">Revision \u2014 read it off the label and tap it</div>'
               + '<div class="rp-grid">'
               + REV_LETTERS.split('').map(function(L){
                   return '<button data-rev="'+L+'">'+L+'</button>'; }).join('')
@@ -4418,9 +4424,27 @@ const REV_POLL_MS    = 150;
 // so either it is confident on the first proper look or a human should just
 // tap the letter. Waiting longer does not make a doubtful glyph clearer - it
 // only makes the operator wait.
-// v9.4: ONE. Adriele: "the revision is taking too long." Tapping a letter is
-// instant and the buttons are always in the Revision row now, so a second
-// reading buys almost nothing and costs half a second on every label.
+// ============================================================================
+//  THE REVISION IS THE OPERATOR'S, FOR NOW  -  v9.5
+//  ---------------------------------------------------------------------------
+//  Adriele: "revision will be only with button, it is taking too long. Do not
+//  erase what we did about revision, leave it, we can revisit - but for now
+//  only with the button by the user."
+//
+//  The READER IS OFF and NOTHING WAS DELETED. The shape matcher, the Arial
+//  templates, the two-view rule, the band geometry, the vocabulary - all still
+//  here, still tested, unchanged. This one flag decides whether it ever runs.
+//
+//  A flag rather than a deletion because the work is sound; what beat it is
+//  economics, not correctness. Reading costs a few hundred milliseconds and is
+//  sometimes unsure. A tap costs one touch and is never unsure, because the
+//  person is holding the label. When the reader can beat a thumb, set this back
+//  to true and all of it wakes up.
+//
+//  With it off: material and charge are captured, the strip opens at once, and
+//  the six letters are already on screen waiting. No reading pause at all.
+const REV_AUTOREAD = false;
+
 const REV_MAX_TRIES  = 1;    // attempts that actually produced a letter
 // THREE agreeing, not four. Four was the right number when the answer could be
 // any of 26 letters and nothing vouched for it. With a five-letter vocabulary
@@ -4679,6 +4703,8 @@ async function revTick(){
 }
 
 function startRevVoting(){
+  // v9.5: off by default - see REV_AUTOREAD. One line brings the reader back.
+  if(!REV_AUTOREAD) return;
   if(revVoteRunning) return;
   revVoteRunning = true;
   // tallies and counters are cleared per LABEL in resetSession(), not here -
@@ -4869,7 +4895,7 @@ setInterval(function(){
   // reading the moment it lands, instead of waiting for the material or the
   // charge to arrive first. On the EQ label the charge comes from text and
   // takes seconds; the revision no longer waits behind it.
-  if(!revVoteRunning && !heldField('Rev') && !isPurchasedPart(heldVal('Mat'))
+  if(REV_AUTOREAD && !revVoteRunning && !heldField('Rev') && !isPurchasedPart(heldVal('Mat'))
      && revTries < REV_MAX_TRIES && revLooks < REV_MAX_LOOKS
      && isWae() && (heldField('CH-Nr') || heldField('Mat') || heldField('Char')))
     startRevVoting();
