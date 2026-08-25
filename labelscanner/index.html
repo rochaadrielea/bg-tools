@@ -58,7 +58,10 @@
   .alvo i.tr{top:-2px;right:-2px;border-left:0;border-bottom:0;border-radius:0 10px 0 0;}
   .alvo i.bl{bottom:-2px;left:-2px;border-right:0;border-top:0;border-radius:0 0 0 10px;}
   .alvo i.br{bottom:-2px;right:-2px;border-left:0;border-top:0;border-radius:0 0 10px 0;}
-  .alvo b{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;opacity:.5;transition:opacity .25s;}
+  /* v9.8: the cross MOVES to wherever the material is being read, instead of
+     sitting uselessly at the middle of the frame. */
+  .alvo b{position:absolute;left:50%;top:50%;width:38px;height:38px;margin:-19px 0 0 -19px;
+    opacity:.55;transition:opacity .25s,left .18s,top .18s;}
   .alvo b:before,.alvo b:after{content:'';position:absolute;background:var(--signal);}
   .alvo b:before{left:50%;top:0;width:1.5px;height:100%;margin-left:-.75px;}
   .alvo b:after{top:50%;left:0;height:1.5px;width:100%;margin-top:-.75px;}
@@ -69,6 +72,19 @@
   .reticle.ready{box-shadow:0 0 0 100vmax rgba(0,0,0,.32),0 0 22px rgba(0,224,150,.55) inset;}
   /* a box that lands on a barcode the instant it decodes, named - so success
      is something you SEE, not something you read about afterwards */
+  /* WHERE THE MATERIAL IS BEING READ, drawn live. Adriele: "it isn't focused
+     on the material, the alvo isn't going there, and I believe that is why the
+     material takes so long to read." She was right - the reader looks at the
+     left of the label while the cross sat at the centre, so the number was
+     lined up against a mark that meant nothing. Now the operator can see the
+     exact patch being read and put the number inside it. */
+  .matzone{position:absolute;border:2px dashed var(--warn);border-radius:8px;
+    pointer-events:none;opacity:.85;transition:opacity .25s;
+    box-shadow:0 0 0 100vmax rgba(0,0,0,.14);}
+  .matzone span{position:absolute;top:-11px;left:6px;font-family:var(--mono);
+    font-size:10px;font-weight:700;letter-spacing:.5px;color:#241703;
+    background:var(--warn);border-radius:4px;padding:2px 7px;white-space:nowrap;}
+  .matzone.done{opacity:0;}
   .found{position:absolute;border:2.5px solid var(--signal);border-radius:6px;pointer-events:none;
     box-shadow:0 0 12px rgba(0,224,150,.5);animation:foundpop .28s ease-out;}
   .found span{position:absolute;top:-11px;left:-2px;font-family:var(--mono);font-size:10px;
@@ -300,6 +316,7 @@
   <div class="stage">
     <video id="vid" playsinline muted autoplay></video>
     <div class="reticle" id="reticle"></div>
+    <div class="matzone" id="matZone" style="display:none"><span>MATERIAL HERE</span></div>
     <div class="saybar" id="sayBar"></div>
     <div class="alvo" id="alvo"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i><b></b></div>
     <div id="foundLayer" style="position:absolute;inset:0;pointer-events:none"></div>
@@ -413,7 +430,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v9.7';
+const VERSION = 'v9.8';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -624,8 +641,96 @@ function flashFound(box, label){
 }
 function clearFound(){ if(foundLayer) foundLayer.innerHTML = ''; }
 
+// ============================================================================
+//  POINT AT WHAT IS ACTUALLY BEING READ  -  v9.8
+//  ---------------------------------------------------------------------------
+//  Draws the material band on screen and drags the alvo cross onto it, so the
+//  mark the operator lines the number up against is the mark the reader is
+//  looking through. Also asks the camera to focus THERE rather than on whatever
+//  fills the most of the frame - which on a bagged part is the shiny plastic,
+//  not the small print.
+//  Focus by point is not supported everywhere; where it is missing the zone and
+//  the cross still do their job and continuous focus carries on as before.
+// ============================================================================
+const matZone = document.getElementById('matZone');
+let lastFocusAt = 0, lastFocusKey = '';
+
+function videoScale(){
+  if(!vid || !vid.videoWidth || !vid.getBoundingClientRect) return null;
+  if(!matZone || !matZone.parentNode || !matZone.parentNode.getBoundingClientRect) return null;
+  const rect = vid.getBoundingClientRect();
+  const host = matZone.parentNode.getBoundingClientRect();
+  return {kx: rect.width/vid.videoWidth, ky: rect.height/vid.videoHeight,
+          ox: rect.left - host.left, oy: rect.top - host.top,
+          vw: vid.videoWidth, vh: vid.videoHeight};
+}
+
+// The cross, if it is there. Looking it up defensively is not paranoia: the
+// test run caught paintAim() throwing the moment the element was missing, and
+// paintAim runs on every progress update - so one absent node would have taken
+// the whole status line down with it.
+function revCross(){
+  return (alvoEl && alvoEl.querySelector) ? alvoEl.querySelector('b') : null;
+}
+
+function paintMatZone(){
+  if(!matZone) return;
+  const cross = revCross();
+  // once the material is in hand there is nothing left to aim at
+  if(heldVal('Mat') || !scanning || scanBusy){
+    matZone.style.display = 'none';
+    if(cross){ cross.style.left = '50%'; cross.style.top = '50%'; }
+    return;
+  }
+  const rc = materialBandRect(), sc = videoScale();
+  if(!rc || !sc){ matZone.style.display = 'none'; return; }
+
+  matZone.style.display = '';
+  matZone.style.left   = (rc.x * sc.kx + sc.ox) + 'px';
+  matZone.style.top    = (rc.y * sc.ky + sc.oy) + 'px';
+  matZone.style.width  = (rc.w * sc.kx) + 'px';
+  matZone.style.height = (rc.h * sc.ky) + 'px';
+
+  // the cross follows the zone, as a fraction of the alvo box
+  if(cross && alvoEl.getBoundingClientRect){
+    const a = alvoEl.getBoundingClientRect();
+    const host = matZone.parentNode.getBoundingClientRect();
+    const cxPx = (rc.x + rc.w/2) * sc.kx + sc.ox + host.left - a.left;
+    const cyPx = (rc.y + rc.h/2) * sc.ky + sc.oy + host.top  - a.top;
+    if(a.width > 0 && a.height > 0){
+      cross.style.left = Math.max(0, Math.min(100, cxPx*100/a.width))  + '%';
+      cross.style.top  = Math.max(0, Math.min(100, cyPx*100/a.height)) + '%';
+    }
+  }
+
+  focusOnMaterial(rc, sc);
+}
+
+// Ask the camera to focus on the material, not on the bag. Rate-limited and
+// only re-sent when the point has actually moved - hammering applyConstraints
+// makes the picture hunt continuously, which is worse than never asking.
+function focusOnMaterial(rc, sc){
+  if(!track || !track.getCapabilities) return;
+  const now = Date.now();
+  if(now - lastFocusAt < 1500) return;
+  const px = (rc.x + rc.w/2) / sc.vw, py = (rc.y + rc.h/2) / sc.vh;
+  const key = px.toFixed(2) + ',' + py.toFixed(2);
+  if(key === lastFocusKey) return;
+  let caps = null;
+  try{ caps = track.getCapabilities(); }catch(_){ return; }
+  if(!caps || !caps.pointsOfInterest) return;
+  lastFocusAt = now; lastFocusKey = key;
+  try{
+    track.applyConstraints({advanced:[
+      {pointsOfInterest:[{x:px, y:py}]},
+      {focusMode:'continuous'}
+    ]}).catch(function(){});
+  }catch(_){}
+}
+
 // white / amber / green - readable from across the bench, no text needed
 function paintAim(){
+  try{ paintMatZone(); }catch(e){ console.warn('aim overlay', e); }
   if(!alvoEl || !reticle) return;
   // Green means "the camera has done everything it can". With the reader off
   // the revision is not the camera's job, so waiting for it would leave the
@@ -1176,6 +1281,7 @@ function resetSession(reason){
   strayWatch = null;
   clearFound();
   hideSay();
+  lastFocusKey = '';
   const had = Object.keys(session.fields).length;
   session = newSession();
   reticle.classList.remove('partial','reject');
@@ -4322,10 +4428,15 @@ const mbCtx = mbCv.getContext('2d', {willReadFrequently:true});
 // Both offsets are in barcode-units, so the band tracks the label at any
 // distance and any zoom. It deliberately catches the description line too -
 // PSM 6 reads a small block, and a description never looks like a material.
-function grabMaterialBand(){
+// WHERE THE MATERIAL IS READ  -  one function, so the rectangle drawn on screen
+// and the pixels actually sent to the reader can never disagree. v9.8: this used
+// to be buried inside grabMaterialBand, which meant nothing else could ask
+// "where are you looking?" - and so the alvo pointed at the middle of the frame
+// while the reader looked at the left-hand side, and the operator lined the
+// label up against a cross that meant nothing.
+function materialBandRect(){
   const r = reticleRect();
   if(!r || !vid.videoWidth) return null;
-
   let sx, sy, sw, sh;
   const f = heldField('CH-Nr');
   const b = f && f.box;
@@ -4336,14 +4447,20 @@ function grabMaterialBand(){
     sx = r.x;
     sw = Math.min(r.x + r.w, bx) - sx;
   } else {
-    // No barcode box (compatibility reader, or nothing decoded yet). Cover the
-    // whole middle of the box rather than the top - the material is never at
-    // the very top of one of these labels.
+    // No barcode box yet. Cover the middle of the box - the material is never
+    // at the very top of one of these labels.
     sx = r.x;  sw = r.w;
     sy = r.y + r.h * 0.15;
     sh = r.h * 0.42;
   }
   if(sw < 20 || sh < 8) return null;
+  return {x:sx, y:sy, w:sw, h:sh};
+}
+
+function grabMaterialBand(){
+  const rc = materialBandRect();
+  if(!rc) return null;
+  const sx = rc.x, sy = rc.y, sw = rc.w, sh = rc.h;
 
   const k = Math.max(2, Math.min(6, 2400/sw));
   const w = Math.round(sw*k), h = Math.round(sh*k);
