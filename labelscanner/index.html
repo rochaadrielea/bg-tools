@@ -257,6 +257,14 @@
   .revpickinline button.hot{border-color:var(--warn);color:var(--warn);background:#5A431E;}
   .revpickinline button.rp-none{grid-column:1/-1;font-size:15px;font-weight:600;
     height:auto;padding:16px 0;background:transparent;color:#D8B87C;border-style:dashed;}
+  /* v10.0: "this label has no revision" gets its OWN colour. Adriele asked for
+     it and she is right - a dash and a letter are both answers, but to
+     different questions, and down a list of rows they must not look alike.
+     Blue-grey says "accounted for, nothing to see"; amber says "a value was
+     read off the label". */
+  .revpicked.none{background:#1E2A38;color:#8FB4D0;}
+  .revpicked.none .chg{border-color:#3C556E;color:#8FB4D0;}
+  td.rev-none{color:#8FB4D0;}
   .revpicked{grid-column:1/-1;padding:12px;font-family:var(--mono);font-size:17px;
     color:#fff;display:flex;align-items:center;gap:10px;background:#4A3617;}
   .revpicked .chg{margin-left:auto;font-size:13px;color:#D8B87C;
@@ -430,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v9.9';
+const VERSION = 'v10.1';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -444,7 +452,13 @@ const OCR_MAX_PX = 2200;
 const ENHANCE_EVERY = 3;
 const MAT_FIX_DIST = 1;
 
-const COLS = ["Mat","Definition","Rev","SerNr","Char","L-Char","Auftr","Menge","Einheit","Verfallsdatum","CH-Nr"];
+// v10.1: "Equip" added. Adriele: "if there is equipment, let's retrieve that
+// value into a notes column - it isn't crucial information." The EQ number was
+// already being read (it is what tells the tool the charge is printed rather
+// than encoded) but it was only kept in CH-Nr, mixed in with CH- charge codes,
+// so nothing downstream could tell an equipment number from a charge code.
+// Its own column costs nothing and keeps it honest.
+const COLS = ["Mat","Definition","Rev","SerNr","Char","L-Char","Auftr","Menge","Einheit","Verfallsdatum","CH-Nr","Equip"];
 const AUDIT_COLS = ["Source","Proof","Check"];
 const ALL_COLS = COLS.concat(AUDIT_COLS);
 const MANDATORY = ["Mat","Char"];
@@ -673,16 +687,34 @@ function revCross(){
   return (alvoEl && alvoEl.querySelector) ? alvoEl.querySelector('b') : null;
 }
 
+// WHICHEVER FIELD IS STILL MISSING  -  v10.0
+// Adriele: "the alvo only goes to charge, it barely stays in the material",
+// and "when EQ is in the charge, go with the alvo where it reads the charge,
+// down the label."
+// The zone used to be the material band and nothing else, so on an EQ label -
+// where the charge is printed BELOW the barcode and has to be read from the
+// text - it pointed at the wrong half of the label for the entire time the
+// charge was being hunted. It now points at whatever is actually outstanding:
+// the material first, then the charge, and it says which.
+function aimTarget(){
+  if(!heldVal('Mat')) return {rc: materialBandRect(), what:'MATERIAL HERE'};
+  if(!heldVal('Char') && isWae() && heldField('CH-Nr'))
+    return {rc: chargeBandRect(), what:'CHARGE HERE'};
+  return null;
+}
+
 function paintMatZone(){
   if(!matZone) return;
   const cross = revCross();
-  // once the material is in hand there is nothing left to aim at
-  if(heldVal('Mat') || !scanning || scanBusy){
+  const target = (!scanning || scanBusy) ? null : aimTarget();
+  if(!target || !target.rc){
     matZone.style.display = 'none';
     if(cross){ cross.style.left = '50%'; cross.style.top = '50%'; }
     return;
   }
-  const rc = materialBandRect(), sc = videoScale();
+  const label = matZone.querySelector ? matZone.querySelector('span') : null;
+  if(label) label.textContent = target.what;
+  const rc = target.rc, sc = videoScale();
   if(!rc || !sc){ matZone.style.display = 'none'; return; }
 
   matZone.style.display = '';
@@ -1500,9 +1532,15 @@ setInterval(function(){
   // as a last resort for a label that names itself as neither.
   const pb = session.pendingBare;
   if(pb && !review.classList.contains('show') && !confirmBar.classList.contains('show')){
+    // v10.0: only a SIX-digit code can be parked now, and six digits is a
+    // charge or a batch on every label family - the WAE charge (879489), the
+    // MSL batch (876923). The old branch here filed a parked code as the
+    // MATERIAL as soon as the label looked like WAE, which made sense when six
+    // and seven digits shared one rule and is simply wrong now.
+    // A genuine six-digit material is caught earlier, by the master list.
     if(waeSignal([])){
       session.pendingBare = null;
-      put('Mat', pb.value, 'bc', pb.box, pb.tick);
+      put('Char', pb.value, 'bc', pb.box, pb.tick);
       evaluate();
     } else if(session.family === 'MSL'){
       session.pendingBare = null;
@@ -1510,6 +1548,10 @@ setInterval(function(){
       setStatus('MSL label \u2014 batch ' + pb.value + ', reading the material','busy');
       evaluate();
     } else if(Date.now() - pb.t > BARE_PARK_MS){
+      // v10.0: only a SIX-digit number can still be parked, and six digits is a
+      // charge on every label family seen so far - so this fallback is no
+      // longer a guess between two very different things. A seven-digit
+      // material is filed as a material immediately and never reaches here.
       session.pendingBare = null;
       put('Char', pb.value, 'bc', pb.box, pb.tick);
       evaluate();
@@ -2060,15 +2102,37 @@ function waeSignal(codes){
 //  BARCODE RULES
 //  Order matters and is deliberate: most specific first.
 // ============================================================================
+// ============================================================================
+//  THE MATERIAL IS ON THE LEFT  -  v10.0
+//  ---------------------------------------------------------------------------
+//  Adriele: "in WAE the charge is ALWAYS on the right, the material on the left."
+//
+//  That fact decides in ONE FRAME what the old code needed a second barcode, a
+//  master lookup and a 1.5-second wait to guess at - and got wrong. On the EQ
+//  label in her screenshot the material 3003715 decoded first, was not in the
+//  master, got parked, the park expired before the EQ code arrived, and the
+//  expired-park fallback filed it as the CHARGE. The material became the charge.
+//
+//  If a bare number and a CH-/EQ- code are visible together and the bare one is
+//  clearly to its LEFT, it is the material. No waiting, no vocabulary, no guess.
+//  Positions come from the decoder's own corner points, so where a decoder does
+//  not report them this simply does not fire and the old path still applies.
+function leftOfChargeCode(codes, self){
+  if(!self || !self.box) return false;
+  for(const c of (codes||[])){
+    if(c === self || !c || !c.box) continue;
+    const v = String(c.value||'').trim();
+    if(!/^(CH|EQ)-?\d+$/i.test(v)) continue;
+    // "clearly" left: past the midpoint of the other code, so two barcodes that
+    // happen to overlap slightly cannot decide anything
+    if((self.box.x + self.box.width) <= (c.box.x + c.box.width * 0.5)) return true;
+  }
+  return false;
+}
+
 function applyBarcodes(codes, tick){
   let changed = false;
   const wae = waeSignal(codes);
-  // the second barcode has arrived: whatever was parked is the MATERIAL
-  if(wae && session.pendingBare){
-    const pb = session.pendingBare;
-    session.pendingBare = null;
-    changed = put('Mat', pb.value, 'bc', pb.box, pb.tick) || changed;
-  }
   for(const c of codes){
     const s = (c.value||'').trim(); if(!s) continue;
     session.codes[s] = 1;                 // for the two-barcode family test
@@ -2083,6 +2147,8 @@ function applyBarcodes(codes, tick){
     }
     // EQ labels: serialized parts. The EQ number is NOT the Charge.
     if(/^EQ-?\d+$/i.test(s)){
+      // keep the bare equipment number in its own column as well
+      changed = put('Equip', s.replace(/^EQ-?/i,''), 'bc', box, tick) || changed;
       changed = put('CH-Nr', s.toUpperCase(),'bc',box,tick) || changed;
       continue;
     }
@@ -2099,6 +2165,27 @@ function applyBarcodes(codes, tick){
       // never send the reader after one. Only if the Rev is not already held -
       // a value the operator typed always wins.
       if(!heldField('Rev')){ put('Rev', REV_NONE, 'auto', null, 0); lock('Rev','auto'); }
+      continue;
+    }
+
+    // v10.0: a bare number sitting to the LEFT of the CH-/EQ- code is the
+    // material, decided from the picture rather than from waiting.
+    if(/^\d{4,9}$/.test(s) && leftOfChargeCode(codes, c)){
+      session.pendingBare = null;
+      changed = put('Mat', s, 'bc', box, tick) || changed;
+      continue;
+    }
+
+    // TEN DIGITS. On a WAE label that is the lot (L-Char). On an MSL label it
+    // is the BATCH, and the batch IS the charge. v10.0: this is Adriele's
+    // observation - "the label reads lot ... we call charge but reads lot, so
+    // that could be a hint to activate the MSL flow." The MSL label in the
+    // photo carries Batch 1000023635 and nothing else, so filing it as a lot
+    // left the charge empty and the label could never be completed.
+    if(/^\d{10}$/.test(s) && (session.family === 'MSL' || (!wae && !heldVal('Char')))){
+      changed = put('Char', s, 'bc', box, tick) || changed;
+      changed = put('L-Char', s, 'bc', box, tick) || changed;
+      if(!session.family) probeFamily();     // the 10-digit read is itself a hint
       continue;
     }
 
@@ -2129,12 +2216,47 @@ function applyBarcodes(codes, tick){
     //   a second barcode appears   -> WAE      -> Material
     //   the number is in the master -> Material immediately, no waiting
     //   BARE_PARK_MS with one code and no master hit -> MSL -> Charge
-    if(/^\d{6,7}$/.test(s)){
-      if(wae){
-        changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
-      } else if(MASTER && matIndex.has(normId(s))){
-        changed = put('Mat', s.toUpperCase(),'bc',box,tick) || changed;
-      } else {
+    // ======================================================================
+    //  SEVEN DIGITS IS A MATERIAL. SIX IS A CHARGE.  -  v10.0
+    //  --------------------------------------------------------------------
+    //  THIS IS THE BUG FROM THE SCREENSHOT. 3003715 is a material; it was not
+    //  in the master list, so it was parked, and after a second and a half the
+    //  fallback filed it as the CHARGE. The real charge (879489) could then
+    //  never be stored because the field was full - and a row would have been
+    //  written with the material number sitting in the charge column.
+    //
+    //  Every charge on every label seen so far is SIX digits: 579371, 883220,
+    //  876923, 879489, 887631, 889932. Every material is SEVEN: 3001280,
+    //  3003689, 3003715, 3007640. The old rule matched both with \d{6,7} and
+    //  then guessed between them; the length says it outright.
+    //
+    //  The master list still overrules the length, so a genuine six-digit
+    //  material would be recognised the moment it is in the list.
+    // ======================================================================
+    // Seven digits is a material, whether or not the list has heard of it. Not
+    // being in the list is a CHECK result (it is tagged RV), not a reason to
+    // decide it must be something else - and deciding it was a charge is
+    // exactly what corrupted the row in the screenshot.
+    if(/^\d{7}$/.test(s)){
+      changed = put('Mat', s, 'bc', box, tick) || changed;
+      continue;
+    }
+    // Six digits is a charge - unless the list says otherwise, because a real
+    // six-digit material in the master beats a rule of thumb about lengths.
+    if(/^\d{6}$/.test(s) && MASTER && matIndex.has(normId(s))){
+      changed = put('Mat', s, 'bc', box, tick) || changed;
+      continue;
+    }
+
+    // Only a SIX-digit number can still reach here - seven is already filed as
+    // a material above, and a six-digit one that IS in the master list was
+    // filed as a material too. v10.0 removed the old `if(wae) -> Material`
+    // branch from this block: it was written when six and seven digits shared
+    // one rule, and with them separated it would take a six-digit charge on a
+    // WAE label and file it as the material - the same class of mistake, in
+    // the opposite direction.
+    if(/^\d{6}$/.test(s)){
+      {
         // v8.9: THE CLOCK STARTS ONCE. This used to build a brand-new park
         // object on every decode, and the live loop decodes the same barcode
         // about twelve times a second - so the age was reset to zero before it
@@ -2159,6 +2281,23 @@ function applyBarcodes(codes, tick){
 
     rawUnplaced = s;
   }
+  // THE PARKED CODE IS RESOLVED LAST, once every barcode in this frame has had
+  // its say. v10.0: it used to run FIRST, so a bare six-digit number was filed
+  // as the charge and then locked - and the CH- code arriving in the same frame
+  // was refused, even though a prefixed CH- code is far better evidence than a
+  // bare number. Resolving last means the good evidence lands first and the
+  // parked code simply has nothing left to do.
+  //
+  // Filed as the CHARGE, not the material: only a six-digit code can be parked
+  // now, and six digits is a charge or a batch on every label family. This is
+  // one of three places that rule appears - the park timer and
+  // barcodeMandatory are the others - and all three now agree.
+  if(wae && session.pendingBare){
+    const pb = session.pendingBare;
+    session.pendingBare = null;
+    changed = put('Char', pb.value, 'bc', pb.box, pb.tick) || changed;
+  }
+
   return changed;
 }
 
@@ -2181,12 +2320,16 @@ function barcodeMandatory(s, wae){
   if(/^CH-?\d+$/i.test(s))  return {field:'Char', value:s.replace(/^CH-?/i,'')};
   if(/^EQ-?\d+$/i.test(s))  return null;
   if(/^\d{3,6}\.\d{2,6}$/.test(s)) return {field:'Mat', value:s.toUpperCase()};
-  if(/^\d{10}$/.test(s))    return null;
+  // v10.0: kept deliberately in step with applyBarcodes above. When these two
+  // disagree the tool files a value one way and then decides the same barcode
+  // means a different label - so any change to the rules has to be made twice,
+  // and the tests check both.
+  if(/^\d{10}$/.test(s)) return (session.family === 'MSL') ? {field:'Char', value:s} : null;
   if(/^[A-Z]{1,2}\d{4,}[A-Z0-9-]{0,6}$/i.test(s)) return {field:'Mat', value:s.toUpperCase()};
-  if(/^\d{6,7}$/.test(s)){
-    if(wae) return {field:'Mat', value:s.toUpperCase()};
+  if(/^\d{7}$/.test(s)) return {field:'Mat', value:s.toUpperCase()};
+  if(/^\d{6}$/.test(s)){
     if(MASTER && matIndex.has(normId(s))) return {field:'Mat', value:s.toUpperCase()};
-    if(MASTER) return {field:'Char', value:s};
+    if(wae || MASTER) return {field:'Char', value:s};
   }
   return null;
 }
@@ -2559,7 +2702,8 @@ function openConfirm(proof){
     // dash is a fact about the part, not a guess to correct.
     if(c === 'Rev' && v && wae){
       html += '<div class="crowf"><div class="k">' + CONFIRM_LABELS.Rev + '</div>'
-            + '<div class="revpicked">' + (v===REV_NONE ? 'no revision' : v)
+            + '<div class="revpicked' + (v===REV_NONE ? ' none' : '') + '">'
+            + (v===REV_NONE ? 'no revision printed' : v)
             + (purchased ? '  \u00b7 purchased part'
                          : '<span class="chg" data-revchange="1">change</span>')
             + '</div></div>';
@@ -4158,7 +4302,8 @@ function openReview(proof){
       row.innerHTML = '<label>'+col+(f.age>0?' <i>'+f.age+'s</i>':'')+'</label>'
         + '<div class="revpickinline">'
         + (cur
-            ? '<div class="revpicked">' + (cur===REV_NONE ? 'no revision' : cur)
+            ? '<div class="revpicked' + (cur===REV_NONE ? ' none' : '') + '">'
+              + (cur===REV_NONE ? 'no revision printed' : cur)
               + '<span class="chg" data-revchange="1">change</span></div>'
             : '<div class="rp-hint">Revision \u2014 read it off the label and tap it</div>'
               + '<div class="rp-grid">'
@@ -4305,6 +4450,9 @@ function renderTable(){
       const cls = ((c==='Check' && r.Check!=='ML')
                 || (c==='Proof' && /split|time-only|manual|stale-pair/.test(r[c]||'')))
                   ? ' class="flag"' : '';
+      // a dash in the Revision column is "no revision printed", not a gap -
+      // coloured so a whole tray of rows can be read down at a glance
+      if(c === 'Rev' && v === REV_NONE) cls = ' class="rev-none"';
       // in edit mode the KEY fields become editable in place; the rest stay
       // read-only so a stray tap cannot quietly rewrite Source or Proof
       if(editRow === i && KEY_COLS.indexOf(c) >= 0){
@@ -4526,13 +4674,28 @@ async function materialTick(){
       // Two passes on the picture, and - v8.8 - a third on a glare-corrected
       // copy of it. The material line is the one most often washed out by a
       // highlight on the bag, and it is the field that costs the most to lose.
+      // TWO PASSES BY DEFAULT, A THIRD ONLY WHEN THEY FAIL  -  v10.1
+      // Adriele: "so slow, please improve the performance." Every look was
+      // running THREE full OCR passes plus a local-threshold rebuild of the
+      // whole band - on a phone that is most of the cost of the entire loop,
+      // and it was being paid on every frame whether it was needed or not.
+      //
+      // The glare-corrected pass earns its place only when the ordinary ones
+      // come back with nothing the vocabulary recognises. On a well-lit label
+      // that is never, so the common case is now a third faster than the two
+      // passes suggest - the expensive part was the threshold rebuild, not the
+      // reading.
       const rawA = await readBand('mat', band);
       const rawB = await readBand('mat', band, '0123456789');
       let rawC = '';
-      try{
-        const flat = adaptiveBinarise(band, 0.30, 10);
-        rawC = await readBand('mat', flat);
-      }catch(_){}
+      const gotSomething = addMaterialEvidence(rawA)
+                         | addMaterialEvidence(rawB);
+      if(!gotSomething){
+        try{
+          const flat = adaptiveBinarise(band, 0.30, 10);
+          rawC = await readBand('mat', flat);
+        }catch(_){}
+      }
       const raw = rawA;
       if(rawA) matVoteText.push(rawA);
       if(rawB && rawB !== rawA) matVoteText.push(rawB);
@@ -4540,8 +4703,6 @@ async function materialTick(){
       if(rawC) addMaterialEvidence(rawC);
       // EVERY read narrows the vocabulary, whether or not it produced a token
       // that is valid on its own. This is the accumulation that was missing.
-      addMaterialEvidence(rawA);
-      if(rawB && rawB !== rawA) addMaterialEvidence(rawB);
 
       const toks = (rawA + '\n' + rawB + '\n' + rawC).toUpperCase().match(MAT_TOKEN_RE) || [];
       if(raw) matTries++;
@@ -4684,7 +4845,12 @@ const REV_POLL_MS    = 150;
 //
 //  With it off: material and charge are captured, the strip opens at once, and
 //  the six letters are already on screen waiting. No reading pause at all.
-const REV_AUTOREAD = false;
+// v10.0: BACK ON, and the buttons stay. Adriele: "the revision should try to
+// guess AND together have the buttons." Those were never in conflict - the
+// reader gets one quick look while the operator is still moving the phone, and
+// whatever it finds is only ever a suggestion sitting on the strip next to six
+// letters they can overrule with one tap. It costs one look, not a wait.
+const REV_AUTOREAD = true;
 
 const REV_MAX_TRIES  = 1;    // attempts that actually produced a letter
 // THREE agreeing, not four. Four was the right number when the answer could be
@@ -4999,7 +5165,11 @@ const cbCtx = cbCv.getContext('2d', {willReadFrequently:true});
 // the box - and moving closer, which is what you do to read small print, made
 // it worse. Measured on both real labels the SerNr / Char. / L-Char. block sits
 // 4.2 to 6.0 barcode-heights below the barcode's top edge, on the left.
-function grabChargeBand(){
+// WHERE THE CHARGE IS READ - extracted for the same reason as the material's:
+// the rectangle drawn on screen and the pixels sent to the reader must be the
+// same rectangle, or the operator is aiming at something the tool is not
+// looking through. v10.0.
+function chargeBandRect(){
   const r = reticleRect();
   if(!r || !vid.videoWidth) return null;
 
@@ -5033,6 +5203,14 @@ function grabChargeBand(){
     sw = r.w * 0.70;
     sh = r.h * 0.34;
   }
+  if(sw < 20 || sh < 8) return null;
+  return {x:sx, y:sy, w:sw, h:sh};
+}
+
+function grabChargeBand(){
+  const rc = chargeBandRect();
+  if(!rc) return null;
+  const sx = rc.x, sy = rc.y, sw = rc.w, sh = rc.h;
   if(sw < 20 || sh < 8) return null;
 
   const k = Math.max(2, Math.min(6, 1800/sw));
@@ -5135,7 +5313,23 @@ setInterval(function(){
   if(review.classList.contains('show')) return;
   if(confirmBar.classList.contains('show')) return;
   if(!matVoteRunning && heldField('Char') && !heldField('Mat')) startMaterialVoting();
-  if(!chgVoteRunning && hasEqCode() && !heldField('Char')) startChargeVoting();
+  // ==========================================================================
+  //  READ THE CHARGE FROM THE PAPER WHENEVER IT IS MISSING  -  v10.1
+  //  ------------------------------------------------------------------------
+  //  THIS WAS THE "need Char" BUG. The charge reader only ever started once an
+  //  EQ- barcode had decoded. On the label in Adriele's photo the charge
+  //  (887574) is printed in plain text, the EQ code was out of frame, and so
+  //  the reader NEVER STARTED - the tool sat on "Mat 3006459 - need Char" with
+  //  the number it wanted sitting legibly on the screen the whole time.
+  //
+  //  An EQ code means the charge is definitely not in a barcode. It was never
+  //  a precondition for reading it off the paper. The real condition is much
+  //  simpler: the material is in hand, the charge is not, and no CH- barcode
+  //  has supplied it. Then read it.
+  // ==========================================================================
+  if(!chgVoteRunning && !heldField('Char')
+     && (hasEqCode() || heldField('Mat') || heldField('CH-Nr')))
+    startChargeVoting();
   // v7.2: the revision used to wait for Mat AND Char. On the EQ label the
   // Charge comes from TEXT, which takes seconds - so the revision was locked
   // out for the whole time the label was in front of the camera, and by the
