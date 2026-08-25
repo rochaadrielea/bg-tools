@@ -430,7 +430,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v9.8';
+const VERSION = 'v9.9';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -2208,6 +2208,16 @@ function barcodeMandatory(s, wae){
 // ============================================================================
 let strayWatch = null;          // {field, value, n, t}
 const STRAY_CONFIRM = 2;        // sightings before the operator is told
+// ...and sightings before the new label simply WINS. v9.9: Adriele - "it is not
+// recognising the other label." Once anything was locked, a genuinely different
+// label was ignored for ever and the only way out was pressing Clear label.
+// That was correct for a glimpse and wrong for a label you have deliberately
+// moved to, and there is no way for the tool to tell those apart from ONE
+// frame - only from PERSISTENCE. A label swinging past shows up once or twice;
+// a label you are now pointing at stays there.
+// Nothing is lost when it takes over: the old reading was never confirmed, so
+// no row was ever going to be written from it.
+const STRAY_TAKEOVER = 5;
 const STRAY_FORGET_MS = 2500;   // ...and they must be close together
 
 function isNewLabel(codes){
@@ -2301,13 +2311,32 @@ function onCodes(codes, tick){
   // ==========================================================================
   if(isNewLabel(codes)){
     if(holdingSomething()){
-      // Ignore the frame outright, every time. Speak only once the same
-      // disagreement has turned up twice.
       const w = strayConfirmed(codes);
+
+      // IT HAS STOPPED BEING A STRAY. The same different label has now been in
+      // front of the camera for five straight sightings - that is not a bag
+      // swinging past, that is where the operator is pointing. Start again on
+      // it rather than sulking at a label they have clearly left behind.
+      if(w && w.n >= STRAY_TAKEOVER){
+        metricEnd('abandoned');
+        stopAllVoting();
+        hideConfirm();
+        resetSession();
+        strayWatch = null;          // the new label is now THE label
+        sayOverCamera('New label \u2014 starting again', 1400);
+        metricStart();
+        applyBarcodes(codes, tick);
+        showProgress();
+        evaluate();
+        return;
+      }
+
+      // Still just a glimpse: ignore the frame outright, and only speak once
+      // the same disagreement has turned up twice.
       if(w){
         session.stray = {field:w.field, kept:heldVal(w.field), other:w.value};
         metricNote('strays', (mLabel ? (mLabel.strays||0) : 0) + 1);
-        setStatus('Another label came into view \u2014 keeping what is already read','busy');
+        setStatus('Another label came into view \u2014 keep it steady to switch','busy');
       }
       return;                       // hold everything, take nothing
     }
