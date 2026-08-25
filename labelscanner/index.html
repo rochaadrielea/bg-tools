@@ -34,7 +34,38 @@
 
   .stage{position:relative;border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--line);aspect-ratio:3/4;max-height:56vh;margin:0 auto;}
   video{width:100%;height:100%;object-fit:cover;display:block;}
-  .reticle{position:absolute;inset:14% 8%;border:2px solid var(--signal);border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.32);pointer-events:none;opacity:.9;transition:border-color .2s;}
+  .reticle{position:absolute;inset:14% 8%;border:2px solid var(--signal);border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.32);pointer-events:none;opacity:.9;transition:border-color .2s,box-shadow .2s;}
+  /* THE ALVO  -  v9.4
+     Adriele: "we need a way to help people help the scan - just writing does
+     not work, we need something visual, like an alvo, and a square showing the
+     label identified what is needed."
+     Text tells you afterwards. A target tells you WHERE, now, while the phone
+     is still moving. Corners plus a centre cross give the eye something to line
+     the label up against, and the colour says how it is going without a word
+     being read: white nothing yet, amber something held, green everything. */
+  .alvo{position:absolute;inset:14% 8%;pointer-events:none;}
+  .alvo i{position:absolute;width:26px;height:26px;border:3px solid var(--signal);opacity:.95;transition:border-color .25s;}
+  .alvo i.tl{top:-2px;left:-2px;border-right:0;border-bottom:0;border-radius:10px 0 0 0;}
+  .alvo i.tr{top:-2px;right:-2px;border-left:0;border-bottom:0;border-radius:0 10px 0 0;}
+  .alvo i.bl{bottom:-2px;left:-2px;border-right:0;border-top:0;border-radius:0 0 0 10px;}
+  .alvo i.br{bottom:-2px;right:-2px;border-left:0;border-top:0;border-radius:0 0 10px 0;}
+  .alvo b{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;opacity:.5;transition:opacity .25s;}
+  .alvo b:before,.alvo b:after{content:'';position:absolute;background:var(--signal);}
+  .alvo b:before{left:50%;top:0;width:1.5px;height:100%;margin-left:-.75px;}
+  .alvo b:after{top:50%;left:0;height:1.5px;width:100%;margin-top:-.75px;}
+  .alvo.hold i{border-color:var(--warn);}
+  .alvo.hold b:before,.alvo.hold b:after{background:var(--warn);}
+  .alvo.ready b{opacity:0;}
+  .reticle.hold{border-color:var(--warn);}
+  .reticle.ready{box-shadow:0 0 0 100vmax rgba(0,0,0,.32),0 0 22px rgba(0,224,150,.55) inset;}
+  /* a box that lands on a barcode the instant it decodes, named - so success
+     is something you SEE, not something you read about afterwards */
+  .found{position:absolute;border:2.5px solid var(--signal);border-radius:6px;pointer-events:none;
+    box-shadow:0 0 12px rgba(0,224,150,.5);animation:foundpop .28s ease-out;}
+  .found span{position:absolute;top:-11px;left:-2px;font-family:var(--mono);font-size:10px;
+    font-weight:700;letter-spacing:.5px;color:#08130E;background:var(--signal);
+    border-radius:4px;padding:2px 6px;white-space:nowrap;}
+  @keyframes foundpop{from{transform:scale(1.25);opacity:0;}to{transform:scale(1);opacity:1;}}
   .reticle.hit{border-color:#fff;}
   .reticle.partial{border-color:var(--warn);}
   .reticle.reject{border-color:var(--bad);}
@@ -172,6 +203,26 @@
   .crevrow button.none{grid-column:1/-1;font-size:17px;font-weight:600;
     padding:16px 0;background:transparent;color:#D8B87C;border-style:dashed;}
   .crevpick{display:none;}
+  /* v9.3: the revision picker lives INSIDE the Revision row, full width, so it
+     is where the eye already is and no separate block can be pushed under the
+     keyboard. The Revision cell stops being a text input while it asks for a
+     tap - a non-input cannot summon the keyboard, which is what was hiding the
+     buttons entirely in the screenshot. */
+  .revpickinline{grid-column:1/-1;padding:10px 12px 12px;background:#3A2A12;}
+  .revpickinline .rp-hint{font-family:var(--mono);font-size:11px;color:#D8B87C;
+    margin:0 0 9px;line-height:1.5;}
+  .revpickinline .rp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .revpickinline button{font-family:var(--mono);font-size:34px;font-weight:700;
+    padding:20px 0;background:#4A3617;color:#fff;border:2px solid #8A6B2E;
+    border-radius:12px;cursor:pointer;line-height:1;-webkit-tap-highlight-color:transparent;}
+  .revpickinline button:active{background:var(--warn);color:#241703;}
+  .revpickinline button.hot{border-color:var(--warn);color:var(--warn);background:#5A431E;}
+  .revpickinline button.rp-none{grid-column:1/-1;font-size:15px;font-weight:600;
+    padding:15px 0;background:transparent;color:#D8B87C;border-style:dashed;}
+  .revpicked{grid-column:1/-1;padding:12px;font-family:var(--mono);font-size:17px;
+    color:#fff;display:flex;align-items:center;gap:10px;background:#4A3617;}
+  .revpicked .chg{margin-left:auto;font-size:13px;color:#D8B87C;
+    border:1px solid #8A6B2E;border-radius:8px;padding:6px 12px;cursor:pointer;}
   .crowf.tagrow .v{font-size:13px;color:var(--warn);}
   .confirmbar .crow{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .confirmbar .crow.three{grid-template-columns:1fr 1fr 1.4fr;}
@@ -227,6 +278,8 @@
   <div class="stage">
     <video id="vid" playsinline muted autoplay></video>
     <div class="reticle" id="reticle"></div>
+    <div class="alvo" id="alvo"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i><b></b></div>
+    <div id="foundLayer" style="position:absolute;inset:0;pointer-events:none"></div>
     <div class="splash" id="splash"><div class="mark" id="splashMark"></div><div class="what" id="splashTxt"></div></div>
 
     <div class="status" id="status"><span class="dot"></span><span id="statustxt">Camera off</span></div>
@@ -278,7 +331,6 @@
 <div class="confirmbar" id="confirmBar">
   <div class="ctitle">Check against the label in your hand</div>
   <div class="cgrid" id="confirmGrid"></div>
-  <div class="crevpick" id="confirmRevPick"></div>
   <div class="crow">
     <button class="cdismiss" id="confirmDismiss">Not this</button>
     <button class="cok" id="confirmOk">Confirm &amp; add</button>
@@ -338,7 +390,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v9.2';
+const VERSION = 'v9.4';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -496,7 +548,58 @@ function bestVote(tally){
   return {value:best, n:n};
 }
 
+// ============================================================================
+//  SHOWING THE PERSON WHAT THE SCANNER SEES  -  v9.4
+//  ---------------------------------------------------------------------------
+//  The screenshot behind this said "Revision not certain - read it off the
+//  label" while the label lay at 45 degrees under a glare. Everything on it was
+//  legible to a human, and the operator had no way to tell whether the tool had
+//  seen anything at all, or where to point.
+//
+//  The frame now speaks without words, and a green box lands on each barcode
+//  the moment it decodes, labelled with the field it filled.
+//
+//  The box needs the barcode's corner points. The native BarcodeDetector always
+//  reports them and ZXing usually does; where they are missing no box is drawn
+//  and the colours carry on alone. A box in the wrong place is worse than none.
+// ============================================================================
+const alvoEl = document.getElementById('alvo');
+const foundLayer = document.getElementById('foundLayer');
+const FIELD_SHOWN = {Mat:'MATERIAL', Char:'CHARGE', 'CH-Nr':'CHARGE CODE',
+                     'L-Char':'LOT', SerNr:'SERIAL'};
+
+function flashFound(box, label){
+  if(!foundLayer || !box || !(box.width > 2) || !(box.height > 2)) return;
+  const r = reticleRect();
+  if(!r || !vid.videoWidth) return;
+  const rect = vid.getBoundingClientRect();
+  const host = foundLayer.getBoundingClientRect();
+  const kx = rect.width / vid.videoWidth, ky = rect.height / vid.videoHeight;
+  const el = document.createElement('div');
+  el.className = 'found';
+  el.style.left   = ((r.x + box.x) * kx + rect.left - host.left) + 'px';
+  el.style.top    = ((r.y + box.y) * ky + rect.top  - host.top ) + 'px';
+  el.style.width  = (box.width  * kx) + 'px';
+  el.style.height = (box.height * ky) + 'px';
+  el.innerHTML = '<span>' + String(label||'').replace(/</g,'&lt;') + '</span>';
+  foundLayer.appendChild(el);
+  setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 1100);
+}
+function clearFound(){ if(foundLayer) foundLayer.innerHTML = ''; }
+
+// white / amber / green - readable from across the bench, no text needed
+function paintAim(){
+  if(!alvoEl || !reticle) return;
+  const haveAll = MANDATORY.every(function(c){ return !!heldVal(c); })
+               && (!isWae() || !!heldVal('Rev') || isPurchasedPart(heldVal('Mat')));
+  const haveSome = KEY_COLS.some(function(c){ return !!heldVal(c); });
+  const state = haveAll ? 'ready' : (haveSome ? 'hold' : '');
+  alvoEl.className = 'alvo' + (state ? ' ' + state : '');
+  reticle.className = 'reticle' + (state ? ' ' + state : '');
+}
+
 function showProgress(){
+  paintAim();
   if(review.classList.contains('show') || confirmBar.classList.contains('show')) return;
   const parts = [];
   if(session.family) parts.push(session.family);
@@ -1029,6 +1132,8 @@ function resetSession(reason){
   lastProgress = '';
   lastBandSig.mat = lastBandSig.rev = lastBandSig.chg = 0;
   lastRevRect = null;
+  strayWatch = null;
+  clearFound();
   const had = Object.keys(session.fields).length;
   session = newSession();
   reticle.classList.remove('partial','reject');
@@ -1219,6 +1324,13 @@ function put(field, value, src, box, tick){
   // ==========================================================================
   session.locked[field] = src;
   session.lastAt = now;
+
+  // v9.4: the moment a barcode fills a field, put a green box on it. This is
+  // the only place that knows the value, the field AND where it was seen, so
+  // it is the only place the box can be drawn honestly.
+  if(src === 'bc' && box && FIELD_SHOWN[field]){
+    try{ flashFound(box, FIELD_SHOWN[field]); }catch(_){}
+  }
   return true;
 }
 
@@ -1930,8 +2042,28 @@ function barcodeMandatory(s, wae){
   }
   return null;
 }
+// ============================================================================
+//  ONE FRAME IS NOT A SECOND LABEL  -  v9.4
+//  ---------------------------------------------------------------------------
+//  Adriele: "sometimes it keeps seeing other labels but there isn't."
+//
+//  waeSignal(codes) was asked about THIS FRAME ONLY. A frame catching just one
+//  of the two barcodes answers "not WAE", so the bare-digit material fell to
+//  the last rule and was classified as a CHARGE - which then disagreed with the
+//  held charge and announced a label that was never there. It now asks what the
+//  SESSION knows: the family, and every code seen on this label so far.
+//
+//  The GUARD stays immediate: a frame that disagrees is never applied, not even
+//  once. Only the MESSAGE waits for corroboration, which is what she was
+//  complaining about. A real second label sits in view for many frames; a
+//  misread appears once and is gone.
+// ============================================================================
+let strayWatch = null;          // {field, value, n, t}
+const STRAY_CONFIRM = 2;        // sightings before the operator is told
+const STRAY_FORGET_MS = 2500;   // ...and they must be close together
+
 function isNewLabel(codes){
-  const wae = waeSignal(codes);
+  const wae = waeSignal(codes) || waeSignal([]);
   for(const c of (codes||[])){
     const m = barcodeMandatory(c && c.value, wae);
     if(!m) continue;
@@ -1939,6 +2071,31 @@ function isNewLabel(codes){
     if(held && normId(held) !== normId(m.value)) return true;
   }
   return false;
+}
+
+// Has the same disagreement been seen enough times to be worth saying?
+// The whole frame is judged at once: a stray label usually shows BOTH its
+// barcodes together, and counting them one at a time let the material conflict
+// set the watch and the charge conflict immediately reset it, so the count
+// never got past one.
+function strayConfirmed(codes){
+  const wae = waeSignal(codes) || waeSignal([]);
+  const now = Date.now();
+  const conflicts = [];
+  for(const c of (codes||[])){
+    const m = barcodeMandatory(c && c.value, wae);
+    if(!m) continue;
+    const held = heldVal(m.field);
+    if(held && normId(held) !== normId(m.value)) conflicts.push(m);
+  }
+  if(!conflicts.length) return null;
+  const same = strayWatch && (now - strayWatch.t) < STRAY_FORGET_MS
+            && conflicts.some(function(x){
+                 return x.field === strayWatch.field
+                     && normId(x.value) === normId(strayWatch.value); });
+  if(same){ strayWatch.n++; strayWatch.t = now; }
+  else { strayWatch = {field:conflicts[0].field, value:conflicts[0].value, n:1, t:now}; }
+  return strayWatch.n >= STRAY_CONFIRM ? strayWatch : null;
 }
 
 // v7.0: is this barcode set the SAME label that was just confirmed? The camera
@@ -1990,11 +2147,15 @@ function onCodes(codes, tick){
   // ==========================================================================
   if(isNewLabel(codes)){
     if(holdingSomething()){
-      const m = barcodeMandatory(codes[0] && codes[0].value, waeSignal(codes));
-      if(m) session.stray = {field:m.field, kept:heldVal(m.field), other:m.value};
-      metricNote('strays', (mLabel ? (mLabel.strays||0) : 0) + 1);
-      setStatus('Another label came into view \u2014 keeping what is already read','busy');
-      return;                       // hold everything, ignore the stray entirely
+      // Ignore the frame outright, every time. Speak only once the same
+      // disagreement has turned up twice.
+      const w = strayConfirmed(codes);
+      if(w){
+        session.stray = {field:w.field, kept:heldVal(w.field), other:w.value};
+        metricNote('strays', (mLabel ? (mLabel.strays||0) : 0) + 1);
+        setStatus('Another label came into view \u2014 keeping what is already read','busy');
+      }
+      return;                       // hold everything, take nothing
     }
     stopAllVoting();
     hideConfirm();
@@ -2148,7 +2309,6 @@ function beep(){ try{
 // ============================================================================
 const confirmBar = document.getElementById('confirmBar');
 const confirmGrid = document.getElementById('confirmGrid');
-const confirmRevPick = document.getElementById('confirmRevPick');
 const confirmOk = document.getElementById('confirmOk');
 const confirmDismiss = document.getElementById('confirmDismiss');
 let confirmPending = null;      // the proof object for the row being confirmed
@@ -2178,11 +2338,50 @@ function openConfirm(proof){
   const tag = checkTag(heldVal('Mat'));
   let html = '';
   const purchased = isPurchasedPart(heldVal('Mat'));
+  // does the revision still need answering? material + charge in, WAE, not a
+  // purchased part, nothing read yet
+  const needRev = wae && !heldVal('Rev') && !purchased
+               && heldVal('Mat') && heldVal('Char');
+
   KEY_COLS.forEach(function(c){
     let v = heldVal(c);
     if(!v && !wae && (c === 'SerNr' || c === 'Rev')) return;
-    // purchased part with the auto dash: show it as n/a, gently, so the operator
-    // reads it as "accounted for" not "type here"
+
+    // THE REVISION ROW, when it still needs an answer, IS the picker - the big
+    // letter buttons render right here, full width, under the "Revision" label.
+    // No text input, so the keyboard never opens and the buttons never hide.
+    if(c === 'Rev' && needRev){
+      const o = revOptions();
+      html += '<div class="crowf"><div class="k">' + CONFIRM_LABELS.Rev + '</div>'
+            + '<div class="revpickinline">'
+            + '<div class="rp-hint">read it off the label and tap it'
+            + (o.voted ? '  \u00b7  ' + (o.voted>1?'the first '+o.voted+' are':'the first is')
+                       + ' what the camera saw' : '') + '</div>'
+            + '<div class="rp-grid">'
+            + o.letters.map(function(L,i){
+                return '<button data-rev="' + L + '"' + (i < o.voted ? ' class="hot"' : '')
+                     + '>' + L + '</button>';
+              }).join('')
+            + '<button class="rp-none" data-rev="' + REV_NONE + '">'
+            + 'This label has no revision printed</button>'
+            + '</div></div></div>';
+      return;
+    }
+
+    // The revision AFTER it has an answer: shown, tappable to change, but still
+    // not a keyboard input - tapping "change" brings the buttons back. A
+    // purchased part shows the same way but WITHOUT the change link, because its
+    // dash is a fact about the part, not a guess to correct.
+    if(c === 'Rev' && v && wae){
+      html += '<div class="crowf"><div class="k">' + CONFIRM_LABELS.Rev + '</div>'
+            + '<div class="revpicked">' + (v===REV_NONE ? 'no revision' : v)
+            + (purchased ? '  \u00b7 purchased part'
+                         : '<span class="chg" data-revchange="1">change</span>')
+            + '</div></div>';
+      return;
+    }
+
+    // every other field stays a normal editable cell
     html += '<div class="crowf"><div class="k">' + CONFIRM_LABELS[c] + '</div>'
           + '<input class="v" data-col="' + c + '" spellcheck="false" '
           + (c === 'Rev' ? 'maxlength="1" ' : '')
@@ -2204,29 +2403,6 @@ function openConfirm(proof){
           + '</div></div>';
   }
   confirmGrid.innerHTML = html;
-
-  // BIG BUTTONS FOR THE REVISION. Only when the material and the charge are
-  // both in hand and the revision is the one thing missing - that is exactly
-  // the moment a person can glance at the label and answer in one tap.
-  if(wae && !heldVal('Rev') && !isPurchasedPart(heldVal('Mat')) && heldVal('Mat') && heldVal('Char')){
-    const o = revOptions();
-    confirmRevPick.innerHTML =
-      '<div class="cp-label">Revision not read after ' + revTries + ' tries \u2014 '
-      + 'read it off the label and tap it'
-      + (o.voted ? '<br>the first ' + (o.voted>1?o.voted+' were':'one was') + ' what the camera saw' : '')
-      + '</div><div class="cp-grid">'
-      + o.letters.map(function(L,i){
-          return '<button data-rev="' + L + '"' + (i < o.voted ? ' class="hot"' : '') + '>' + L + '</button>';
-        }).join('')
-      + '<button class="cp-none" data-rev="' + REV_NONE + '">'
-      + 'This label has no revision printed</button>'
-      + '</div>';
-    confirmRevPick.className = 'crevpick show';
-  } else {
-    confirmRevPick.className = 'crevpick';
-    confirmRevPick.innerHTML = '';
-  }
-
   confirmPending = proof || {ok:false, kind:'manual'};
   confirmBar.classList.add('show');
   review.className = 'review';
@@ -2237,19 +2413,29 @@ function openConfirm(proof){
 
 function hideConfirm(){
   confirmBar.classList.remove('show');
-  confirmRevPick.className = 'crevpick';
   confirmPending = null;
 }
 
-// tapping a letter fills the Revision box; nothing is written until Confirm
-confirmRevPick.addEventListener('click', function(e){
-  const L = e.target && e.target.dataset && e.target.dataset.rev;
-  if(!L) return;
-  const inp = confirmGrid.querySelector('input[data-col="Rev"]');
-  if(inp) inp.value = L;
-  Array.prototype.forEach.call(confirmRevPick.querySelectorAll('button'), function(b){
-    b.classList.toggle('hot', b === e.target);
-  });
+// tapping a letter in the inline picker fills the revision and redraws the strip
+// so the row collapses to the chosen value. Nothing is written until Confirm.
+confirmGrid.addEventListener('click', function(e){
+  const el = e.target;
+  if(!el || !el.dataset) return;
+  if(el.dataset.rev){
+    const L = el.dataset.rev;
+    put('Rev', L, 'typed', null, 0);
+    lock('Rev','typed');
+    metricNote('edit','Rev');
+    openConfirm(confirmPending);       // redraw: Rev row now shows the answer
+    return;
+  }
+  if(el.dataset.revchange){
+    // put the buttons back: forget the held revision for this strip only
+    delete session.fields.Rev;
+    delete session.locked.Rev;
+    openConfirm(confirmPending);
+    return;
+  }
 });
 
 // Anything typed or tapped on the strip goes into the session as the OPERATOR's
@@ -3728,15 +3914,8 @@ function openReview(proof){
   }
   // the revision letters, on the card as well as the strip. Typing a single
   // letter is exactly where a mistake is invisible, so it gets buttons here too.
-  if(!String(current.Rev.value||'').trim()){
-    const ro = revOptions();
-    msgs.push('Revision \u2014 read it off the label and tap it:<br>'
-      + ro.letters.map(function(L,i){
-          return '<button class="sugg" data-rev="'+L+'"'
-               + (i < ro.voted ? ' style="border-color:var(--warn);color:var(--warn)"' : '')
-               + '>'+L+'</button>';
-        }).join(' '));
-  }
+  // v9.4: the revision buttons moved INTO the Revision row, so they are no
+  // longer duplicated up here where they sat detached from the field they fill.
   // v8.8: what the camera had, offered back rather than inherited
   if(manualCarry){
     const bits = Object.keys(manualCarry).map(function(c){
@@ -3781,6 +3960,33 @@ function openReview(proof){
     if(f.age > 0) cls += ' aged';
     const row = document.createElement('div');
     row.className = 'field '+cls;
+
+    // THE REVISION IS BUTTONS, NEVER A TEXT BOX  -  v9.4
+    // Adriele: "the keyboard appears because we can text, so we need to work
+    // with that." A revision is one character out of six - there is nothing to
+    // type. Making it an input is what summoned the keyboard and buried the
+    // letters underneath it. Material and Charge stay typeable: they are long
+    // numbers with no fixed list, so a keyboard is the right tool there and it
+    // only opens when the operator taps one of them.
+    if(col === 'Rev' && !isPurchasedPart(current.Mat.value)){
+      const cur = String(f.value||'');
+      row.innerHTML = '<label>'+col+(f.age>0?' <i>'+f.age+'s</i>':'')+'</label>'
+        + '<div class="revpickinline">'
+        + (cur
+            ? '<div class="revpicked">' + (cur===REV_NONE ? 'no revision' : cur)
+              + '<span class="chg" data-revchange="1">change</span></div>'
+            : '<div class="rp-hint">read it off the label and tap it</div>'
+              + '<div class="rp-grid">'
+              + REV_LETTERS.split('').map(function(L){
+                  return '<button data-rev="'+L+'">'+L+'</button>'; }).join('')
+              + '<button class="rp-none" data-rev="'+REV_NONE+'">'
+              + 'This label has no revision printed</button>'
+              + '</div>')
+        + '</div>';
+      fieldsEl.appendChild(row);
+      return;
+    }
+
     row.innerHTML = '<label>'+col+(f.age>0?' <i>'+f.age+'s</i>':'')+'</label>'
       + '<input data-col="'+col+'" value="'
       + (f.value||'').replace(/"/g,'&quot;') + '" spellcheck="false">';
@@ -3821,6 +4027,22 @@ rnote.addEventListener('click', function(e){
   else if(d.char){ put('Char', d.char, 'typed', null, 0); charSuggestions = []; }
   else return;
   openReview(current._proof);
+});
+
+// the inline revision picker on Card B
+fieldsEl.addEventListener('click', function(e){
+  if(!current || !e.target || !e.target.dataset) return;
+  const d = e.target.dataset;
+  if(d.rev){
+    put('Rev', d.rev, 'typed', null, 0);
+    lock('Rev','typed');
+    metricNote('edit','Rev');
+    openReview(current._proof);
+  } else if(d.revchange){
+    delete session.fields.Rev;
+    delete session.locked.Rev;
+    openReview(current._proof);
+  }
 });
 
 fieldsEl.addEventListener('input', function(e){
@@ -4196,7 +4418,10 @@ const REV_POLL_MS    = 150;
 // so either it is confident on the first proper look or a human should just
 // tap the letter. Waiting longer does not make a doubtful glyph clearer - it
 // only makes the operator wait.
-const REV_MAX_TRIES  = 2;    // attempts that actually produced a letter
+// v9.4: ONE. Adriele: "the revision is taking too long." Tapping a letter is
+// instant and the buttons are always in the Revision row now, so a second
+// reading buys almost nothing and costs half a second on every label.
+const REV_MAX_TRIES  = 1;    // attempts that actually produced a letter
 // THREE agreeing, not four. Four was the right number when the answer could be
 // any of 26 letters and nothing vouched for it. With a five-letter vocabulary
 // doing its own filtering - and every invalid reading discarded rather than
@@ -4207,14 +4432,18 @@ const REV_MAX_TRIES  = 2;    // attempts that actually produced a letter
 // two agreeing looks is four consistent readings across two different frames.
 // Adriele asked for 2 and for speed; the vocabulary and the two-view rule are
 // what make 2 safe here where it would have been reckless at 26 letters.
-const REV_LOCK_VOTES = 2;    // two agreeing attempts lock it
+// v9.4: ONE. With a single attempt allowed a threshold of two could never be
+// reached, and the revision could never settle by itself - the still-photo path
+// included. One is not a low bar: an attempt only exists when the engine and
+// the shape matcher leave exactly one valid letter between them.
+const REV_LOCK_VOTES = 1;    // one good attempt locks it
 // ...OR one attempt that is unmistakable. The shape matcher reports how far
 // ahead the winning letter is, and a glyph this clean is not a coin toss - it
 // is a good photograph of an unambiguous letter. Demanding a second opinion on
 // it just costs half a second for nothing.
 const REV_SURE_SCORE  = 0.78;
 const REV_SURE_MARGIN = 0.14;
-const REV_MAX_LOOKS  = 4;    // looks allowed to get those attempts (blur costs nothing)
+const REV_MAX_LOOKS  = 2;    // looks allowed to get it (a blurred frame costs nothing)
 
 // (REV_WHITELIST is declared up with BAND_CFG - the band workers are
 //  configured with it at creation, which happens earlier in the file.)
