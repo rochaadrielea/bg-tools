@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v10.5';
+const VERSION = 'v10.6';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -4919,7 +4919,11 @@ function materialBandRect(){
 //  Each read is now perhaps 1200 x 60 - about seventy thousand pixels instead
 //  of five million - and single-line mode has no layout to get wrong.
 // ============================================================================
-const LINE_TARGET_H = 56;     // what a capital should measure when read
+const LINE_TARGET_H = 56;     // what a capital should measure on a whole line
+// A lone value gets read much bigger: the crop is a fraction of the width, so
+// the pixels are affordable, and a 7-digit number at this height is about as
+// legible as Tesseract will ever see it.
+const WORD_TARGET_H = 96;
 const LINE_MAX_W = 1500;      // and the widest a line is ever drawn
 
 // Rows of ink in a thresholded band -> [{y0,y1,x0,x1}, ...], tightest first.
@@ -4980,7 +4984,74 @@ function sliceTextLines(bw, maxLines){
   return out.slice(0, maxLines || 4);
 }
 
+// ============================================================================
+//  GO AFTER THE NUMBER, NOT THE LINE  -  v10.6
+//  ---------------------------------------------------------------------------
+//  Adriele: "go after the Mat.No and read it, more rapidly, and compare with
+//  the master as you read - it is probably in the list."
+//
+//  A label line is "Mat.No      3000716" - a caption, a wide gap, the value.
+//  Reading the whole line means reading the caption too, and the caption is
+//  what puts MAT, NO, PROD and QTY into the candidate pool where they have no
+//  business being. It also doubles the pixels for a part of the line nobody
+//  wants.
+//
+//  Columns of ink split a line into words exactly the way rows split a band
+//  into lines - the same technique that isolates the revision letter. The
+//  VALUE is the last group on the line. Cropping to it alone means:
+//    - a much smaller picture, so a much bigger magnification for free
+//    - no caption to misread, and no caption tokens to filter out later
+//    - the vocabulary is asked about one thing, which is what it is good at
+//
+//  Each word crop is a few tens of thousands of pixels. Reading three of them
+//  costs less than reading one line did.
+// ============================================================================
+function sliceWords(d, W, y0, y1, x0, x1){
+  const colInk = new Uint32Array(x1 - x0 + 1);
+  for(let x=x0;x<=x1;x++){
+    let n = 0;
+    for(let y=y0;y<=y1;y++) if(d[((y*W)+x)<<2] < 128) n++;
+    colInk[x-x0] = n;
+  }
+  // a gap wider than roughly half the line height separates words; narrower
+  // than that is just the space inside "Mat.No"
+  const lineH = y1 - y0 + 1;
+  const gapNeeded = Math.max(3, Math.round(lineH * 0.55));
+
+  const groups = [];
+  let start = -1, gap = 0;
+  for(let i=0;i<colInk.length;i++){
+    if(colInk[i] > 0){
+      if(start < 0) start = i;
+      gap = 0;
+    } else if(start >= 0){
+      gap++;
+      if(gap >= gapNeeded){ groups.push([x0+start, x0+i-gap]); start = -1; gap = 0; }
+    }
+  }
+  if(start >= 0) groups.push([x0+start, x1]);
+  return groups.filter(function(g){ return (g[1]-g[0]+1) >= Math.max(6, lineH*0.4); });
+}
+
 // Draw one line from the VIDEO at the magnification that line actually needs.
+// Draw an arbitrary rectangle of the band from the VIDEO, magnified so its
+// text stands about targetH pixels tall.
+function drawPieceFromVideo(rc, srcScale, bx0, by0, bw, bh, targetH){
+  const vx = rc.x + bx0/srcScale, vy = rc.y + by0/srcScale;
+  const vw = bw/srcScale, vh = bh/srcScale;
+  if(vw < 4 || vh < 3) return null;
+  const pad = vh * 0.28;
+  const sx = Math.max(0, vx - pad), sy = Math.max(0, vy - pad);
+  const sw = vw + pad*2, sh = vh + pad*2;
+  let k = (targetH || LINE_TARGET_H) / vh;
+  if(sw * k > LINE_MAX_W) k = LINE_MAX_W / sw;
+  const w = Math.max(24, Math.round(sw*k)), h = Math.max(12, Math.round(sh*k));
+  if(lnCv.width !== w || lnCv.height !== h){ lnCv.width = w; lnCv.height = h; }
+  lnCtx.filter = 'grayscale(1) contrast(1.55)';
+  lnCtx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, h);
+  return lnCv;
+}
+
 function drawLineFromVideo(rc, line, srcScale){
   const vx = rc.x + line.x0 / srcScale, vy = rc.y + line.y0 / srcScale;
   const vw = line.w / srcScale, vh = line.h / srcScale;
@@ -5049,23 +5120,50 @@ async function materialTick(){
           usedLines = true;
           const rc = materialBandRect();
           const srcScale = band.width / (rc ? rc.w : band.width);
+          const ctx = flat.getContext('2d', {willReadFrequently:true});
+          const img = ctx.getImageData(0,0,flat.width,flat.height);
+          const d = img.data, FW = flat.width;
+
           for(let i=0;i<lines.length;i++){
-            const lc = drawLineFromVideo(rc, lines[i], srcScale);
+            const L = lines[i];
+
+            // THE VALUE FIRST. Split the line into words and read the LAST one
+            // on its own, magnified hard. On "Mat.No   3000716" that is the
+            // number and nothing else - no caption to misread, a fraction of
+            // the pixels, and the vocabulary gets asked about one thing.
+            const words = sliceWords(d, FW, L.y0, L.y1, L.x0, L.x1);
+            if(words.length >= 2){
+              const w = words[words.length-1];
+              const wc = drawPieceFromVideo(rc, srcScale, w[0], L.y0,
+                                            w[1]-w[0]+1, L.h, WORD_TARGET_H);
+              if(wc){
+                // digits first: nearly every material is all digits, and a
+                // digits-only pass cannot be tempted into a letter
+                const dOnly = await readBand('mat', wc, '0123456789');
+                if(dOnly){ readTexts.push(dOnly); addMaterialEvidence(dOnly); }
+                if(materialVerdict().value) break;
+                const gen = await readBand('mat', wc);
+                if(gen && gen !== dOnly){ readTexts.push(gen); addMaterialEvidence(gen); }
+                if(materialVerdict().value) break;
+              }
+            }
+
+            // the whole line, as a second opinion - it catches a material that
+            // is printed with no caption in front of it
+            const lc = drawLineFromVideo(rc, L, srcScale);
             if(!lc) continue;
             const a = await readBand('mat', lc);
-            if(a) readTexts.push(a);
+            if(a){ readTexts.push(a); addMaterialEvidence(a); }
+            if(materialVerdict().value) break;
             const b = await readBand('mat', lc, '0123456789');
-            if(b && b !== a) readTexts.push(b);
-            // a line that already settles it: stop, the rest are description
-            addMaterialEvidence(a); if(b) addMaterialEvidence(b);
+            if(b && b !== a){ readTexts.push(b); addMaterialEvidence(b); }
             if(materialVerdict().value) break;
           }
         }
       }catch(_){ usedLines = false; }
 
       // No lines found - the band is blank, or a bag so speckled that every row
-      // looks like ink. Fall back to reading the whole band, which is what the
-      // tool did before v10.5.
+      // looks like ink. Fall back to reading the whole band.
       if(!usedLines || !readTexts.length){
         const wA = await readBand('mat', band);
         const wB = await readBand('mat', band, '0123456789');
