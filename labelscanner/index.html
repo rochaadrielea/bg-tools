@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v10.2';
+const VERSION = 'v10.4';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -556,8 +556,73 @@ function metricSummary(){
 const rows = loadRows();
 let editRow = -1;              // which line of the list is open for editing
 let current = null;
-function loadRows(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY))||[] }catch(_){ return [] } }
-function saveRows(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(rows)) }catch(_){} }
+// ============================================================================
+//  THE ROWS ARE THE ONLY THING THAT MATTERS  -  v10.3
+//  ---------------------------------------------------------------------------
+//  Adriele: "the list should survive anything - closing and opening again. The
+//  only thing that can erase it is Clear."
+//
+//  saveRows() used to swallow EVERY error. If the browser's storage filled up -
+//  and the metrics keep up to 500 sessions in the same small allowance - the
+//  save failed in complete silence and a morning's scanning was gone the next
+//  time the page opened. Nothing told anybody.
+//
+//  Now:
+//   - a failed save TRIES AGAIN after throwing the metrics away. Metrics are
+//     nice to have; the rows are the work. If it comes to a choice, the rows
+//     win without hesitation.
+//   - if it still fails, it says so loudly instead of pretending.
+//   - a SECOND copy is kept under its own key, and load falls back to it. Two
+//     independent copies is the difference between a corrupted write losing
+//     everything and losing nothing.
+//
+//  What no amount of code can fix: a different BROWSER, or a different address,
+//  has its own separate storage. Rows saved in Chrome are not visible in
+//  Firefox, and rows saved on github.io are not visible on quality.ruaggroup.com.
+//  That is the browser's rule, not the tool's - so the header now says which
+//  device it is showing, rather than a bare "0 rows" that looks like loss.
+// ============================================================================
+const STORE_BAK = STORE_KEY + '_bak';
+
+function loadRows(){
+  let a = null, b = null;
+  try{ a = JSON.parse(localStorage.getItem(STORE_KEY)); }catch(_){}
+  try{ b = JSON.parse(localStorage.getItem(STORE_BAK)); }catch(_){}
+  const okA = Array.isArray(a), okB = Array.isArray(b);
+  if(okA && okB) return (b.length > a.length) ? b : a;   // the fuller copy wins
+  if(okA) return a;
+  if(okB) return b;
+  return [];
+}
+
+let storageWarned = false;
+function saveRows(){
+  const json = JSON.stringify(rows);
+  try{
+    localStorage.setItem(STORE_KEY, json);
+    try{ localStorage.setItem(STORE_BAK, json); }catch(_){}  // best effort
+    return true;
+  }catch(e){
+    // out of room: the metrics go, the rows stay
+    try{
+      localStorage.removeItem(METRIC_KEY);
+      if(typeof metrics === 'object' && metrics) metrics.sessions = [];
+      localStorage.setItem(STORE_KEY, json);
+      localStorage.setItem(STORE_BAK, json);
+      return true;
+    }catch(e2){
+      if(!storageWarned){
+        storageWarned = true;
+        try{
+          sayOverCamera('STORAGE FULL \u2014 export now, rows are not being saved', 8000);
+        }catch(_){}
+        try{ setStatus('Storage full \u2014 export the list now','bad'); }catch(_){}
+      }
+      console.error('rows could not be saved', e2);
+      return false;
+    }
+  }
+}
 
 const vid=document.getElementById('vid');
 const statusEl=document.getElementById('status'), statusTxt=document.getElementById('statustxt');
@@ -4568,15 +4633,39 @@ function renderTable(){
   // way to correct one wrong character, and on a tray of ninety labels the bag
   // may already be back in the box. The pencil opens that row for editing in
   // place; the cross still deletes.
+  // NEVER LET ONE ROW TAKE THE WHOLE LIST DOWN  -  v10.4
+  // The const bug above blanked everything because one throw inside map() lost
+  // all sixteen rows. Each row is now built on its own, and a row that cannot
+  // be rendered shows as a visible error line instead of silently taking its
+  // fifteen neighbours with it. A list is the operator's work; it should be the
+  // hardest thing in the app to lose.
   body.innerHTML = rows.map(function(r,i){
-    return '<tr'+(editRow===i?' class="editing"':'')+'>'
+    try{ return rowHtml(r,i); }
+    catch(e){
+      console.error('row '+i+' could not be drawn', e);
+      return '<tr><td class="del" data-i="'+i+'">&#10005;</td>'
+           + '<td class="flag" colspan="'+(ALL_COLS.length+1)+'">'
+           + 'this line could not be displayed \u2014 it is still in the export</td></tr>';
+    }
+  }).join('');
+}
+
+function rowHtml(r,i){
+  return '<tr'+(editRow===i?' class="editing"':'')+'>'
       + '<td class="edit" data-edit="'+i+'" title="edit this line">&#9998;</td>'
       + '<td class="del" data-i="'+i+'" title="delete this line">&#10005;</td>'
       + ALL_COLS.map(function(c){
       const v = (r[c]||'').toString().replace(/</g,'&lt;');
-      const cls = ((c==='Check' && r.Check!=='ML')
-                || (c==='Proof' && /split|time-only|manual|stale-pair/.test(r[c]||'')))
-                  ? ' class="flag"' : '';
+      // v10.4: `let`, not `const`. This was declared const and then assigned to
+      // on the next line - so the instant any row carried Rev = "-" the
+      // assignment threw, the whole map() died, body.innerHTML was never set,
+      // and THE ENTIRE LIST WENT BLANK. The count kept working because it is
+      // set separately from rows.length, and the export kept working because it
+      // reads rows directly. That is exactly what Adriele saw: "16 rows" in the
+      // header, nothing underneath, and a complete file when she exported.
+      let cls = ((c==='Check' && r.Check!=='ML')
+              || (c==='Proof' && /split|time-only|manual|stale-pair/.test(r[c]||'')))
+                ? ' class="flag"' : '';
       // a dash in the Revision column is "no revision printed", not a gap -
       // coloured so a whole tray of rows can be read down at a glance
       if(c === 'Rev' && v === REV_NONE) cls = ' class="rev-none"';
@@ -4588,7 +4677,6 @@ function renderTable(){
       }
       return '<td'+cls+'>'+v+'</td>';
     }).join('') + '</tr>';
-  }).join('');
 }
 
 document.getElementById('body').addEventListener('click', function(e){
@@ -4760,22 +4848,43 @@ function materialBandRect(){
   let sx, sy, sw, sh;
   const f = heldField('CH-Nr');
   const b = f && f.box;
-  if(b && b.width > 8 && b.height > 4){
+
+  // THE MSL LABEL HAS NO CH- BARCODE  -  v10.3
+  // Its only barcode is the BATCH, printed at the very bottom, and the material
+  // is at the very top - measured off the real label, "Mat.No" sits 4.2
+  // barcode-heights ABOVE the batch code. Until now the band only ever anchored
+  // to a CH-Nr box, which an MSL label does not have, so it fell back to a
+  // fixed slice of the aim box and the material line sat right on its edge.
+  // That is why Adriele's photo showed "Char 852045 - need Mat" with 3000716
+  // printed in large clear type on the screen.
+  const mb = (!b && session.family === 'MSL')
+           ? (heldField('Char') || heldField('L-Char')) : null;
+  const bb = mb && mb.box;
+
+  if(bb && bb.width > 8 && bb.height > 4){
+    const bt = r.y + bb.y;
+    sy = bt - bb.height * 5.5;
+    sh = bb.height * 2.6;                 // 5.5 up to 2.9 up: covers 4.2
+    sx = r.x;
+    sw = r.w;
+  } else if(b && b.width > 8 && b.height > 4){
     const bx = r.x + b.x, by = r.y + b.y;
     sy = Math.max(r.y, by + b.height * 1.30);
     sh = Math.min(r.y + r.h, by + b.height * 3.20) - sy;
     sx = r.x;
     sw = Math.min(r.x + r.w, bx) - sx;
   } else {
-    // No barcode box yet. Cover the middle of the box - the material is never
-    // at the very top of one of these labels.
+    // No barcode box at all. v10.3: WIDER than before - it used to cover 15%
+    // to 57% of the aim box, and on the MSL label in the photo the material
+    // line landed right on the bottom edge of that, so half the frames missed
+    // it. A generous band read at slightly lower magnification beats a tight
+    // one aimed at the wrong place.
     sx = r.x;  sw = r.w;
-    sy = r.y + r.h * 0.15;
-    sh = r.h * 0.42;
+    sy = r.y + r.h * 0.08;
+    sh = r.h * 0.60;
   }
   return clampBand(sx, sy, sw, sh, r, function(){
-    // the barcode is out of the picture entirely: cover the middle of the box
-    return {x:r.x, y:r.y + r.h*0.15, w:r.w, h:r.h*0.42};
+    return {x:r.x, y:r.y + r.h*0.08, w:r.w, h:r.h*0.60};
   });
 }
 
