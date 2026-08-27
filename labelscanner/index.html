@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v10.9';
+const VERSION = 'v11.0';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -1567,6 +1567,7 @@ function resetSession(reason){
   // every reading loop's tally and allowance belongs to the label in view
   matVotes = {}; matCand = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
   matRvReads = [];
+  familyProbes = 0;
   narrowStart();
   revVotes = {}; revTries = 0; revLooks = 0;
   chgVotes = {}; chgTries = 0;
@@ -2442,8 +2443,18 @@ function familyFromText(text){
 }
 
 // One look at the whole label, only when it would actually decide something.
+// v11.0: a hard limit. probeFamily un-set its own "tried" flag whenever it
+// could not decide, so a label whose words are unreadable was probed again on
+// every single tick - an OCR pass each time, for as long as it was in view.
+// Three attempts is enough to tell an MSL from a WAE; after that the barcode
+// count decides and the tool gets on with it.
+const FAMILY_MAX_PROBES = 3;
+let familyProbes = 0;
+
 async function probeFamily(){
   if(session.family || session.familyTried) return session.family;
+  if(familyProbes >= FAMILY_MAX_PROBES){ session.familyTried = true; return ''; }
+  familyProbes++;
   if(scanBusy || ocrActive || !scanning || !vid.videoWidth) return '';
   session.familyTried = true;
   try{
@@ -2657,14 +2668,38 @@ function applyBarcodes(codes, tick){
         // state. Re-decoding now only refreshes WHERE the code is, never when
         // it was first seen.
         const pb0 = session.pendingBare;
-        if(pb0 && pb0.value === s.toUpperCase()){
+        // ==================================================================
+        //  DO NOT PARK WHAT IS ALREADY FILED  -  v11.0
+        //  ----------------------------------------------------------------
+        //  Adriele: "it is stuck on 'checking which label this is' and keeps
+        //  beeping." Both came from here.
+        //
+        //  The park had no idea whether the charge was already in hand. So:
+        //  park, wait 1.5s, file it as the charge, clear the park - and then
+        //  the very next frame decoded the same barcode again, found nothing
+        //  parked, and PARKED IT AGAIN with a fresh clock. Round and round,
+        //  a dozen times a second, for ever. The status flipped back to
+        //  "checking which label this is" on every lap, which is why it looked
+        //  stuck, and `changed` was set every lap too, which is what rang the
+        //  bell every 400ms.
+        //
+        //  A code whose value is already sitting in the field it would fill has
+        //  nothing left to say.
+        // ==================================================================
+        const val = s.toUpperCase();
+        if(normId(heldVal('Char')) === normId(val)) continue;   // already filed
+        if(heldVal('Char')) continue;      // a different charge is held: not ours
+
+        if(pb0 && pb0.value === val){
+          // the same code again: refresh WHERE it is, never the clock, or the
+          // wait could never expire
           if(box){ pb0.box = box; }
           pb0.tick = tick || pb0.tick;
+          // and nothing has changed, so nothing should flash or beep
         } else {
-          session.pendingBare = {value:s.toUpperCase(), box:box||null,
-                                 tick:tick||0, t:Date.now()};
+          session.pendingBare = {value:val, box:box||null, tick:tick||0, t:Date.now()};
+          changed = true;
         }
-        changed = true;
       }
       continue;
     }
