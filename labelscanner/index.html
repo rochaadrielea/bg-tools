@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v10.8';
+const VERSION = 'v10.9';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -866,8 +866,13 @@ function showProgress(){
     else if(short.length === 1)
       parts.push('Mat ' + short[0] + '? ' + v.score.toFixed(1) + '/' + MAT_CAND_LOCK.toFixed(1));
     else {
-      const r = bestVote(matRvVotes);
-      parts.push('Mat ' + (r.value ? r.value + ' ' + r.n + '/' + MAT_RV_LOCK_VOTES : '\u2026'));
+      const rv = rvConsensus();
+      if(rv) parts.push('Mat ' + rv + '? (not in list)');
+      else {
+        const r = bestVote(matRvVotes);
+        parts.push('Mat ' + (r.value ? r.value + ' ' + r.n + '/' + MAT_RV_LOCK_VOTES
+                                     : '\u2026 ' + matRvReads.length + ' reads'));
+      }
     }
   }
 
@@ -1314,7 +1319,10 @@ function addMaterialEvidence(text){
   const toks = lines.join(' ').toUpperCase().match(MAT_TOKEN_RE) || [];
   for(let i=0;i<toks.length;i++){
     const t = cleanMatToken(toks[i]);
-    if(t.length >= 5 && t !== normId(heldVal('Char'))) narrowMaterial(t);
+    if(t.length >= 5 && t !== normId(heldVal('Char'))){
+      narrowMaterial(t);   // the master search...
+      rvNote(t);           // ...and the one that needs no master, side by side
+    }
   }
   return Object.keys(one).length > 0;
 }
@@ -1322,9 +1330,25 @@ function addMaterialEvidence(text){
 // -> {value, score, lead} - value is '' until one entry is clearly ahead
 function materialVerdict(){
   // The narrowing gets the first word: it has seen every read, not just the
-  // ones that happened to be valid on their own.
+  // ones that happened to be valid on their own, and a material the master
+  // knows is always the better answer.
   const nv = narrowVerdict();
   if(nv.value) return {value:nv.value, top:nv.value, score:99, lead:99};
+
+  // But it is not allowed to HOLD ANYTHING UP. When the material is not in the
+  // list - most MSL parts - the narrowing will never answer no matter how long
+  // it is given, so waiting for it is waiting for nothing. The per-character
+  // consensus is asked in parallel, and it needs no list at all.
+  //
+  // Only once the master search has genuinely had its chance: enough reads to
+  // have narrowed, and a best fit poor enough that the part is evidently not
+  // one of the 1150. Otherwise a part that IS in the list could be filed by its
+  // raw reading, tagged RV, when the tool could have confirmed it properly.
+  const rv = rvConsensus();
+  if(rv){
+    const listedAndClose = matAlive && matReads >= 2 && nv.avg > 0 && nv.avg <= 0.60;
+    if(!listedAndClose) return {value:rv, top:rv, score:99, lead:99, unlisted:true};
+  }
 
   let best='', bestS=0, second=0;
   for(const m in matCand){
@@ -1542,6 +1566,7 @@ function resetSession(reason){
   charSuggestions = [];
   // every reading loop's tally and allowance belongs to the label in view
   matVotes = {}; matCand = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
+  matRvReads = [];
   narrowStart();
   revVotes = {}; revTries = 0; revLooks = 0;
   chgVotes = {}; chgTries = 0;
@@ -4995,6 +5020,68 @@ let matVoteRunning = false;
 let matVotes = {};
 let matCand = {};        // v8.0: master entries -> accumulated support
 let matRvVotes = {};
+// ============================================================================
+//  WHEN THE MASTER LIST CANNOT HELP  -  v10.9
+//  ---------------------------------------------------------------------------
+//  Adriele: "some materials are not in the master list, especially the MSL ones.
+//  Do not delay because of this - run the match in parallel, and if you did not
+//  find it, give me what you found."
+//
+//  Both parts of that were wrong before. The narrowing can only ever answer
+//  with a material that IS in the list, so on an MSL part it narrows for a
+//  while, finds nothing that fits, and holds the whole label up. And the
+//  fallback needed FOUR IDENTICAL reads - the hardest possible bar for exactly
+//  the case where the vocabulary is no help, because nothing is there to
+//  correct the OCR and it rarely returns the same string twice, let alone four
+//  times.
+//
+//  So the fallback votes PER CHARACTER instead of per string. Three reads of
+//  3007640 that each get one different digit wrong still agree on every
+//  position by majority, and the answer comes out right even though not one of
+//  the reads was. It is the same principle as the narrowing, applied where
+//  there is no list to narrow.
+//
+//  It runs alongside, not after. Whichever answers first wins, and a material
+//  the master knows is always preferred - but a material it does not know is
+//  no longer a reason to make somebody type.
+// ============================================================================
+const RV_MIN_READS = 3;      // before a consensus is trusted at all
+let matRvReads = [];         // every value-shaped token seen on this label
+
+function rvNote(tok){
+  const t = cleanMatToken(tok);
+  if(t && t.length >= 5 && couldBeMaterial(t) && t !== normId(heldVal('Char'))){
+    matRvReads.push(t);
+    if(matRvReads.length > 40) matRvReads.shift();
+  }
+}
+
+// Majority vote, position by position, among the reads that agree on length.
+// '' when any position is a tie - a coin toss in one character is a coin toss
+// in the whole number.
+function rvConsensus(){
+  if(matRvReads.length < RV_MIN_READS) return '';
+  const byLen = {};
+  for(const r of matRvReads) (byLen[r.length] = byLen[r.length] || []).push(r);
+  let group = [];
+  for(const L in byLen) if(byLen[L].length > group.length) group = byLen[L];
+  if(group.length < RV_MIN_READS) return '';
+
+  let out = '';
+  for(let i=0;i<group[0].length;i++){
+    const tally = {};
+    for(const r of group){ const c = r.charAt(i); tally[c] = (tally[c]||0) + 1; }
+    let bc = '', bn = 0, second = 0;
+    for(const c in tally){
+      if(tally[c] > bn){ second = bn; bn = tally[c]; bc = c; }
+      else if(tally[c] > second){ second = tally[c]; }
+    }
+    if(bn <= second) return '';              // tied on this character
+    if(bn * 2 <= group.length) return '';    // and it must be a real majority
+    out += bc;
+  }
+  return out;
+}
 let matTries = 0;
 let matVoteTimer = null;
 let matVoteText = [];
