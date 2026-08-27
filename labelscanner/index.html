@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v10.4';
+const VERSION = 'v10.5';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -3179,7 +3179,11 @@ const BAND_CFG = {
   // Capitals, digits, dash, dot. Lowercase is what turned "Mat.No 3001195"
   // into "Maine s00186" - a material number has never contained a lowercase
   // letter, so allowing them only gave the engine wrong answers to choose from.
-  mat: {psm:'6', wl:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.'},
+  // v10.5: PSM 7 - a SINGLE LINE. The band is cut into lines before it gets
+  // here, so there is no layout left to analyse, and page mode on a one-line
+  // image is where the invented columns and reading orders came from. Single-
+  // line mode has no such freedom: it reads left to right and stops.
+  mat: {psm:'7', wl:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.'},
   rev:  {psm:'6', wl:REV_WHITELIST},      // the vocabulary, for its whole life
   // v8.3: the revision reads the SAME picture two ways, and until now it did
   // them one after the other on one worker - so a look cost two reads back to
@@ -4800,6 +4804,8 @@ let matVoteTimer = null;
 let matVoteText = [];
 let matDeepFired = false;
 
+const lnCv = document.createElement('canvas');
+const lnCtx = lnCv.getContext('2d', {willReadFrequently:true});
 const fullCv = document.createElement('canvas');
 const fullCtx = fullCv.getContext('2d', {willReadFrequently:true});
 const mbCv = document.createElement('canvas');
@@ -4888,6 +4894,109 @@ function materialBandRect(){
   });
 }
 
+// ============================================================================
+//  FIND THE LINES, THEN READ ONE LINE  -  v10.5
+//  ---------------------------------------------------------------------------
+//  Adriele: "the MSL reader is still horrible - the camera is right in front of
+//  the material and it is guessing wrong."
+//
+//  It was being handed 2400 x 2192 pixels - FIVE MEGAPIXELS - and asked to do
+//  full page-layout analysis on it, several times a second, to find one number.
+//  For comparison a whole A4 page scanned at 300dpi is under nine. And the
+//  magnification bought nothing: the text is already ~45 pixels tall in the
+//  source, which is more than enough, so every one of those pixels was cost
+//  without benefit. Worse, page-layout mode on a big block invents columns and
+//  reading orders that are not there - which is exactly what "guessing wrong"
+//  looks like.
+//
+//  A label is not a page. It is a handful of short lines. So:
+//    1. threshold the band once, cheaply, at low magnification
+//    2. measure ink per ROW - text lines show up as solid runs, gaps as zero
+//    3. crop each line tightly, left and right as well as top and bottom
+//    4. read each line ON ITS OWN, magnified so the text is ~56px tall, in
+//       SINGLE-LINE mode
+//
+//  Each read is now perhaps 1200 x 60 - about seventy thousand pixels instead
+//  of five million - and single-line mode has no layout to get wrong.
+// ============================================================================
+const LINE_TARGET_H = 56;     // what a capital should measure when read
+const LINE_MAX_W = 1500;      // and the widest a line is ever drawn
+
+// Rows of ink in a thresholded band -> [{y0,y1,x0,x1}, ...], tightest first.
+function sliceTextLines(bw, maxLines){
+  let d, W, H;
+  try{
+    const ctx = bw.getContext('2d', {willReadFrequently:true});
+    const img = ctx.getImageData(0,0,bw.width,bw.height);
+    d = img.data; W = bw.width; H = bw.height;
+  }catch(_){ return []; }
+  if(W < 8 || H < 8) return [];
+
+  const rowInk = new Uint32Array(H);
+  for(let y=0;y<H;y++){
+    let n = 0; const o = y*W;
+    for(let x=0;x<W;x++) if(d[(o+x)<<2] < 128) n++;
+    rowInk[y] = n;
+  }
+  // a row is "text" when a small but real fraction of it is dark. Too low and
+  // the bag's speckle joins every line into one; too high and thin digits
+  // vanish.
+  const thr = Math.max(2, Math.round(W * 0.010));
+
+  const runs = [];
+  let start = -1;
+  for(let y=0;y<H;y++){
+    if(rowInk[y] > thr){ if(start < 0) start = y; }
+    else if(start >= 0){ runs.push([start, y-1]); start = -1; }
+  }
+  if(start >= 0) runs.push([start, H-1]);
+
+  // join runs split by the gap inside a character, drop anything too thin to
+  // be a line of print
+  const merged = [];
+  const minH = Math.max(6, Math.round(H * 0.02));
+  for(const r of runs){
+    const last = merged[merged.length-1];
+    if(last && (r[0] - last[1]) <= 2) last[1] = r[1];
+    else merged.push([r[0], r[1]]);
+  }
+
+  const out = [];
+  for(const [y0,y1] of merged){
+    if((y1 - y0 + 1) < minH) continue;
+    // tighten left and right too - most of a label line is empty paper
+    let x0 = W, x1 = -1;
+    for(let y=y0;y<=y1;y++){
+      const o = y*W;
+      for(let x=0;x<W;x++){
+        if(d[(o+x)<<2] < 128){ if(x < x0) x0 = x; if(x > x1) x1 = x; }
+      }
+    }
+    if(x1 < x0) continue;
+    out.push({y0:y0, y1:y1, x0:x0, x1:x1, h:(y1-y0+1), w:(x1-x0+1)});
+  }
+  // tallest first: on these labels the material line is the biggest print
+  out.sort(function(a,b){ return b.h - a.h; });
+  return out.slice(0, maxLines || 4);
+}
+
+// Draw one line from the VIDEO at the magnification that line actually needs.
+function drawLineFromVideo(rc, line, srcScale){
+  const vx = rc.x + line.x0 / srcScale, vy = rc.y + line.y0 / srcScale;
+  const vw = line.w / srcScale, vh = line.h / srcScale;
+  if(vw < 8 || vh < 4) return null;
+  const pad = vh * 0.25;
+  const sx = Math.max(0, vx - pad), sy = Math.max(0, vy - pad);
+  const sw = vw + pad*2, sh = vh + pad*2;
+  let k = LINE_TARGET_H / vh;
+  if(sw * k > LINE_MAX_W) k = LINE_MAX_W / sw;
+  const w = Math.max(24, Math.round(sw*k)), h = Math.max(12, Math.round(sh*k));
+  if(lnCv.width !== w || lnCv.height !== h){ lnCv.width = w; lnCv.height = h; }
+  lnCtx.filter = 'grayscale(1) contrast(1.5)';
+  lnCtx.drawImage(vid, sx, sy, sw, sh, 0, 0, w, h);
+  return lnCv;
+}
+
 function grabMaterialBand(){
   const rc = materialBandRect();
   if(!rc) return null;
@@ -4919,46 +5028,57 @@ async function materialTick(){
       // same pixels as last time = the same witness twice, not two witnesses
       if(!bandChanged('mat', band)){ matVoteTimer = setTimeout(materialTick, MAT_POLL_MS); return; }
 
-      // TWO PASSES ON THE SAME PICTURE, and they disagree usefully. The general
-      // pass can read a material that contains letters (K1005524, C3529120-C);
-      // the digits-only pass cannot be tempted into a letter at all, which is
-      // what fixes the O-for-0 reads that dominate on these labels. Every token
-      // from both is judged against the master, so a pass that produces
-      // nothing costs nothing.
-      // Two passes on the picture, and - v8.8 - a third on a glare-corrected
-      // copy of it. The material line is the one most often washed out by a
-      // highlight on the bag, and it is the field that costs the most to lose.
-      // TWO PASSES BY DEFAULT, A THIRD ONLY WHEN THEY FAIL  -  v10.1
-      // Adriele: "so slow, please improve the performance." Every look was
-      // running THREE full OCR passes plus a local-threshold rebuild of the
-      // whole band - on a phone that is most of the cost of the entire loop,
-      // and it was being paid on every frame whether it was needed or not.
+      // ONE LINE AT A TIME  -  v10.5
+      // The band is thresholded once, its text lines are measured from the ink
+      // in each row, and then each line is drawn FROM THE VIDEO at whatever
+      // magnification that particular line needs and read on its own in
+      // single-line mode.
       //
-      // The glare-corrected pass earns its place only when the ordinary ones
-      // come back with nothing the vocabulary recognises. On a well-lit label
-      // that is never, so the common case is now a third faster than the two
-      // passes suggest - the expensive part was the threshold rebuild, not the
-      // reading.
-      const rawA = await readBand('mat', band);
-      const rawB = await readBand('mat', band, '0123456789');
-      let rawC = '';
-      const gotSomething = addMaterialEvidence(rawA)
-                         | addMaterialEvidence(rawB);
-      if(!gotSomething){
-        try{
-          const flat = adaptiveBinarise(band, 0.30, 10);
-          rawC = await readBand('mat', flat);
-        }catch(_){}
-      }
-      const raw = rawA;
-      if(rawA) matVoteText.push(rawA);
-      if(rawB && rawB !== rawA) matVoteText.push(rawB);
-      if(rawC && rawC !== rawA && rawC !== rawB) matVoteText.push(rawC);
-      if(rawC) addMaterialEvidence(rawC);
-      // EVERY read narrows the vocabulary, whether or not it produced a token
-      // that is valid on its own. This is the accumulation that was missing.
+      // Two readings per line, as before: the general one can handle a material
+      // with letters in it (K1005524, C3529120-C), and the digits-only one
+      // cannot be tempted into a letter at all, which is what kills the O-for-0
+      // mistakes. Every token from every line goes to the vocabulary, so a line
+      // that turns out to be the description or the expiry date simply
+      // contributes nothing and costs nothing.
+      let readTexts = [];
+      let usedLines = false;
+      try{
+        const flat = adaptiveBinarise(band, 0.30, 10);
+        const lines = sliceTextLines(flat, 3);
+        if(lines.length){
+          usedLines = true;
+          const rc = materialBandRect();
+          const srcScale = band.width / (rc ? rc.w : band.width);
+          for(let i=0;i<lines.length;i++){
+            const lc = drawLineFromVideo(rc, lines[i], srcScale);
+            if(!lc) continue;
+            const a = await readBand('mat', lc);
+            if(a) readTexts.push(a);
+            const b = await readBand('mat', lc, '0123456789');
+            if(b && b !== a) readTexts.push(b);
+            // a line that already settles it: stop, the rest are description
+            addMaterialEvidence(a); if(b) addMaterialEvidence(b);
+            if(materialVerdict().value) break;
+          }
+        }
+      }catch(_){ usedLines = false; }
 
-      const toks = (rawA + '\n' + rawB + '\n' + rawC).toUpperCase().match(MAT_TOKEN_RE) || [];
+      // No lines found - the band is blank, or a bag so speckled that every row
+      // looks like ink. Fall back to reading the whole band, which is what the
+      // tool did before v10.5.
+      if(!usedLines || !readTexts.length){
+        const wA = await readBand('mat', band);
+        const wB = await readBand('mat', band, '0123456789');
+        if(wA){ readTexts.push(wA); addMaterialEvidence(wA); }
+        if(wB && wB !== wA){ readTexts.push(wB); addMaterialEvidence(wB); }
+      }
+
+      const rawA = readTexts[0] || '', rawB = readTexts[1] || '', rawC = readTexts[2] || '';
+      const raw = rawA;
+      readTexts.forEach(function(t2){ if(t2) matVoteText.push(t2); });
+      const allText = readTexts.join('\n');
+
+      const toks = allText.toUpperCase().match(MAT_TOKEN_RE) || [];
       if(raw) matTries++;
       showProgress();
 
