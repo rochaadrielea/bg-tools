@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v10.6';
+const VERSION = 'v10.7';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -856,7 +856,13 @@ function showProgress(){
     // on the right number or hunting in the wrong place entirely.
     const v = materialVerdict();
     const short = materialShortlist(2);
-    if(short.length > 1)      parts.push('Mat ' + short.join('? ') + '?');
+    // v10.7: show the set closing in - 1150, then 40, then 3, then one. It is
+    // the clearest possible sign that the tool is getting somewhere, and if the
+    // number stops falling the operator knows to move the phone rather than
+    // wait.
+    const nv = narrowVerdict();
+    const narrowing = (nv.n && nv.n > 1 && matReads) ? '  \u00b7 ' + nv.n + ' left' : '';
+    if(short.length > 1)      parts.push('Mat ' + short.join('? ') + '?' + narrowing);
     else if(short.length === 1)
       parts.push('Mat ' + short[0] + '? ' + v.score.toFixed(1) + '/' + MAT_CAND_LOCK.toFixed(1));
     else {
@@ -1147,15 +1153,179 @@ function masterCandidates(text){
   return out;
 }
 
+// ============================================================================
+//  NARROWING: EVERY READ ELIMINATES  -  v10.7
+//  ---------------------------------------------------------------------------
+//  Adriele: "while you read, can you compare with the master list, so you get
+//  closer and closer?"
+//
+//  Until now every read was judged ON ITS OWN and given a score. A read that
+//  was nearly right scored nothing and was forgotten, so five nearly-right
+//  reads added up to nothing at all - the tool started from zero every time.
+//
+//  This keeps a LIVE SET of the materials still possible, and charges each of
+//  them for how badly it fits each read. Costs accumulate, so a material that
+//  is nearly right every time gathers a small bill while a material that is
+//  wrong gathers a large one - and the wrong ones are struck out permanently.
+//  1150 becomes 40 becomes 3 becomes 1. That is the "closer and closer".
+//
+//  It is strictly stronger than scoring reads independently, because being
+//  eliminated is remembered. No single read has to be correct: the right answer
+//  only has to be the one that fits ALL of them least badly.
+//
+//  SAFEGUARDS, because striking out the right answer is unrecoverable:
+//   - a candidate is only struck out when it costs KEEP_BAND MORE than the best
+//     one, which is a wide margin, not a photo finish
+//   - the set never empties: if everything would go, the best few stay
+//   - nothing is filed from one read, however clean it looks
+//   - a survivor must fit well ON AVERAGE, not just be the last one standing
+// ============================================================================
+const NARROW_KEEP_BAND = 2.0;   // how much worse than the best is still alive
+const NARROW_MIN_READS = 2;     // never settle on a single read
+const NARROW_MAX_AVG   = 1.10;  // and the winner must actually fit
+// How far ahead the winner has to be. ONE full real character, which is the
+// same bar the rest of this tool uses: confusions are cheap (0.25 each), a
+// genuinely different digit costs 1.00. Requiring a lead of a whole character
+// means the runner-up is a different PART, not a different reading of the same
+// one. Using the elimination band (2.0) here was simply too strict - it left
+// 3000716 at 0.75 sitting behind a 2.0 bar while the next best cost 2.50, more
+// than three times as much, and refused to call it.
+const NARROW_CLEAR = 1.00;
+// AND ONE READ MUST HAVE FITTED ALMOST EXACTLY.
+// The regression suite caught the narrowing breaking Adriele's own trap: six
+// reads of 3001166 settled on 3001196, because a consistent ONE-REAL-CHARACTER
+// error averages 1.00 per read and slipped under the average-fit bar. Average
+// cost cannot tell four cheap confusions from one real difference - they come
+// to the same number - so it cannot be the only test.
+// A material is only accepted if, on at least one read, it explained what was
+// seen almost perfectly. A wrong part never does that: it is wrong by a whole
+// character every single time.
+const NARROW_BEST_FIT = 0.60;
+let matAlive = null;            // Map: material -> accumulated cost
+let matBestFit = null;          // Map: material -> best cost in any ONE read
+let matReads = 0;
+
+function narrowStart(){ matAlive = null; matBestFit = null; matReads = 0; }
+
+// Is this token even shaped like a material? Narrowing on "SCHWEIZ" or
+// "GRAVITY" charges every material for failing to be a word, which tells us
+// nothing and leaves noise sitting on the shortlist.
+function couldBeMaterial(t){
+  return /[0-9]/.test(t) && /^[A-Z0-9][A-Z0-9.\-]{4,15}$/.test(t);
+}
+
+// One read. Returns how many materials are still possible.
+function narrowMaterial(tok){
+  const t = cleanMatToken(tok);
+  if(!MASTER || !t || t.length < 4 || !couldBeMaterial(t)) {
+    return matAlive ? matAlive.size : 0;
+  }
+
+  if(!matAlive){
+    matAlive = new Map();
+    matBestFit = new Map();
+    for(let i=0;i<matList.length;i++){ matAlive.set(matList[i], 0); matBestFit.set(matList[i], 99); }
+  }
+
+  // Measure first, commit second. A read that fits NOTHING is not evidence -
+  // it is a smear, a description, or the wrong patch of the label - and adding
+  // it would push every material a little further from the truth while telling
+  // us nothing about which.
+  const forms = matForms(t);
+  const fit = new Map();
+  let bestFit = Infinity;
+  matAlive.forEach(function(cost, e){
+    let d = Infinity;
+    for(let f=0; f<forms.length; f++){
+      const x = weightedDist(forms[f], e, 3);
+      if(x < d) d = x;
+    }
+    d = Math.min(d, 3);
+    fit.set(e, d);
+    if(d < bestFit) bestFit = d;
+  });
+  if(bestFit >= 3) return matAlive.size;      // nothing fits: not a read at all
+
+  matReads++;
+  let best = Infinity;
+  matAlive.forEach(function(cost, e){
+    const d = fit.get(e);
+    const nc = cost + d;
+    matAlive.set(e, nc);
+    if(d < matBestFit.get(e)) matBestFit.set(e, d);
+    if(nc < best) best = nc;
+  });
+
+  // strike out anything that is now hopeless
+  const keep = best + NARROW_KEEP_BAND;
+  const survivors = [];
+  matAlive.forEach(function(c, e){ if(c <= keep) survivors.push([e, c]); });
+  if(survivors.length){
+    matAlive = new Map(survivors);
+  }
+  return matAlive.size;
+}
+
+// -> {value, n, avg} - value is '' until one material is clearly alone
+function narrowVerdict(){
+  if(!matAlive || !matAlive.size || matReads < NARROW_MIN_READS) {
+    return {value:'', n: matAlive ? matAlive.size : 0, avg:0};
+  }
+  let best = '', bestC = Infinity, second = Infinity;
+  matAlive.forEach(function(c, e){
+    if(c < bestC){ second = bestC; bestC = c; best = e; }
+    else if(c < second){ second = c; }
+  });
+  const avg = bestC / matReads;
+  // `|| 99` here was a bug: a PERFECT fit is 0, and 0 is falsy in JavaScript,
+  // so the best possible reading was turned into the worst and every clean read
+  // was refused. Check for undefined explicitly.
+  let fitted = 99;
+  if(matBestFit && matBestFit.has(best)) fitted = matBestFit.get(best);
+  // alone, or far enough ahead that the runner-up is not a contender...
+  const clear = (matAlive.size === 1) || ((second - bestC) >= NARROW_CLEAR);
+  // ...AND it explained one of the reads almost exactly. Without this a part
+  // that is wrong by one character every time still wins on totals.
+  const ok = clear && avg <= NARROW_MAX_AVG && fitted <= NARROW_BEST_FIT;
+  return {value: ok ? best : '', n: matAlive.size, avg: avg, fit: fitted, top: best};
+}
+
+// what the narrowing is currently thinking, best first
+function narrowShortlist(n){
+  // Nothing has been read yet, so every material is still "alive" and offering
+  // any of them would be pure noise dressed up as a candidate. The test caught
+  // this: "BEYOND GRAVITY SCHWEIZ AG" produced a suggestion.
+  if(!matAlive || !matReads) return [];
+  const a = [];
+  matAlive.forEach(function(c, e){ a.push([e, c]); });
+  a.sort(function(x, y){ return x[1] - y[1]; });
+  return a.slice(0, n || 3).map(function(p){ return p[0]; });
+}
+
 // The running candidate set for the label in view, and what it currently says.
 function addMaterialEvidence(text){
   const one = masterCandidates(text);
   for(const m in one) matCand[m] = (matCand[m]||0) + one[m];
+
+  // v10.7: and it NARROWS. Every token that could be a material charges every
+  // surviving material for how badly it fits, so the set shrinks read by read.
+  const lines = String(text||'').split(/\n/)
+                  .filter(function(l){ return !OTHER_FIELD_LINE.test(l); });
+  const toks = lines.join(' ').toUpperCase().match(MAT_TOKEN_RE) || [];
+  for(let i=0;i<toks.length;i++){
+    const t = cleanMatToken(toks[i]);
+    if(t.length >= 5 && t !== normId(heldVal('Char'))) narrowMaterial(t);
+  }
   return Object.keys(one).length > 0;
 }
 
 // -> {value, score, lead} - value is '' until one entry is clearly ahead
 function materialVerdict(){
+  // The narrowing gets the first word: it has seen every read, not just the
+  // ones that happened to be valid on their own.
+  const nv = narrowVerdict();
+  if(nv.value) return {value:nv.value, top:nv.value, score:99, lead:99};
+
   let best='', bestS=0, second=0;
   for(const m in matCand){
     if(matCand[m] > bestS){ second=bestS; bestS=matCand[m]; best=m; }
@@ -1170,6 +1340,8 @@ function materialVerdict(){
 // buttons. Never invented: every entry here is a real material the vocabulary
 // says the picture could be.
 function materialShortlist(n){
+  const nl = narrowShortlist(n);
+  if(nl.length) return nl;
   return Object.keys(matCand)
     .sort(function(a,b){ return matCand[b]-matCand[a]; })
     .slice(0, n||3);
@@ -1370,6 +1542,7 @@ function resetSession(reason){
   charSuggestions = [];
   // every reading loop's tally and allowance belongs to the label in view
   matVotes = {}; matCand = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
+  narrowStart();
   revVotes = {}; revTries = 0; revLooks = 0;
   chgVotes = {}; chgTries = 0;
   lastProgress = '';
