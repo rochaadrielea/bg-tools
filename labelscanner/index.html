@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v10.7';
+const VERSION = 'v10.8';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -4126,6 +4126,14 @@ async function deepMaterialScan(){
           if(!txt.trim()) continue;
           texts.push(txt);
 
+          // THE STILL PHOTO FEEDS THE NARROWING TOO  -  v10.8
+          // This is the best picture the tool will ever get - the whole sensor,
+          // four rotations, no reticle - and until now its reading was thrown
+          // away unless it resolved the material outright. Every one of those
+          // passes is a strong witness, and the narrowing is built to make use
+          // of witnesses that are only nearly right.
+          addMaterialEvidence(txt);
+
           const p = parseOcr(txt);
           // everything else the pass happened to read joins the session too -
           // a rotation that finds the material usually finds the rest as well
@@ -4140,6 +4148,16 @@ async function deepMaterialScan(){
             if(r.value && ok){
               put('Mat', r.value, 'ocr', null, 0);
               if(r.original) session.matOriginal = r.original;
+            }
+          }
+          // ...and the narrowing gets to answer as well. Four rotations of a
+          // full-sensor photo, each nearly right, will settle a material that
+          // no single one of them read correctly.
+          if(!heldField('Mat')){
+            const nv = materialVerdict();
+            if(nv.value){
+              put('Mat', nv.value, 'ocr', null, 0);
+              lock('Mat','ocr');
             }
           }
           if(heldField('Mat')){
@@ -4965,7 +4983,12 @@ const MAT_LOCK_VOTES = 2;
 // so it is held to the same bar: FOUR agreeing reads. Adriele asked for 4 on
 // the material; this is where 4 actually buys something and 2 does not.
 const MAT_RV_LOCK_VOTES = 4;
-const MAT_DEEP_AFTER = 10;   // quick band misses -> escalate to the deep scan
+// v10.8: SIX, not ten. A look used to cost five megapixels; since v10.6 it
+// costs about forty thousand, so six looks now go by faster than two used to.
+// The still photo is the strongest reader in the tool - full sensor, four
+// rotations, no reticle - and making the operator wait ten failures for it was
+// already generous. Now it is just slow.
+const MAT_DEEP_AFTER = 6;    // quick band misses -> escalate to the still photo
 const MAT_MAX_TRIES  = 24;   // absolute ceiling before the card opens
 
 let matVoteRunning = false;
@@ -5350,7 +5373,18 @@ async function materialTick(){
       const allText = readTexts.join('\n');
 
       const toks = allText.toUpperCase().match(MAT_TOKEN_RE) || [];
-      if(raw) matTries++;
+      // A LOOK IS A TRY, WHETHER OR NOT IT READ ANYTHING  -  v10.8
+      // This counted only looks that came back with TEXT. Since v10.5 the band
+      // is cut into lines first, so when the label is blurred or badly aimed
+      // there are no lines, no text, and the counter never moved - which meant
+      // the escalation to the STILL PHOTO never fired, the give-up never fired,
+      // and the tool simply looped until the hint suggested typing it by hand.
+      // Adriele: "three asking me to add manually, and it is not taking a
+      // picture." It was not taking a picture because, by its own count, it had
+      // not tried yet.
+      //
+      // Reading nothing at all is the most complete failure there is. It counts.
+      matTries++;
       showProgress();
 
       const verdict = materialVerdict();
