@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v11.0';
+const VERSION = 'v11.2';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -485,6 +485,91 @@ const STORE_KEY = 'wae_label_rows_v5';   // unchanged on purpose: keeps rows alr
 //  It stays on the phone. Nothing is uploaded; there is no backend to upload
 //  to. It travels out inside the .xlsx the operator already exports.
 // ============================================================================
+// ============================================================================
+//  LEARNING FROM CONFIRMED LABELS  -  v11.1
+//  ---------------------------------------------------------------------------
+//  Adriele: "for MSL especially, to learn the pattern - and to learn which
+//  model is good."
+//
+//  Two things worth learning, and neither of them needs a neural network:
+//
+//  1. WHERE THE MATERIAL IS. Every offset in this tool was measured off ONE
+//     photograph - "4.2 barcode-heights above the batch code" came from a
+//     single MSL label. That is a guess dressed up as a constant, and it is
+//     why MSL has been the worst family. Every confirmed label says where the
+//     material REALLY was, so after a few dozen the tool knows the layout of
+//     the labels actually in this building rather than the one I was sent.
+//
+//  2. WHICH READER IS ANY GOOD. The tool has several - barcode, the general
+//     OCR pass, digits-only, the shape matcher, the still photo - and it has
+//     been trying them in an order I decided. Each confirmed row says which one
+//     produced the value that a human then accepted unchanged. Order them by
+//     their record, per family, and the best reader for MSL gets asked first
+//     even if it is not the best for WAE.
+//
+//  WHY NOT A MODEL: almost every failure of the last twenty versions was AIM or
+//  PLUMBING - a band pointed at the wrong part of the label, a counter that
+//  never incremented, a loop that never exited. A model on top of a misaimed
+//  band would have read the same wrong patch with more confidence, and it could
+//  not be read back the way these numbers can. This stays deterministic and
+//  auditable, which is what aerospace traceability needs.
+//
+//  ONLY CONFIRMED, UNEDITED ROWS TEACH IT. A row the operator had to correct is
+//  evidence the reader was WRONG, and is recorded as such.
+// ============================================================================
+const LEARN_KEY = 'wae_learn_v1';
+const LEARN_MIN = 5;         // samples before a learned offset is trusted at all
+const LEARN_FULL = 20;       // and where it fully replaces the measured default
+
+function loadLearn(){
+  try{ return JSON.parse(localStorage.getItem(LEARN_KEY)) || {geom:{}, readers:{}}; }
+  catch(_){ return {geom:{}, readers:{}}; }
+}
+function saveLearn(){
+  try{ localStorage.setItem(LEARN_KEY, JSON.stringify(learn)); }catch(_){}
+}
+const learn = loadLearn();
+if(!learn.geom) learn.geom = {};
+if(!learn.readers) learn.readers = {};
+
+// --- 1. where the material sat, in barcode-heights above/below the anchor ---
+function learnGeom(family, offset){
+  if(!family || !isFinite(offset)) return;
+  // a wild offset is a mis-association, not a lesson
+  if(offset < -12 || offset > 12) return;
+  const g = learn.geom[family] || (learn.geom[family] = {n:0, sum:0});
+  g.n++; g.sum += offset;
+  saveLearn();
+}
+
+// -> the offset to use, blended from the measured default towards what has
+// actually been seen. It never jumps: with five samples it is mostly the
+// default, with twenty it is mostly what the labels here really do.
+function geomOffset(family, fallback){
+  const g = learn.geom[family];
+  if(!g || g.n < LEARN_MIN) return fallback;
+  const mean = g.sum / g.n;
+  const w = Math.min(1, (g.n - LEARN_MIN) / (LEARN_FULL - LEARN_MIN));
+  return fallback * (1 - w) + mean * w;
+}
+
+// --- 2. which reader produced a value a human then accepted ---
+function learnReader(family, col, src, wasEdited){
+  if(!src) return;
+  const k = (family || '?') + '|' + col + '|' + src;
+  const r = learn.readers[k] || (learn.readers[k] = {ok:0, bad:0});
+  if(wasEdited) r.bad++; else r.ok++;
+  saveLearn();
+}
+
+// How well a reader has done for this family and field, 0..1. An unknown
+// reader gets 0.5 - no record is not the same as a bad record.
+function readerScore(family, col, src){
+  const r = learn.readers[(family||'?') + '|' + col + '|' + src];
+  if(!r || (r.ok + r.bad) < 3) return 0.5;
+  return r.ok / (r.ok + r.bad);
+}
+
 const METRIC_KEY = 'wae_metrics_v1';
 
 function loadMetrics(){
@@ -1559,7 +1644,7 @@ function fixRevChar(raw){
 // ============================================================================
 let session = newSession();
 let attemptStart = Date.now();
-function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null, locked:{}, stray:null, family:''}; }
+function newSession(){ return {fields:{}, lastAt:0, votes:{}, conflict:null, matOriginal:'', codes:{}, pendingBare:null, locked:{}, stray:null, family:'', familyTried:false, matGeom:null}; }
 
 function resetSession(reason){
   matSuggestions = [];
@@ -1568,6 +1653,7 @@ function resetSession(reason){
   matVotes = {}; matCand = {}; matRvVotes = {}; matTries = 0; matVoteText = []; matDeepFired = false;
   matRvReads = [];
   familyProbes = 0;
+  matDeepShots = 0;
   narrowStart();
   revVotes = {}; revTries = 0; revLooks = 0;
   chgVotes = {}; chgTries = 0;
@@ -3230,6 +3316,19 @@ confirmOk.addEventListener('click', function(){
     return;
   }
 
+  // ONLY A CLEAN CONFIRM TEACHES. If the operator corrected the material then
+  // whatever the reader found was wrong, and the place it found it is not a
+  // lesson about where the material lives - it is recorded as a miss instead.
+  const editedCols = (mLabel && mLabel.edits) ? mLabel.edits : [];
+  const fam = session.family || '';
+  KEY_COLS.forEach(function(c){
+    const f = heldField(c);
+    if(f) learnReader(fam, c, f.src, editedCols.indexOf(c) >= 0);
+  });
+  if(session.matGeom && editedCols.indexOf('Mat') < 0 && heldVal('Mat')){
+    learnGeom(session.matGeom.family, session.matGeom.off);
+  }
+
   metricNote('rev', row.Rev || '');
   metricEnd('added', function(c){ const f = heldField(c); return f ? f.src : ''; });
   lastConfirmed = {Mat:row.Mat, Char:row.Char};
@@ -3594,11 +3693,34 @@ function resolveVotes(){
 const stillCv = document.createElement('canvas');
 const stillCtx = stillCv.getContext('2d', {willReadFrequently:true});
 
+// ASK THE CAMERA FOR ITS BIGGEST PICTURE  -  v11.2
+// takePhoto() was called with no settings at all, so it handed back whatever
+// the camera felt like - usually the same 1920 wide as the preview, on a sensor
+// that can give four thousand. That threw away most of the reason for taking a
+// photograph in the first place. Asked properly, the material line goes from
+// about 45 pixels tall to nearer 200, which is the difference between Tesseract
+// guessing and Tesseract reading.
+// Worked out once and remembered: getPhotoCapabilities() is slow to call.
+let photoBest = null;
+async function bestPhotoSettings(ic){
+  if(photoBest !== null) return photoBest;
+  photoBest = undefined;
+  try{
+    const caps = await ic.getPhotoCapabilities();
+    if(caps && caps.imageWidth && caps.imageWidth.max){
+      photoBest = {imageWidth: caps.imageWidth.max,
+                   imageHeight: caps.imageHeight ? caps.imageHeight.max : undefined};
+    }
+  }catch(_){}
+  return photoBest;
+}
+
 async function captureStill(){
   if(window.ImageCapture && track){
     try{
       const ic = new ImageCapture(track);
-      const blob = await ic.takePhoto();
+      const settings = await bestPhotoSettings(ic);
+      const blob = settings ? await ic.takePhoto(settings) : await ic.takePhoto();
       const bmp = await createImageBitmap(blob);
       stillCv.width = bmp.width; stillCv.height = bmp.height;
       stillCtx.filter = 'none';
@@ -4152,7 +4274,8 @@ async function deepMaterialScan(){
   scanChip.classList.add('act');
   const texts = [];
   try{
-    setStatus('Taking a sharp photo of the label\u2026','busy');
+    setStatus('Photo ' + Math.max(1, matDeepShots) + ' of ' + MAT_DEEP_MAX
+              + ' \u2014 hold still\u2026','busy');
     const still = await captureStill();
     if(!still){ setStatus('Could not take a photo','bad'); return false; }
     const crop = cropStill(still);
@@ -5043,12 +5166,31 @@ const MAT_LOCK_VOTES = 2;
 // so it is held to the same bar: FOUR agreeing reads. Adriele asked for 4 on
 // the material; this is where 4 actually buys something and 2 does not.
 const MAT_RV_LOCK_VOTES = 4;
-// v10.8: SIX, not ten. A look used to cost five megapixels; since v10.6 it
-// costs about forty thousand, so six looks now go by faster than two used to.
-// The still photo is the strongest reader in the tool - full sensor, four
-// rotations, no reticle - and making the operator wait ten failures for it was
-// already generous. Now it is just slow.
-const MAT_DEEP_AFTER = 6;    // quick band misses -> escalate to the still photo
+// ============================================================================
+//  PHOTOGRAPHS, NOT VIDEO FRAMES  -  v11.2
+//  ---------------------------------------------------------------------------
+//  Adriele: "I think taking a picture, as many as you can, and reading those,
+//  would be better." She is right, and the reasons are all physical:
+//
+//    RESOLUTION  the preview is 1920 wide; the sensor will give four thousand
+//                or more. The material line goes from ~45 pixels tall to ~200.
+//    FOCUS       taking a photo runs the autofocus and exposure properly. A
+//                video frame is whatever the preview happened to be showing.
+//    NO SMEAR    a frame grabbed while the hand is moving is smeared; a photo
+//                is stabilised before it is taken.
+//
+//  One good photograph is worth a great many video frames, and the narrowing
+//  and the per-character consensus are both built to combine several imperfect
+//  readings into one right answer - so several photographs is worth more again.
+//
+//  So the photograph stops being a last resort after six failures and becomes
+//  the strategy: the first one after THREE quick looks, and up to three of them
+//  per label. The band loop keeps running between them, because when it works
+//  it is instant and free.
+// ============================================================================
+const MAT_DEEP_AFTER = 3;    // quick band misses -> take a photograph
+const MAT_DEEP_MAX   = 3;    // and how many photographs one label is worth
+const MAT_DEEP_GAP   = 4;    // looks between photographs, so the band gets a turn
 const MAT_MAX_TRIES  = 24;   // absolute ceiling before the card opens
 
 let matVoteRunning = false;
@@ -5121,6 +5263,7 @@ let matTries = 0;
 let matVoteTimer = null;
 let matVoteText = [];
 let matDeepFired = false;
+let matDeepShots = 0;      // photographs taken for THIS label
 
 const lnCv = document.createElement('canvas');
 const lnCtx = lnCv.getContext('2d', {willReadFrequently:true});
@@ -5186,9 +5329,15 @@ function materialBandRect(){
   const bb = mb && mb.box;
 
   if(bb && bb.width > 8 && bb.height > 4){
+    // v11.1: the CENTRE of this band is LEARNED. "4.2 barcode-heights above the
+    // batch code" came from one photograph; after a few dozen confirmed MSL
+    // labels this is where the material actually sits on the labels in this
+    // building. The band stays generously tall either way, so learning shifts
+    // the aim without ever narrowing the margin for error.
+    const centre = geomOffset('MSL', 4.2);
     const bt = r.y + bb.y;
-    sy = bt - bb.height * 5.5;
-    sh = bb.height * 2.6;                 // 5.5 up to 2.9 up: covers 4.2
+    sy = bt - bb.height * (centre + 1.3);
+    sh = bb.height * 2.6;
     sx = r.x;
     sw = r.w;
   } else if(b && b.width > 8 && b.height > 4){
@@ -5442,8 +5591,25 @@ async function materialTick(){
           const img = ctx.getImageData(0,0,flat.width,flat.height);
           const d = img.data, FW = flat.width;
 
+          // what a successful line is measured against
+          const anchorF = heldField('CH-Nr')
+                       || ((session.family === 'MSL')
+                            ? (heldField('Char') || heldField('L-Char')) : null);
+          const anchor = anchorF && anchorF.box;
+
           for(let i=0;i<lines.length;i++){
             const L = lines[i];
+            // where this line sits relative to the anchor barcode, in
+            // barcode-heights. Recorded now; taught only if the row is
+            // confirmed with the material untouched.
+            if(anchor && anchor.height > 4 && rc){
+              const rr = reticleRect();
+              if(rr){
+                const lineMidCrop = (rc.y - rr.y) + (L.y0 + L.h/2)/srcScale;
+                session.matGeom = {family: session.family || '',
+                                   off: (anchor.y - lineMidCrop) / anchor.height};
+              }
+            }
 
             // THE VALUE FIRST. Split the line into words and read the LAST one
             // on its own, magnified hard. On "Mat.No   3000716" that is the
@@ -5537,11 +5703,24 @@ async function materialTick(){
       // band reads use, so a still that finds the material usually settles the
       // revision in the same breath. revTick sits out while scanBusy is set and
       // loses no looks doing it.
-      if(!matDeepFired && matTries >= MAT_DEEP_AFTER){
+      // Take another photograph when the band has had another few goes and
+      // still has nothing. Each one feeds the narrowing and the consensus, so
+      // three imperfect photographs settle what none of them read on its own.
+      const dueForPhoto = matDeepShots < MAT_DEEP_MAX
+                       && matTries >= MAT_DEEP_AFTER + matDeepShots * MAT_DEEP_GAP;
+      if(dueForPhoto){
+        matDeepShots++;
         matDeepFired = true;
         stopMaterialVoting();
         const got = await deepMaterialScan();
         if(got){ evaluate(); return; }
+        // no answer yet, but this photograph has still narrowed the field.
+        // Go back to the band; another photograph follows if it is needed.
+        if(matDeepShots < MAT_DEEP_MAX){
+          showProgress();
+          matVoteTimer = setTimeout(materialTick, MAT_POLL_MS);
+          return;
+        }
         // the deep scan looked properly and found nothing - now it is fair to ask
         const notMat = [];
         ['Auftr','Char','L-Char','CH-Nr'].forEach(function(k){
@@ -6256,6 +6435,25 @@ function devRender(){
        + '   margin ' + (lastRevShape.margin||0).toFixed(2)
        + '\n              ' + lastRevShape.why + '\n';
   }
+  h += '</pre>';
+
+  h += '<h3>what it has learned</h3><pre>';
+  const gk = Object.keys(learn.geom);
+  if(!gk.length) h += 'layout: nothing yet\n';
+  else gk.forEach(function(f){
+    const g = learn.geom[f];
+    h += 'layout ' + f + '  ' + (g.sum/g.n).toFixed(2) + ' barcode-heights'
+       + '   from ' + g.n + ' label' + (g.n===1?'':'s')
+       + (g.n < LEARN_MIN ? '  (not used yet)' : '') + '\n';
+  });
+  const rk = Object.keys(learn.readers).sort();
+  if(!rk.length) h += 'readers: nothing yet';
+  else rk.forEach(function(k){
+    const r = learn.readers[k];
+    const tot = r.ok + r.bad;
+    h += (k + '                          ').slice(0,26)
+       + Math.round(r.ok*100/tot) + '%  (' + r.ok + ' kept / ' + r.bad + ' corrected)\n';
+  });
   h += '</pre>';
 
   const q = metricSummary();
