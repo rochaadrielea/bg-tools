@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v11.2';
+const VERSION = 'v11.5';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -447,6 +447,7 @@ const IDLE_MS = 2500;
 const BOX_SPANS = 2.5;
 const HINT_MS = 6000;
 const NEED_VOTES = 2;
+const OCR_SWEEP_MS = 3000;   // longest one photograph may hold the camera
 const OCR_MIN_PX = 1800;
 const OCR_MAX_PX = 2200;
 const ENHANCE_EVERY = 3;
@@ -2547,7 +2548,12 @@ async function probeFamily(){
     const cv = drawCrop(0.6, true);        // small on purpose: these are big words
     if(!cv) { session.familyTried = false; return ''; }
     const txt = await readBand('mat', cv);
-    const fam = familyFromText(txt);
+    let fam = familyFromText(txt);
+    // v11.3: and it may not contradict a decoded CH-/EQ- code. If one has been
+    // seen, this is a WAE label whatever the words looked like through a
+    // blurred frame.
+    const chf2 = heldField('CH-Nr');
+    if(chf2 && /^(CH|EQ)-?\d/i.test(String(chf2.value))) fam = 'WAE';
     if(fam){
       session.family = fam;
       if(!lastOcrText) lastOcrText = txt;
@@ -2559,7 +2565,28 @@ async function probeFamily(){
 }
 
 function waeSignal(codes){
-  // The label said so itself. Nothing counted beats something printed.
+  // ==========================================================================
+  //  A DECODED BARCODE OUTRANKS A WORD-READ  -  v11.3
+  //  ------------------------------------------------------------------------
+  //  Adriele: "the WAE label, which is our best reader, sometimes does not
+  //  recognise it." This is why. session.family - which comes from OCR of the
+  //  label's WORDS - was consulted FIRST, so one poor probe could decide a WAE
+  //  label was MSL and nothing afterwards could argue, not even the CH- barcode
+  //  sitting decoded in the session. From then on the tool looked for the
+  //  material above a batch code that does not exist, waited for a charge that
+  //  was already in hand, and eventually resorted to a photograph.
+  //
+  //  A CH- or EQ- code appears on NO OTHER FAMILY and carries a checksum. It is
+  //  proof. A word-read is an opinion, and an opinion taken through a blurred
+  //  frame at that. Proof goes first.
+  // ==========================================================================
+  const chf = heldField('CH-Nr');
+  if(chf && /^(CH|EQ)-?\d/i.test(String(chf.value))) return true;
+  for(const c of (codes||[])){
+    if(/^(CH|EQ)-?\d+$/i.test(String((c && c.value) || '').trim())) return true;
+  }
+
+  // Then what the label called itself.
   if(session.family) return session.family === 'WAE';
 
   // SIGNAL 1 - TWO BARCODES. Adriele's rule, and the plain physical fact:
@@ -3179,12 +3206,21 @@ function openConfirm(proof){
   const purchased = isPurchasedPart(heldVal('Mat'));
   // does the revision still need answering? material + charge in, WAE, not a
   // purchased part, nothing read yet
-  const needRev = wae && !heldVal('Rev') && !purchased
+  // and the buttons appear whenever that row is asking for an answer
+  const needRev = !heldVal('Rev') && !purchased
+               && session.family !== 'MSL'
                && heldVal('Mat') && heldVal('Char');
 
   KEY_COLS.forEach(function(c){
     let v = heldVal(c);
-    if(!v && !wae && (c === 'SerNr' || c === 'Rev')) return;
+    // v11.5: Adriele - "every WAE label has a revision, and the person has to
+    // confirm anyway." The Revision row used to be hidden when it was empty AND
+    // the label had not been positively identified as WAE - so on a label the
+    // family probe had not settled, the one field that always needs a human
+    // answer was the one field not on the screen. It is only hidden when the
+    // label is known to be MSL, which genuinely has no revision line.
+    if(!v && c === 'Rev' && session.family === 'MSL') return;
+    if(!v && !wae && c === 'SerNr') return;
 
     // THE REVISION ROW, when it still needs an answer, IS the picker - the big
     // letter buttons render right here, full width, under the "Revision" label.
@@ -3211,7 +3247,13 @@ function openConfirm(proof){
     // not a keyboard input - tapping "change" brings the buttons back. A
     // purchased part shows the same way but WITHOUT the change link, because its
     // dash is a fact about the part, not a guess to correct.
-    if(c === 'Rev' && v && wae){
+    // v11.5: a purchased part shows its dash the same clear way as any other
+    // answered revision - "no revision printed" rather than a dash sitting in a
+    // text box that looks like something to type over. Not gated on `wae`
+    // either: the row is shown for every family except MSL, so the way it is
+    // DISPLAYED has to follow the same rule or a label whose family has not
+    // settled shows the value in the wrong style.
+    if(c === 'Rev' && v && session.family !== 'MSL'){
       html += '<div class="crowf"><div class="k">' + CONFIRM_LABELS.Rev + '</div>'
             + '<div class="revpicked' + (v===REV_NONE ? ' none' : '') + '">'
             + (v===REV_NONE ? 'no revision printed' : v)
@@ -3261,21 +3303,34 @@ function hideConfirm(){
 confirmGrid.addEventListener('click', function(e){
   const el = e.target;
   if(!el || !el.dataset) return;
+  if(!el.dataset.rev && !el.dataset.revchange) return;
+
+  // ==========================================================================
+  //  SAVE WHAT WAS TYPED BEFORE REDRAWING  -  v11.5
+  //  ------------------------------------------------------------------------
+  //  Adriele: "when I write the material or the charge manually and then select
+  //  the revision, what I wrote is erased."
+  //
+  //  Tapping a letter redraws the strip, and the redraw builds every row from
+  //  the SESSION - but the text typed into the Material and Charge boxes only
+  //  ever lived in the input elements until Confirm was pressed. So the redraw
+  //  faithfully restored the old values over the top of the operator's typing.
+  //
+  //  Reading the boxes first costs nothing and is the only correct order:
+  //  never redraw a form without first taking what the person has put in it.
+  // ==========================================================================
+  harvestConfirmEdits();
+
   if(el.dataset.rev){
-    const L = el.dataset.rev;
-    put('Rev', L, 'typed', null, 0);
+    put('Rev', el.dataset.rev, 'typed', null, 0);
     lock('Rev','typed');
     metricNote('edit','Rev');
-    openConfirm(confirmPending);       // redraw: Rev row now shows the answer
-    return;
-  }
-  if(el.dataset.revchange){
+  } else {
     // put the buttons back: forget the held revision for this strip only
     delete session.fields.Rev;
     delete session.locked.Rev;
-    openConfirm(confirmPending);
-    return;
   }
+  openConfirm(confirmPending);
 });
 
 // Anything typed or tapped on the strip goes into the session as the OPERATOR's
@@ -3715,6 +3770,34 @@ async function bestPhotoSettings(ic){
   return photoBest;
 }
 
+// Every barcode on the still, whichever decoder this browser has. Boxes are
+// deliberately NOT passed on: the still is a different size from the video, so
+// its coordinates would send the OCR bands to the wrong part of the label. The
+// VALUE is all that is wanted here.
+async function decodeStill(){
+  if(!stillCv.width) return [];
+  const out = [];
+  if(nativeDetector){
+    try{
+      const codes = await nativeDetector.detect(stillCv);
+      for(const c of (codes||[])){
+        const v = ((c.rawValue)||'').trim();
+        if(v) out.push({value:v, box:null});
+      }
+    }catch(_){}
+  }
+  if(!out.length && codeReader){
+    try{
+      const r = codeReader.decodeFromCanvas(stillCv);
+      if(r && r.getText){
+        const v = String(r.getText()).trim();
+        if(v) out.push({value:v, box:null});
+      }
+    }catch(_){}
+  }
+  return out;
+}
+
 async function captureStill(){
   if(window.ImageCapture && track){
     try{
@@ -3771,69 +3854,11 @@ function scaleCanvas(src, factor, grey){
   return c;
 }
 
-// ============================================================================
-//  RESISTANT TO LIGHT  -  v8.8
-//  ---------------------------------------------------------------------------
-//  Adriele: "can be more resistant to light".
-//
-//  Otsu picks ONE threshold for the whole picture from its histogram. That is
-//  the right tool for an evenly lit label and the wrong one for a shiny poly
-//  bag, where a specular highlight blows out one corner while the rest sits in
-//  shadow: any single cut-off either loses the bright half or floods the dark
-//  half. Look at the third photo - the whole left side of the bag is a mirror.
-//
-//  This thresholds every pixel against the average of ITS OWN NEIGHBOURHOOD
-//  instead, so bright and dark parts of the same label are each judged on their
-//  own terms and the highlight simply stops mattering. An integral image makes
-//  the local average O(1) per pixel, so the whole thing is one pass and cheap
-//  enough to run on every look.
-//
-//  Otsu is kept - it is still better on a clean, evenly lit label, and the two
-//  disagreeing is exactly the signal the two-view rule uses.
-// ============================================================================
-function binariseAdaptive(src, winFrac, bias){
-  const c = document.createElement('canvas');
-  c.width = src.width; c.height = src.height;
-  const ctx = c.getContext('2d', {willReadFrequently:true});
-  ctx.drawImage(src, 0, 0);
-  let img;
-  try{ img = ctx.getImageData(0,0,c.width,c.height); }catch(_){ return c; }
-  const d = img.data, W = c.width, H = c.height;
-
-  // grey + integral image (one extra row/column of zeros to avoid edge tests)
-  const sum = new Float64Array((W+1)*(H+1));
-  for(let y=0;y<H;y++){
-    let rowSum = 0;
-    for(let x=0;x<W;x++){
-      const i = (y*W+x)*4;
-      const g = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114);
-      d[i]=d[i+1]=d[i+2]=g|0;
-      rowSum += g;
-      sum[(y+1)*(W+1)+(x+1)] = sum[y*(W+1)+(x+1)] + rowSum;
-    }
-  }
-
-  // window about an eighth of the short side, and never smaller than 7px
-  const win = Math.max(7, Math.round(Math.min(W,H) * (winFrac || 0.14)));
-  const r = win >> 1;
-  const C = (bias === undefined ? 7 : bias);   // how far below local mean is ink
-
-  for(let y=0;y<H;y++){
-    const y0 = Math.max(0, y-r), y1 = Math.min(H-1, y+r);
-    for(let x=0;x<W;x++){
-      const x0 = Math.max(0, x-r), x1 = Math.min(W-1, x+r);
-      const area = (x1-x0+1) * (y1-y0+1);
-      const tot = sum[(y1+1)*(W+1)+(x1+1)] - sum[y0*(W+1)+(x1+1)]
-                - sum[(y1+1)*(W+1)+x0]     + sum[y0*(W+1)+x0];
-      const mean = tot / area;
-      const i = (y*W+x)*4;
-      const v = (d[i] < mean - C) ? 0 : 255;
-      d[i]=d[i+1]=d[i+2]=v;
-    }
-  }
-  ctx.putImageData(img,0,0);
-  return c;
-}
+// binariseAdaptive() lived here until v11.3. It did the same job as
+// adaptiveBinarise() below - I wrote that one in v8.8 without noticing this
+// one already existed, and having two local-threshold functions with
+// different argument names is how a call ends up on the wrong one.
+// One is enough.
 
 // Otsu: picks the threshold from the image's own histogram instead of a fixed
 // 128, which is what makes it survive uneven lighting and the glare off a bag.
@@ -4276,8 +4301,44 @@ async function deepMaterialScan(){
   try{
     setStatus('Photo ' + Math.max(1, matDeepShots) + ' of ' + MAT_DEEP_MAX
               + ' \u2014 hold still\u2026','busy');
+    // v11.4: the photograph is the ONLY thing running while scanBusy is set -
+    // the barcode loop is halted for its whole duration. That is tolerable for
+    // a capture and a decode, which are quick; it is not tolerable for a long
+    // OCR sweep, so the sweep below is bounded and bails as soon as it has an
+    // answer. See OCR_SWEEP_MS.
     const still = await captureStill();
     if(!still){ setStatus('Could not take a photo','bad'); return false; }
+    // ========================================================================
+    //  READ THE BARCODES OFF THE PHOTOGRAPH FIRST  -  v11.4
+    //  ----------------------------------------------------------------------
+    //  Adriele's screenshot: a material barcode (K1007456) plainly in view, the
+    //  status reading "Photo 2 of 3", and the material still unknown.
+    //
+    //  Two mistakes compounding. deepMaterialScan sets scanBusy for its whole
+    //  run, and the barcode loop is written `scanBusy ? null : drawFull(...)` -
+    //  so THE MOMENT THE PHOTOGRAPHS START, BARCODE DECODING STOPS. And the
+    //  photograph itself was never handed to the barcode reader at all; it went
+    //  straight to OCR. So the one thing that could have answered instantly was
+    //  switched off by the slow thing called in to help, and the sharpest image
+    //  the tool will ever hold was used for everything except the easy win.
+    //
+    //  The photograph is FOUR TIMES the resolution of a video frame and taken
+    //  with the focus locked - it is the best chance this tool ever gets at a
+    //  small or shallow-printed barcode. So it is decoded first, and if the
+    //  material comes back there is no OCR at all: no rotations, no cleanings,
+    //  no reading. Just the answer.
+    // ========================================================================
+    try{
+      const found = await decodeStill();
+      if(found && found.length){
+        onCodes(found, ++frameTick);
+        if(heldField('Mat')){
+          setStatus('Read from the photo','ok');
+          return true;                        // no OCR needed at all
+        }
+      }
+    }catch(_){}
+
     const crop = cropStill(still);
     await ensureWorker(false);
 
@@ -4290,17 +4351,59 @@ async function deepMaterialScan(){
     const bases = [['sharpened',grey]];
     // both cleanings: Otsu for an even label, local for one with a highlight
     try{ bases.push(['cleaned', binarise(grey)]); }catch(_){}
-    try{ bases.push(['glare-flattened', binariseAdaptive(grey)]); }catch(_){}
+    // v11.3: this called binariseAdaptive(), which DOES exist - but it is a
+    // duplicate I wrote in v8.8 without noticing the original, and the two have
+    // drifted apart in their arguments. The photograph now uses the same local
+    // threshold as the live bands, so a shiny bag is cleaned the same way
+    // whichever path reads it. The duplicate is removed below.
+    try{ bases.push(['glare-flattened', adaptiveBinarise(grey, 0.30, 10)]); }catch(_){}
 
-    for(const deg of [0,90,180,270]){
-      for(let b=0;b<bases.length;b++){
+    // ========================================================================
+    //  ORDER THE ATTEMPTS BY LIKELIHOOD, AND STOP AT THE FIRST ANSWER  v11.3
+    //  ----------------------------------------------------------------------
+    //  Adriele: "please take the pictures and read faster."
+    //
+    //  This was four rotations x three cleanings x two layout modes = TWENTY
+    //  FOUR full-resolution passes, every one of them run whether or not the
+    //  answer had already been found on the first. On a four-megapixel photo
+    //  that is most of a minute.
+    //
+    //  Almost every label is held upright, so the upright passes come first and
+    //  the turned ones only happen if they are needed - which for a label the
+    //  right way up is never. And the second layout mode goes: since v10.5 the
+    //  band reader splits lines properly, and PSM 4's column analysis was only
+    //  ever a workaround for not doing that.
+    //
+    //  Typical cost falls from twenty-four passes to one.
+    // ========================================================================
+    const attempts = [];
+    for(let b=0;b<bases.length;b++) attempts.push([0, b]);          // upright, every cleaning
+    for(const deg of [90,270,180]) attempts.push([deg, 0]);         // then turned, sharpened only
+    // A HARD CEILING ON THE SWEEP. Adriele: "the photos are taking toooooo
+    // long." Barcode decoding is stopped for every millisecond of this, so a
+    // sweep that grinds on is actively preventing the fastest possible answer.
+    // Three seconds is enough for the upright passes on any phone; past that
+    // the live loop deserves the camera back more than this photograph
+    // deserves another rotation.
+    const sweepStart = Date.now();
+
+    for(const [deg, b] of attempts){
+      {
         if(ocrRun !== token) return false;
+        // v11.4: the material may have arrived from the barcode pass above, or
+        // from an earlier attempt in this very loop. Every further pass is a
+        // full-resolution read of a question already answered.
+        if(heldField('Mat')) break;
+        if(Date.now() - sweepStart > OCR_SWEEP_MS){
+          setStatus('Still looking \u2014 keep the label in view','busy');
+          break;
+        }
         let cv;
         try{ cv = rotateCanvas(bases[b][1], deg); }catch(_){ continue; }
         if(!cv) continue;
         setStatus('Reading the material\u2026 ' + bases[b][0]
                   + (deg ? ', turned ' + deg + '\u00b0' : ''), 'busy');
-        for(const psm of ['6','4']){
+        for(const psm of ['6']){
           if(ocrRun !== token) return false;
           try{ await worker.setParameters({tessedit_pageseg_mode:psm,
                                            tessedit_char_whitelist:''}); }catch(_){}
