@@ -438,7 +438,7 @@
 //    the CONSTANTS block below
 // ============================================================================
 
-const VERSION = 'v11.5';
+const VERSION = 'v11.6';
 document.getElementById('ver').textContent = VERSION;
 
 // ---- constants --------------------------------------------------------------
@@ -3798,6 +3798,76 @@ async function decodeStill(){
   return out;
 }
 
+// ============================================================================
+//  A BURST OF PHOTOGRAPHS, READ ALL AT ONCE  -  v11.6
+//  ---------------------------------------------------------------------------
+//  Adriele: "take 4 pictures and 4 checks together, then compare all of them
+//  against the master and show the one that matches best."
+//
+//  That is the right shape, and the reason the old way was slow is that the two
+//  costs were interleaved. CAPTURING is quick; READING is slow - and it was
+//  reading one photograph at a time, on one worker, while three other workers
+//  sat doing nothing. Between photographs it went back to the band loop, so a
+//  label that needed all three waited for capture, read, band, capture, read,
+//  band, capture, read.
+//
+//  Now: take the four photographs back to back, then read all four AT THE SAME
+//  TIME across the four workers that already exist. Four independent witnesses
+//  arrive in about the time one used to, and four witnesses is exactly what the
+//  narrowing and the per-character consensus are built to use - none of them
+//  has to be right on its own.
+//
+//  MEMORY. Four twelve-megapixel photographs as raw pixels is 183 MB, which no
+//  phone will tolerate. Each one is therefore cropped to the aim box and scaled
+//  down the moment it is taken, and the full-size original is released: 29 MB
+//  for all four. The scaling costs nothing - the text is still far larger than
+//  it ever was in a video frame.
+// ============================================================================
+const BURST_N = 4;
+const BURST_LONG = 1600;      // long side each shot is kept at
+
+// One photograph, cropped and scaled into a canvas of its own.
+async function captureShot(){
+  const still = await captureStill();
+  if(!still) return null;
+  const crop = cropStill(still);
+  if(!crop) return null;
+  const long = Math.max(crop.width, crop.height);
+  const f = long > BURST_LONG ? (BURST_LONG/long) : 1;
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(crop.width*f));
+  cv.height = Math.max(1, Math.round(crop.height*f));
+  const ctx = cv.getContext('2d', {willReadFrequently:true});
+  ctx.filter = 'grayscale(1) contrast(1.4)';
+  ctx.drawImage(crop, 0, 0, cv.width, cv.height);
+  return cv;
+}
+
+// Every barcode on any canvas.
+async function decodeCanvas(cv){
+  const out = [];
+  if(!cv || !cv.width) return out;
+  if(nativeDetector){
+    try{
+      const codes = await nativeDetector.detect(cv);
+      for(const c of (codes||[])){
+        const v = ((c.rawValue)||'').trim();
+        if(v) out.push({value:v, box:null});
+      }
+    }catch(_){}
+  }
+  if(!out.length && codeReader){
+    try{
+      const r = codeReader.decodeFromCanvas(cv);
+      if(r && r.getText){
+        const v = String(r.getText()).trim();
+        if(v) out.push({value:v, box:null});
+      }
+    }catch(_){}
+  }
+  return out;
+}
+
 async function captureStill(){
   if(window.ImageCapture && track){
     try{
@@ -4292,6 +4362,79 @@ async function readMaterialLine(crop, box, token){
 //  Upright first, so a normal label finishes in one pass and pays nothing for
 //  the rest of the ladder.
 // ============================================================================
+// The four workers that already exist, so the four photographs are read at the
+// same time instead of one after another. During a burst every band loop is
+// stopped, so none of them is in use.
+const BURST_WORKERS = ['mat','rev','rev2','chg'];
+
+// Read one photograph and hand everything it saw to both engines.
+async function readShot(cv, which){
+  if(!cv) return '';
+  let txt = '';
+  try{
+    // digits-only first: nearly every material is all digits, and this pass
+    // cannot be tempted into a letter
+    const d = await readBand(which, cv, '0123456789');
+    if(d) { txt += d + '\n'; }
+    const g = await readBand(which, cv);
+    if(g && g !== d) txt += g;
+  }catch(_){}
+  if(txt.trim()){
+    addMaterialEvidence(txt);
+    const p = parseOcr(txt);
+    for(const k in p){ if(k.charAt(0) !== '_' && k !== 'Mat') vote(k, p[k]); }
+  }
+  return txt;
+}
+
+// ============================================================================
+//  THE BURST  -  four photographs, four readings, one answer
+//  ---------------------------------------------------------------------------
+//  Capture all four first (quick), decode all four (quick, and often the whole
+//  job), then read all four at once (the slow part, now divided by four).
+//  Every reading goes into the narrowing and the per-character consensus, and
+//  whichever of them the master list matches best is the answer.
+// ============================================================================
+async function burstScan(){
+  const shots = [];
+  for(let i=0;i<BURST_N;i++){
+    if(ocrRun !== burstToken) return false;
+    setStatus('Photo ' + (i+1) + ' of ' + BURST_N + ' \u2014 hold still\u2026','busy');
+    const cv = await captureShot();
+    if(cv) shots.push(cv);
+  }
+  if(!shots.length) return false;
+
+  // barcodes first: a photograph is the sharpest picture this tool ever holds,
+  // and if one of them carries the material there is no reading to do at all
+  setStatus('Checking the codes\u2026','busy');
+  for(const cv of shots){
+    const codes = await decodeCanvas(cv);
+    if(codes.length){
+      onCodes(codes, ++frameTick);
+      if(heldField('Mat')){ setStatus('Read from the photo','ok'); return true; }
+    }
+  }
+
+  // then read them all together
+  setStatus('Reading ' + shots.length + ' photos at once\u2026','busy');
+  const texts = await Promise.all(shots.map(function(cv, i){
+    return readShot(cv, BURST_WORKERS[i % BURST_WORKERS.length]);
+  }));
+  lastOcrText = texts.filter(Boolean).join('\n---\n');
+
+  // and let the master pick the best of what the four of them saw
+  if(!heldField('Mat')){
+    const v = materialVerdict();
+    if(v.value){ put('Mat', v.value, 'ocr', null, 0); lock('Mat','ocr'); }
+  }
+  if(heldField('Mat')){ resolveVotes(); return true; }
+  resolveVotes();
+  return false;
+}
+
+let burstToken = 0;
+
 async function deepMaterialScan(){
   if(scanBusy || ocrActive) return false;
   const token = ++ocrRun;
@@ -4308,6 +4451,16 @@ async function deepMaterialScan(){
     // answer. See OCR_SWEEP_MS.
     const still = await captureStill();
     if(!still){ setStatus('Could not take a photo','bad'); return false; }
+    // v11.6: the burst does the whole job - four photographs, decoded and then
+    // read all at once. It replaces the single-photo capture plus the long
+    // rotation sweep below, which now only runs if the burst came back with
+    // nothing at all (an upside-down label, or a bag so shiny that none of the
+    // four could be read).
+    burstToken = token;
+    const burst = await burstScan();
+    if(burst) return true;
+    if(ocrRun !== token) return false;
+
     // ========================================================================
     //  READ THE BARCODES OFF THE PHOTOGRAPH FIRST  -  v11.4
     //  ----------------------------------------------------------------------
@@ -5292,7 +5445,10 @@ const MAT_RV_LOCK_VOTES = 4;
 //  it is instant and free.
 // ============================================================================
 const MAT_DEEP_AFTER = 3;    // quick band misses -> take a photograph
-const MAT_DEEP_MAX   = 3;    // and how many photographs one label is worth
+// v11.6: ONE burst, because a burst is already four photographs. Three bursts
+// would be twelve, which is more than the narrowing needs and more time than
+// anybody will stand still for.
+const MAT_DEEP_MAX   = 1;    // bursts per label (each is BURST_N photographs)
 const MAT_DEEP_GAP   = 4;    // looks between photographs, so the band gets a turn
 const MAT_MAX_TRIES  = 24;   // absolute ceiling before the card opens
 
